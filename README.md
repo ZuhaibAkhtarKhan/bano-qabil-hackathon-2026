@@ -1,4 +1,4 @@
-# ApplyOne Prototype
+# 1-Apply Prototype
 
 An interactive frontend prototype for the ApplyOne application operating system. It demonstrates the persistent-profile dashboard, application pipeline, opportunity analysis, eligibility checks, evidence-grounded answer generation, profile editing, document state, and responsive navigation.
 
