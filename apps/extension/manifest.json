@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "1-Apply",
+  "version": "0.1.0",
+  "description": "Prepare grounded application fills. Never submits, signs, or pays on your behalf.",
+  "action": {
+    "default_title": "1-Apply",
+    "default_popup": "src/popup/popup.html"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": []
+}

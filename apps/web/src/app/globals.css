@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-instrument), ui-serif, Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --color-canvas: #f9faf6;
+  --color-surface: #ffffff;
+  --color-ink: #0e0e0e;
+  --color-ink-muted: #52525b;
+  --color-line: #e5e7eb;
+  --color-obsidian: #0e0e0e;
+  --color-obsidian-surface: #18181b;
+  --color-obsidian-line: #27272a;
+  --color-mint: #10b981;
+  --color-mint-soft: #e6f7ed;
+  --color-teal: #06b6d4;
+  --color-teal-soft: #cffafe;
+  --color-violet: #8b5cf6;
+  --color-violet-soft: #ede9fe;
+  --color-coral: #f43f5e;
+  --color-coral-soft: #ffe4e6;
+  --color-sand: #f59e0b;
+  --color-sand-soft: #fef3c7;
+  --color-mint-text: #065f46;
+  --color-teal-text: #0e7490;
+  --color-violet-text: #5b21b6;
+  --color-coral-text: #9f1239;
+  --color-sand-text: #92400e;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: #d1fae5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #ecece8 0%, #f7f7f3 50%, #ecece8 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.marquee-track {
+  animation: marquee 32s linear infinite;
+}
+
+.float-badge {
+  animation: float-y 4.2s ease-in-out infinite;
+}
+
+.float-badge-delay-1 {
+  animation-duration: 3.6s;
+}
+
+.float-badge-delay-2 {
+  animation-duration: 4.8s;
+}
+
+.float-badge-delay-3 {
+  animation-duration: 5.2s;
+}
+
+.float-badge-delay-4 {
+  animation-duration: 4.4s;
+}
+
+.engine-panel {
+  animation: fade-up 0.28s ease-out;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .marquee-track,
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

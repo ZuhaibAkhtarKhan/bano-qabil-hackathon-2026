@@ -1,21 +1,54 @@
-# 1-Apply Prototype
+# 1-Apply
 
-An interactive frontend prototype for the ApplyOne application operating system. It demonstrates the persistent-profile dashboard, application pipeline, opportunity analysis, eligibility checks, evidence-grounded answer generation, profile editing, document state, and responsive navigation.
+Create once. Apply everywhere.
+
+Production architecture for an evidence-grounded application operating system. Product features are layered on this foundation; the Chrome extension does not fill or submit yet.
+
+## Layout
+
+```text
+apps/web                 Next.js UI (thin routes) + services + infra
+apps/extension           Chrome Manifest V3 shell (activeTab only)
+packages/contracts       Zod types and validation
+packages/domain          Eligibility, grounding, matching (no React, no I/O)
+packages/form-engine     Protected-control rules for future autofill
+packages/config          Shared TypeScript config
+workers/ai-jobs          Background job processor boundary
+supabase/migrations      PostgreSQL, RLS, pgvector, private storage
+```
+
+UI does not call the model or own SQL. Server actions call services. Services use session-scoped infra. Domain logic lives in `@1apply/domain`.
 
 ## Run locally
 
 ```bash
-pnpm install
-pnpm dev
+npm install
+cp .env.example apps/web/.env.local
+# Fill NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+npm run dev
 ```
 
-Then open `http://localhost:5173`.
+Apply migrations in order:
 
-## Quality checks
+- `supabase/migrations/20260818000000_init.sql`
+- `supabase/migrations/20260818010000_phase3.sql`
+- `supabase/migrations/20260818020000_architecture.sql`
+- `supabase/migrations/20260818030000_grants_onboarding.sql`
+- `supabase/migrations/20260818040000_memory.sql`
+- `supabase/migrations/20260818050000_documents_evidence.sql`
+- `supabase/migrations/20260818060000_opportunity_intelligence.sql`
 
 ```bash
-pnpm lint
-pnpm build
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
-This is a frontend-only prototype with seeded data. The opportunity analysis and answer generation are deterministic demo interactions; backend authentication, storage, database, and live AI integration are specified in `docs/TRD.md` but are not part of this initial slice.
+## Safety
+
+- Row Level Security is deny-by-default. Vector search filters `auth.uid()` before ranking.
+- Documents are private and path-scoped to the user id.
+- No evidence → no claim. AI stays behind `AiProvider`.
+- Autofill ≠ submit. Protected controls are excluded in the form engine.
+- Secrets are never `NEXT_PUBLIC_*`.

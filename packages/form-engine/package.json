@@ -1,0 +1,22 @@
+{
+  "name": "@1apply/form-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.35.0",
+    "@types/node": "24.3.0",
+    "eslint": "9.35.0",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.43.0",
+    "vitest": "3.2.4"
+  }
+}
