@@ -71,27 +71,43 @@ export {
 
 export {
   eligibilityResultSchema,
+  fitFactorSchema,
   fitIndexSchema,
   opportunityRecordSchema,
   requirementRecordSchema,
+  resumeMatchSchema,
   type EligibilityResult,
+  type FitFactor,
   type FitIndex,
   type OpportunityRecord,
   type RequirementRecord,
+  type ResumeMatch,
 } from "./opportunities";
 
 export {
+  answerRecordSchema,
+  answerStateSchema,
   answerVersionSchema,
   applicationRecordSchema,
   assertDraftIsGrounded,
+  claimFlagSchema,
   fillPlanMappingSchema,
+  generationIntentSchema,
   groundedDraftSchema,
+  questionRecordSchema,
   submissionSnapshotSchema,
+  toneStyleSchema,
+  type AnswerRecord,
+  type AnswerState,
   type AnswerVersion,
   type ApplicationRecord,
+  type ClaimFlag,
   type FillPlanMapping,
+  type GenerationIntent,
   type GroundedDraft,
+  type QuestionRecord,
   type SubmissionSnapshot,
+  type ToneStyle,
 } from "./applications";
 
 export { jobRecordSchema, isRetryableJobError, toJobLifecycle, type JobRecord } from "./jobs";

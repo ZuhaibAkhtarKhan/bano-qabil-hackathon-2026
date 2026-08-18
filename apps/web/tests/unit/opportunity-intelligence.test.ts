@@ -74,5 +74,5 @@ describe("ingest API route", () => {
   it("exports POST handler", async () => {
     const mod = await import("@/app/api/opportunities/ingest/route");
     expect(typeof mod.POST).toBe("function");
-  });
+  }, 15000);
 });

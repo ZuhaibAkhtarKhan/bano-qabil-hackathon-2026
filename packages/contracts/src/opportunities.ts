@@ -32,6 +32,18 @@ export const eligibilityResultSchema = z.object({
   state: eligibilityStateSchema,
   explanation: z.string().min(1),
   profileFactId: uuidSchema.nullable(),
+  requirementText: z.string().optional(),
+  requirementKind: z.string().optional(),
+  needsConfirmation: z.boolean().optional(),
+});
+
+export const fitFactorSchema = z.object({
+  key: z.enum(["eligibility", "skillsMatch", "experienceMatch", "educationMatch", "projectRelevance"]),
+  label: z.string().min(1),
+  score: z.number().min(0).max(100),
+  weight: z.number().min(0).max(1),
+  contribution: z.number(),
+  rationale: z.string().min(1),
 });
 
 export const fitIndexSchema = z.object({
@@ -42,9 +54,27 @@ export const fitIndexSchema = z.object({
   projectRelevance: z.number().min(0).max(100),
   eligibility: z.number().min(0).max(100),
   missing: z.array(z.string()),
+  strengths: z.array(z.string()).optional(),
+  rationale: z.string().optional(),
+  factors: z.array(fitFactorSchema).optional(),
+});
+
+export const resumeMatchSchema = z.object({
+  documentId: uuidSchema,
+  documentVersionId: uuidSchema,
+  score: z.number().min(0).max(100),
+  label: z.string().optional(),
+  focus: z.string().optional(),
+  explanation: z.string().optional(),
+  strengths: z.array(z.string()).optional(),
+  gaps: z.array(z.string()).optional(),
+  recommended: z.boolean().optional(),
+  suggestion: z.string().nullable(),
 });
 
 export type OpportunityRecord = z.infer<typeof opportunityRecordSchema>;
 export type RequirementRecord = z.infer<typeof requirementRecordSchema>;
 export type EligibilityResult = z.infer<typeof eligibilityResultSchema>;
 export type FitIndex = z.infer<typeof fitIndexSchema>;
+export type FitFactor = z.infer<typeof fitFactorSchema>;
+export type ResumeMatch = z.infer<typeof resumeMatchSchema>;

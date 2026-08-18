@@ -6,14 +6,46 @@ export {
   rankEvidenceForQuestion,
   rankResumes,
   tokenize,
+  ELIGIBILITY_LABELS,
+  FIT_INDEX_WEIGHTS,
+  RESUME_FOCUSES,
+  classifyOpportunityFocus,
+  classifyResumeFocus,
+  eligibilityFactorScore,
+  eligibilityLabel,
+  explainFitScore,
+  extractYears,
+  inferRequirementKind,
+  overlapScore,
+  reconstructFitScore,
+  selectEvidenceForRequirement,
+  type EligibilityContext,
   type EligibilityVerdict,
+  type FitFactor,
   type FitIndexInput,
+  type FitIndexResult,
   type MemoryEvidence,
   type MemoryRequirement,
+  type RankedResume,
   type ResumeCandidate,
 } from "./matching";
 
 export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
+
+export {
+  buildAnswerPrompt,
+  classifyQuestion,
+  extractClaims,
+  groundingScore,
+  rankEvidenceForAnswer,
+  toneInstruction,
+  validateClaims,
+  type AnswerState,
+  type ClaimFlag,
+  type GenerationIntent,
+  type QuestionKind,
+  type ToneStyle,
+} from "./answer-generation";
 
 export {
   MEMORY_SECTIONS,

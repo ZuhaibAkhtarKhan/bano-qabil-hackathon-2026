@@ -106,13 +106,21 @@ export function factSemanticStatus(input: {
   return "needs_review";
 }
 
-export function answerSemanticStatus(input: {
-  approved: boolean;
-  model: string | null;
-  text: string;
-}): SemanticStatus {
-  if (input.approved) return "approved";
-  if (!input.text.trim()) return "unknown";
-  if (input.model) return "ai_generated";
-  return "user_edited";
+export function eligibilitySemanticStatus(state: string): SemanticStatus {
+  if (state === "met") return "verified";
+  if (state === "not_met") return "rejected";
+  if (state === "partial") return "needs_review";
+  if (state === "not_evaluated") return "unknown";
+  return "unknown";
+}
+
+export function answerSemanticStatus(state: string): SemanticStatus {
+  switch (state) {
+    case "approved":     return "approved";
+    case "rejected":     return "rejected";
+    case "ai_generated": return "ai_generated";
+    case "user_edited":  return "user_edited";
+    case "needs_review": return "needs_review";
+    default:             return "unknown";
+  }
 }

@@ -34,18 +34,25 @@ export const opportunityCategorySchema = z.enum([
 ]);
 export const opportunitySourceSchema = z.enum(["url", "manual", "extension", "discovery"]);
 export const applicationStatusSchema = z.enum([
+  "saved",
+  "analyzing",
+  "ready_to_apply",
+  "in_progress",
+  "review_required",
   "draft",
   "preparing",
   "ready",
   "submitted",
+  "under_review",
   "assessment",
   "interview",
+  "accepted",
   "offer",
   "rejected",
   "withdrawn",
   "archived",
 ]);
-export const eligibilityStateSchema = z.enum(["met", "not_met", "unclear", "not_evaluated"]);
+export const eligibilityStateSchema = z.enum(["met", "not_met", "partial", "unclear", "not_evaluated"]);
 export const jobStateSchema = z.enum([
   "queued",
   "running",
@@ -117,14 +124,21 @@ export type ReminderChannel = z.infer<typeof reminderChannelSchema>;
 export type ReminderStatus = z.infer<typeof reminderStatusSchema>;
 
 export const APPLICATION_LIFECYCLE: readonly ApplicationStatus[] = [
+  "saved",
+  "analyzing",
+  "ready_to_apply",
+  "in_progress",
+  "review_required",
+  "submitted",
+  "under_review",
+  "interview",
+  "accepted",
+  "rejected",
   "draft",
   "preparing",
   "ready",
-  "submitted",
   "assessment",
-  "interview",
   "offer",
-  "rejected",
   "withdrawn",
   "archived",
 ] as const;
