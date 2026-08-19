@@ -1,23 +1,8 @@
-import type { ApplicationStatus } from "@1apply/contracts";
-
 import { StatusPill } from "@/components/ui/status-pill";
+import { applicationStatusLabel, workflowTone } from "@/lib/application-workflow";
 import { asOne, type ApplicationListRow } from "@/server/types";
-
-const tones: Record<ApplicationStatus, "muted" | "sand" | "mint" | "teal" | "violet" | "coral"> = {
-  draft: "muted",
-  preparing: "sand",
-  ready: "mint",
-  submitted: "teal",
-  assessment: "violet",
-  interview: "violet",
-  offer: "mint",
-  rejected: "coral",
-  withdrawn: "muted",
-  archived: "muted",
-};
-
-export function applicationTone(status: ApplicationStatus) {
-  return tones[status];
+export function applicationTone(status: ApplicationListRow["status"]) {
+  return workflowTone(status);
 }
 
 export function formatDeadline(value: string | null) {
@@ -38,7 +23,7 @@ export function ApplicationSummary({ row }: { row: ApplicationListRow }) {
             {opportunity?.organization ?? "Unknown host"} · {formatDeadline(row.deadline_at)}
           </p>
         </div>
-        <StatusPill tone={applicationTone(row.status)}>{row.status.replace("_", " ")}</StatusPill>
+        <StatusPill tone={applicationTone(row.status)}>{applicationStatusLabel(row.status)}</StatusPill>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <div>

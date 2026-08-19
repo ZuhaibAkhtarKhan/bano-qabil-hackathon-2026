@@ -175,50 +175,81 @@ export async function loadApplicationWorkspace(applicationId: string) {
     { data: eligibility },
     { data: fit },
     { data: resumeMatches },
+    { data: requiredDocuments },
     { data: attached },
     { data: snapshots },
     { data: reviewItems },
+    { data: fieldMappings },
+    { data: fillSessions },
+    { data: statusHistory },
+    { data: events },
     { data: evidence },
     { data: documents },
   ] = await Promise.all([
-    supabase.from("requirements").select("id, text, hard").eq("opportunity_id", application.opportunity_id),
+    supabase.from("requirements").select("id, text, hard, kind").eq("opportunity_id", application.opportunity_id),
     supabase
-      .from("application_questions")
-      .select("id, prompt, limit_value, limit_unit, sort_order")
-      .eq("application_id", applicationId)
+      .from("opportunity_questions")
+      .select("id, prompt, limit_value, limit_unit, required, sort_order")
+      .eq("opportunity_id", application.opportunity_id)
       .order("sort_order", { ascending: true }),
     supabase
-      .from("answer_versions")
-      .select("id, question_id, text, evidence_ids, missing_facts, warnings, approved, model, created_at")
-      .order("created_at", { ascending: false }),
+      .from("application_answers")
+      .select(
+        "id, question_id, state, original_ai_text, user_edited_text, approved_text, evidence_ids, claim_flags, missing_facts, warnings, grounding_score, generation_count, model, created_at",
+      )
+      .eq("application_id", applicationId),
     supabase
       .from("eligibility_results")
-      .select("id, requirement_id, state, explanation, evidence_id")
+      .select("id, requirement_id, state, explanation, evidence_id, requirement_text, requirement_kind, needs_confirmation")
       .eq("application_id", applicationId),
     supabase
       .from("fit_evaluations")
       .select(
-        "score, skills_match, experience_match, education_match, project_relevance, eligibility, missing",
+        "score, skills_match, experience_match, education_match, project_relevance, eligibility, missing, rationale, strengths, factors, weights",
       )
       .eq("application_id", applicationId)
       .maybeSingle(),
     supabase
       .from("resume_matches")
-      .select("id, document_id, document_version_id, score, suggestion")
+      .select("id, document_id, document_version_id, score, suggestion, label, focus, explanation, strengths, gaps, recommended")
       .eq("application_id", applicationId)
       .order("score", { ascending: false }),
+    supabase
+      .from("opportunity_documents")
+      .select("id, label, required")
+      .eq("opportunity_id", application.opportunity_id),
     supabase
       .from("application_documents")
       .select("id, document_id, document_version_id")
       .eq("application_id", applicationId),
     supabase
       .from("submission_snapshots")
-      .select("id, submitted_at, answer_manifest, document_manifest")
+      .select("id, submitted_at, answer_manifest, document_manifest, opportunity_snapshot, evidence_manifest, field_manifest, application_status, deadline_at")
       .eq("application_id", applicationId)
       .order("submitted_at", { ascending: false }),
     supabase
       .from("review_items")
       .select("id, kind, prompt, resolved")
+      .eq("application_id", applicationId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("field_mappings")
+      .select("id, field_key, label, value, source, confidence, excluded_by_default, sensitive, created_at")
+      .eq("application_id", applicationId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("fill_sessions")
+      .select("id, origin, expires_at, created_at")
+      .eq("application_id", applicationId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("application_status_history")
+      .select("id, from_status, to_status, created_at")
+      .eq("application_id", applicationId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("application_events")
+      .select("id, event_name, payload, created_at")
       .eq("application_id", applicationId)
       .order("created_at", { ascending: true }),
     supabase
@@ -235,11 +266,19 @@ export async function loadApplicationWorkspace(applicationId: string) {
       .eq("user_id", user.id),
   ]);
 
-  const answersByQuestion = new Map<string, NonNullable<typeof answers>>();
-  for (const answer of answers ?? []) {
-    const list = answersByQuestion.get(answer.question_id) ?? [];
-    list.push(answer);
-    answersByQuestion.set(answer.question_id, list);
+  type AnswerRow = {
+    id: unknown; question_id: unknown; state: unknown; original_ai_text: unknown;
+    user_edited_text: unknown; approved_text: unknown; evidence_ids: unknown;
+    claim_flags: unknown; missing_facts: unknown; warnings: unknown;
+    grounding_score: unknown; generation_count: unknown; model: unknown; created_at: unknown;
+  };
+  const answerByQuestion = new Map<string, AnswerRow>();
+  for (const answer of (answers ?? []) as AnswerRow[]) {
+    const qid = answer.question_id as string;
+    const existing = answerByQuestion.get(qid);
+    if (!existing || (answer.created_at as string) > (existing.created_at as string)) {
+      answerByQuestion.set(qid, answer);
+    }
   }
 
   return {
@@ -247,16 +286,24 @@ export async function loadApplicationWorkspace(applicationId: string) {
     opportunity,
     requirements: requirements ?? [],
     questions: (questions ?? []).map((question) => ({
-      ...question,
-      versions: answersByQuestion.get(question.id) ?? [],
-      approved: (answersByQuestion.get(question.id) ?? []).find((item) => item.approved) ?? null,
+      id: question.id as string,
+      prompt: question.prompt as string,
+      limitValue: (question.limit_value as number | null) ?? null,
+      limitUnit: (question.limit_unit as string | null) ?? null,
+      required: Boolean(question.required),
+      answer: answerByQuestion.get(question.id as string) ?? null,
     })),
     eligibility: eligibility ?? [],
     fit,
     resumeMatches: resumeMatches ?? [],
+    requiredDocuments: requiredDocuments ?? [],
     attached: attached ?? [],
     snapshots: snapshots ?? [],
     reviewItems: reviewItems ?? [],
+    fieldMappings: fieldMappings ?? [],
+    fillSessions: fillSessions ?? [],
+    statusHistory: statusHistory ?? [],
+    events: events ?? [],
     evidence: ((evidence ?? []) as EvidenceRow[]).map(mapEvidence),
     evidenceRows: (evidence ?? []) as EvidenceRow[],
     documents: documents ?? [],

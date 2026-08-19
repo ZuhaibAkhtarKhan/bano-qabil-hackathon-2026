@@ -36,11 +36,9 @@ describe("semantic states", () => {
   it("maps evidence and answers onto distinct statuses", () => {
     expect(evidenceSemanticStatus({ verificationStatus: "verified" })).toBe("verified");
     expect(evidenceSemanticStatus({ verificationStatus: "unverified" })).toBe("needs_review");
-    expect(
-      answerSemanticStatus({ approved: false, model: "gpt", text: "draft" }),
-    ).toBe("ai_generated");
-    expect(answerSemanticStatus({ approved: true, model: "gpt", text: "draft" })).toBe("approved");
-    expect(answerSemanticStatus({ approved: false, model: null, text: "mine" })).toBe("user_edited");
+    expect(answerSemanticStatus("ai_generated")).toBe("ai_generated");
+    expect(answerSemanticStatus("approved")).toBe("approved");
+    expect(answerSemanticStatus("user_edited")).toBe("user_edited");
   });
 });
 
