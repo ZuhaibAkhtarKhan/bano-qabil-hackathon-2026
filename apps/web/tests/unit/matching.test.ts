@@ -58,8 +58,8 @@ describe("eligibility", () => {
       [{ id: "r1", text: "Six month full-time availability in Zurich", hard: true }],
       evidence,
     );
-    expect(verdict?.state).toBe("needs_confirmation");
-    expect(verdict?.displayState).toBe("NEEDS CONFIRMATION");
+    expect(verdict?.state).toBe("unclear");
+    expect(verdict?.needsConfirmation).toBe(true);
   });
 });
 

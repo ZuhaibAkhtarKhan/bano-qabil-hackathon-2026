@@ -4,23 +4,21 @@ import { revalidatePath } from "next/cache";
 
 import { applicationStatusSchema } from "@1apply/contracts";
 import {
+  classifyRequirementKind,
   evaluateSubmissionGuard,
   type SubmissionInput,
 } from "@1apply/domain";
 
+import { canTransitionTo, normalizeApplicationStatus } from "@/lib/application-workflow";
+import { recordApplicationEvent } from "@/services/platform";
 import {
   groundedDraftModelSchema,
   tryGetAiProvider,
 } from "@/server/ai/openai";
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import {
-  classifyRequirementKind,
-  computeFitIndex,
-  evaluateEligibility,
-  rankResumes,
-} from "@/server/domain/matching";
 import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@/server/domain/grounding";
 import { redirectWith, type FlashCode } from "@/server/http/flash";
+import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { runOwnedJob } from "@/server/jobs/runner";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { retrieveForGrounding } from "@/services/retrieval";
@@ -40,7 +38,7 @@ async function loadEvidence(supabase: Awaited<ReturnType<typeof requireWorkspace
   const { data } = await supabase
     .from("evidence_items")
     .select(
-      "id, title, kind, organization, situation, action, outcome, skills, verification_status, excluded_from_ai",
+      "id, title, kind, organization, situation, action, outcome, skills, verification_status, excluded_from_ai, start_date, end_date",
     );
   return ((data ?? []) as EvidenceRow[]).map(mapEvidence);
 }
@@ -130,128 +128,16 @@ export async function analyzeApplication(formData: FormData) {
     supabase,
     { actor, type: "eligibility_evaluate", inputRef: applicationId },
     async () => {
-      const [{ data: opportunity }, { data: requirements }, { data: profile }, evidence] = await Promise.all([
-        supabase
-          .from("opportunities")
-          .select("id, title, organization, raw_excerpt, location, category")
-          .eq("id", application.opportunity_id)
-          .single(),
-        supabase.from("requirements").select("id, text, hard, kind").eq("opportunity_id", application.opportunity_id),
-        supabase
-          .from("profiles")
-          .select("location_city, location_country, availability, work_authorization")
-          .eq("id", user.id)
-          .maybeSingle(),
-        loadEvidence(supabase),
-      ]);
-
-      const candidate = {
-        locationCity: profile?.location_city ?? null,
-        locationCountry: profile?.location_country ?? null,
-        availability: profile?.availability ?? null,
-        workAuthorization: profile?.work_authorization ?? null,
-      };
-
-      const eligibility = evaluateEligibility(
-        (requirements ?? []).map((item) => ({
-          id: item.id,
-          text: item.text,
-          hard: item.hard,
-          kind: item.kind,
-        })),
-        evidence,
-        candidate,
+      const { eligibility } = await evaluateApplicationIntelligence(
+        supabase,
+        actor,
+        applicationId,
+        application.opportunity_id,
       );
-      await supabase.from("eligibility_results").delete().eq("application_id", applicationId);
-      if (eligibility[0]?.requirementId !== "none") {
-        await supabase.from("eligibility_results").insert(
-          eligibility.map((item) => ({
-            user_id: user.id,
-            application_id: applicationId,
-            requirement_id: item.requirementId,
-            state: item.state,
-            explanation: item.explanation,
-            evidence_id: item.evidenceId,
-            requirement_kind: item.kind,
-            display_state: item.displayState,
-          })),
-        );
-      }
-
-      const opportunityText = [
-        opportunity?.title,
-        opportunity?.organization,
-        opportunity?.location,
-        opportunity?.category,
-        opportunity?.raw_excerpt,
-        ...(requirements ?? []).map((item) => item.text),
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      const fit = computeFitIndex({ eligibility, evidence, opportunityText, profile: candidate });
-      await supabase.from("fit_evaluations").delete().eq("application_id", applicationId);
-      await supabase.from("fit_evaluations").insert({
-        user_id: user.id,
-        application_id: applicationId,
-        score: fit.score,
-        skills_match: fit.skillsMatch,
-        experience_match: fit.experienceMatch,
-        education_match: fit.educationMatch,
-        project_relevance: fit.projectRelevance,
-        eligibility: fit.eligibility,
-        missing: fit.missing,
-        strengths: fit.strengths,
-        explanation: fit.explanation,
-        should_apply: fit.shouldApply,
-        factors: fit.factors,
-      });
-
-      const { data: documents } = await supabase
-        .from("documents")
-        .select("id, label, type, current_version_id")
-        .in("type", ["resume", "resume_variant"]);
-      const versionIds = (documents ?? [])
-        .map((item) => item.current_version_id as string | null)
-        .filter((id): id is string => Boolean(id));
-      const { data: chunks } = versionIds.length
-        ? await supabase.from("document_chunks").select("document_version_id, content").in("document_version_id", versionIds)
-        : { data: [] as Array<{ document_version_id: string; content: string }> };
-      const contentByVersion = new Map<string, string>();
-      for (const chunk of chunks ?? []) {
-        const previous = contentByVersion.get(chunk.document_version_id) ?? "";
-        contentByVersion.set(chunk.document_version_id, `${previous} ${chunk.content}`.trim());
-      }
-      const resumes = (documents ?? [])
-        .filter((item) => item.current_version_id)
-        .map((item) => ({
-          documentId: item.id as string,
-          documentVersionId: item.current_version_id as string,
-          label: item.label as string,
-          type: item.type as string,
-          content: contentByVersion.get(item.current_version_id as string) ?? "",
-        }));
-      const ranked = rankResumes(opportunityText, resumes);
-      await supabase.from("resume_matches").delete().eq("application_id", applicationId);
-      if (ranked.length > 0) {
-        await supabase.from("resume_matches").insert(
-          ranked.map((item) => ({
-            user_id: user.id,
-            application_id: applicationId,
-            document_id: item.documentId,
-            document_version_id: item.documentVersionId,
-            score: item.score,
-            suggestion: item.suggestion,
-            track: item.track,
-            explanation: item.explanation,
-            recommended: item.recommended,
-          })),
-        );
-      }
 
       await supabase.from("review_items").delete().eq("application_id", applicationId).eq("resolved", false);
       const review = eligibility
-        .filter((item) => item.state === "unclear" || item.state === "not_met" || item.state === "not_evaluated")
+        .filter((item) => item.state === "unclear" || item.state === "not_met" || item.state === "not_evaluated" || item.state === "partial")
         .map((item) => ({
           user_id: user.id,
           application_id: applicationId,
@@ -263,26 +149,36 @@ export async function analyzeApplication(formData: FormData) {
         await supabase.from("review_items").insert(review);
       }
 
+      const hardMiss = eligibility.some((item) => item.hard && item.state === "not_met");
       await supabase
         .from("applications")
         .update({
-          status: application.status === "draft" ? "preparing" : application.status,
-          next_action: "Review eligibility and draft grounded answers",
+          status: normalizeApplicationStatus(application.status) === "saved" ? "analyzing" : application.status,
+          next_action: hardMiss
+            ? "Hard eligibility is not satisfied — review before applying"
+            : review.length > 0
+              ? "Resolve eligibility gaps and confirm missing evidence"
+              : "Select a resume, review generated answers, and prepare submission",
         })
         .eq("id", applicationId);
+
+      await recordApplicationEvent(supabase, actor, applicationId, "application.analyzed", {
+        reviewCount: review.length,
+        hardMiss,
+      });
 
       await notify(
         supabase,
         user.id,
         applicationId,
-        "Fit Index updated",
-        "Eligibility used only verified evidence. Unclear items need your review — they are not official decisions.",
+        "Intelligence updated",
+        "Eligibility, Fit Index, and resume matching ran as three separate systems on verified evidence only.",
       );
     },
   );
 
   revalidateApplication(applicationId);
-  redirectWith(applicationPath(applicationId), { notice: "fit_analyzed" }, "eligibility");
+  redirectWith(applicationPath(applicationId), { notice: "fit_analyzed" }, "fit");
 }
 
 export async function generateAnswer(formData: FormData) {
@@ -484,7 +380,7 @@ export async function approveAnswer(formData: FormData) {
 }
 
 export async function attachDocument(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   const documentId = String(formData.get("documentId") ?? "");
   const requestedVersionId = String(formData.get("versionId") ?? "").trim() || null;
@@ -519,16 +415,21 @@ export async function attachDocument(formData: FormData) {
     document_version_id: versionId,
   });
 
+  await recordApplicationEvent(supabase, actor, applicationId, "document.attached", {
+    documentId,
+    versionId,
+  });
+
   revalidateApplication(applicationId);
   redirectWith(applicationPath(applicationId), { notice: "attached" }, "documents");
 }
 
 export async function markSubmitted(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   const { data: application } = await supabase
     .from("applications")
-    .select("id, status, deadline_at")
+    .select("id, status, deadline_at, opportunity_id")
     .eq("id", applicationId)
     .maybeSingle();
   if (!application) {
@@ -541,49 +442,44 @@ export async function markSubmitted(formData: FormData) {
   const [
     { data: questions },
     { data: attached },
+    { data: answers },
+    { data: opportunity },
+    { data: mappings },
     { data: eligibilityResults },
     { data: reviewItems },
     { data: snapshots },
     { data: fitRow },
     { data: resumeMatches },
   ] = await Promise.all([
-    supabase.from("application_questions").select("id, prompt").eq("application_id", applicationId),
+    supabase.from("opportunity_questions").select("id, prompt").eq("opportunity_id", application.opportunity_id),
     supabase
       .from("application_documents")
       .select("document_id, document_version_id")
       .eq("application_id", applicationId),
     supabase
-      .from("eligibility_results")
-      .select("state, explanation")
+      .from("application_answers")
+      .select("id, question_id, approved_text, original_ai_text, user_edited_text, evidence_ids")
       .eq("application_id", applicationId),
     supabase
-      .from("review_items")
-      .select("resolved, prompt")
-      .eq("application_id", applicationId),
-    supabase
-      .from("submission_snapshots")
-      .select("id")
-      .eq("application_id", applicationId),
-    supabase
-      .from("fit_evaluations")
-      .select("score, missing")
-      .eq("application_id", applicationId)
+      .from("opportunities")
+      .select("id, title, organization, category, location, source, source_url, deadline_at, raw_excerpt")
+      .eq("id", application.opportunity_id)
       .maybeSingle(),
     supabase
-      .from("resume_matches")
-      .select("document_id, recommended")
+      .from("field_mappings")
+      .select("field_key, label, value, source, confidence, excluded_by_default")
       .eq("application_id", applicationId),
+    supabase.from("eligibility_results").select("state, explanation").eq("application_id", applicationId),
+    supabase.from("review_items").select("resolved, prompt").eq("application_id", applicationId),
+    supabase.from("submission_snapshots").select("id").eq("application_id", applicationId),
+    supabase.from("fit_evaluations").select("score, missing").eq("application_id", applicationId).maybeSingle(),
+    supabase.from("resume_matches").select("document_id, recommended").eq("application_id", applicationId),
   ]);
 
-  const { data: approved } = await supabase
-    .from("answer_versions")
-    .select("id, question_id")
-    .eq("approved", true);
-
   const approvedByQuestion = new Map(
-    (approved ?? [])
-      .filter((row) => (questions ?? []).some((question) => question.id === row.question_id))
-      .map((row) => [row.question_id, row.id]),
+    (answers ?? [])
+      .filter((row) => Boolean(row.approved_text))
+      .map((row) => [row.question_id as string, row.id as string]),
   );
 
   const recommended = (resumeMatches ?? []).find(
@@ -679,19 +575,6 @@ export async function markSubmitted(formData: FormData) {
     );
   }
 
-  const { data: opportunity } = await supabase
-    .from("opportunities")
-    .select("id, title, organization, source_url, category, location, deadline_at, raw_excerpt")
-    .eq("id", (await supabase.from("applications").select("opportunity_id").eq("id", applicationId).single()).data!.opportunity_id)
-    .single();
-
-  const evidenceIds = [...new Set(
-    (approved ?? [])
-      .filter((row) => (questions ?? []).some((q) => q.id === row.question_id))
-      .map(() => [])
-      .flat(),
-  )];
-
   const snapshot = freezeSubmissionManifest({
     answers: [...approvedByQuestion.entries()].map(([questionId, answerVersionId]) => ({
       questionId,
@@ -721,14 +604,28 @@ export async function markSubmitted(formData: FormData) {
             deadlineAt: opportunity.deadline_at,
             excerpt: (opportunity.raw_excerpt ?? "").slice(0, 2000),
           }
-        : null,
-      evidence_manifest: evidenceIds,
+        : {},
+      evidence_manifest: (answers ?? [])
+        .filter((row) => Boolean(row.approved_text))
+        .map((row) => ({
+          questionId: row.question_id,
+          evidenceIds: row.evidence_ids ?? [],
+        })),
+      field_manifest: (mappings ?? []).map((item) => ({
+        fieldKey: item.field_key,
+        label: item.label,
+        value: item.value,
+        source: item.source,
+        confidence: item.confidence,
+        excludedByDefault: item.excluded_by_default,
+      })),
+      application_status: application.status,
+      deadline_at: application.deadline_at,
       idempotency_key: guard.idempotencyKey,
       guard_result: guard,
     })
     .select("id")
     .single();
-
   if (error) {
     await supabase
       .from("submission_attempts")
@@ -756,6 +653,11 @@ export async function markSubmitted(formData: FormData) {
     })
     .eq("id", applicationId);
 
+  await recordApplicationEvent(supabase, actor, applicationId, "application.submitted_snapshot", {
+    answers: snapshot.answerManifest.length,
+    documents: snapshot.documentManifest.length,
+  });
+
   await notify(
     supabase,
     user.id,
@@ -769,10 +671,22 @@ export async function markSubmitted(formData: FormData) {
 }
 
 export async function updateApplicationStatus(formData: FormData) {
-  const { supabase } = await requireWorkspace();
+  const { supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   const parsed = applicationStatusSchema.safeParse(String(formData.get("status") ?? ""));
   if (!parsed.success) {
+    redirectWith(applicationPath(applicationId), { error: "required" }, "review");
+  }
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id, status")
+    .eq("id", applicationId)
+    .maybeSingle();
+  if (!application) {
+    redirectWith(applicationPath(applicationId), { error: "not_found" }, "review");
+  }
+  if (!canTransitionTo(application.status, normalizeApplicationStatus(parsed.data))) {
     redirectWith(applicationPath(applicationId), { error: "required" }, "review");
   }
 
@@ -786,6 +700,11 @@ export async function updateApplicationStatus(formData: FormData) {
           : `Continue from ${parsed.data}`,
     })
     .eq("id", applicationId);
+
+  await recordApplicationEvent(supabase, actor, applicationId, "application.status_updated", {
+    from: application.status,
+    to: parsed.data,
+  });
 
   revalidateApplication(applicationId);
   redirectWith(applicationPath(applicationId), { notice: "status_updated" }, "review");

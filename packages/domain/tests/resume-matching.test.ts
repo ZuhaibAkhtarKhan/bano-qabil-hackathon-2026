@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyResumeTrack, rankResumes, resumeMatchSummary } from "../src/matching";
+import { classifyResumeTrack, rankResumes, resumeMatchSummary } from "../src/intelligence/resume-matching";
 
 describe("resume ranking", () => {
   it("classifies Software Engineering, AI/ML, Web, Research, and General tracks", () => {

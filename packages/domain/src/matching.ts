@@ -1,49 +1,68 @@
-export { tokenize, overlapScore, extractYears, roundScore } from "./intelligence/text";
 export {
   eligibleEvidence,
   evidenceBlob,
-  type CandidateProfile,
-  type EligibilityDisplayState,
-  type EligibilityState,
+  verifiedFacts,
+  verifiedSkills,
+  type EligibilityContext,
   type EligibilityVerdict,
+  type MemoryDocument,
   type MemoryEvidence,
+  type MemoryFact,
   type MemoryRequirement,
-  type RequirementKind,
   type ResumeCandidate,
-  type ResumeTrack,
-} from "./intelligence/types";
+} from "./intelligence-types";
+
 export {
-  ELIGIBILITY_DISPLAY,
-  classifyRequirementKind,
+  ELIGIBILITY_LABELS,
+  eligibilityFactorScore,
+  eligibilityLabel,
   evaluateEligibility,
   evaluateRequirement,
-} from "./intelligence/eligibility";
+  inferRequirementKind,
+  isPreferredRequirement,
+} from "./eligibility";
+
 export {
   FIT_INDEX_WEIGHTS,
   computeFitIndex,
-  fitIndexFromRequirements,
+  explainFitScore,
+  reconstructFitScore,
   type FitFactor,
   type FitIndexInput,
   type FitIndexResult,
-  type FitMissingItem,
-} from "./intelligence/fit-index";
+} from "./fit-index";
+
 export {
-  RESUME_TRACKS,
+  RESUME_FOCUSES,
+  classifyOpportunityFocus,
+  classifyResumeFocus,
+  rankResumes,
+  type RankedResume,
+  type ResumeFocusId,
+} from "./resume-matching";
+
+export { rankEvidenceForQuestion, selectEvidenceForRequirement } from "./evidence";
+
+export { clampScore, extractYears, overlapScore, tokenize } from "./text";
+
+export {
+  ELIGIBILITY_DISPLAY,
+  classifyRequirementKind,
+} from "./intelligence/eligibility";
+
+export {
   classifyResumeTrack,
   dominantOpportunityTrack,
-  rankResumes,
   resumeMatchSummary,
-  type RankedResume,
+  RESUME_TRACKS,
 } from "./intelligence/resume-matching";
 
-import { overlapScore } from "./intelligence/text";
-import { eligibleEvidence, evidenceBlob, type MemoryEvidence } from "./intelligence/types";
+export { fitIndexFromRequirements } from "./intelligence/fit-index";
 
-export function rankEvidenceForQuestion(question: string, evidence: MemoryEvidence[], limit = 4): MemoryEvidence[] {
-  return eligibleEvidence(evidence)
-    .map((item) => ({ item, score: overlapScore(question, evidenceBlob(item)) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((entry) => entry.item);
-}
+export type {
+  CandidateProfile,
+  EligibilityDisplayState,
+  EligibilityState,
+  RequirementKind,
+  ResumeTrack,
+} from "./intelligence/types";

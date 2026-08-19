@@ -16,6 +16,7 @@ import { OAuthTokenError, refreshAccessToken } from "./google-oauth";
 
 const GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 const GMAIL_THREADS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/threads";
+void GMAIL_THREADS_URL;
 
 type GmailMessageHeader = { name: string; value: string };
 type GmailPart = { mimeType: string; body: { data?: string }; parts?: GmailPart[] };

@@ -11,18 +11,47 @@ export {
   classifyResumeTrack,
   FIT_INDEX_WEIGHTS,
   ELIGIBILITY_DISPLAY,
+  ELIGIBILITY_LABELS,
+  RESUME_FOCUSES,
+  classifyOpportunityFocus,
+  classifyResumeFocus,
+  eligibilityFactorScore,
+  eligibilityLabel,
+  explainFitScore,
+  extractYears,
+  inferRequirementKind,
+  reconstructFitScore,
+  selectEvidenceForRequirement,
+  type EligibilityContext,
   type EligibilityVerdict,
   type EligibilityState,
   type EligibilityDisplayState,
+  type FitFactor,
   type FitIndexInput,
   type FitIndexResult,
   type MemoryEvidence,
   type MemoryRequirement,
+  type RankedResume,
   type ResumeCandidate,
   type CandidateProfile,
 } from "./matching";
 
 export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
+
+export {
+  buildAnswerPrompt,
+  classifyQuestion,
+  extractClaims,
+  groundingScore,
+  rankEvidenceForAnswer,
+  toneInstruction,
+  validateClaims,
+  type AnswerState,
+  type ClaimFlag,
+  type GenerationIntent,
+  type QuestionKind,
+  type ToneStyle,
+} from "./answer-generation";
 
 export {
   MEMORY_SECTIONS,

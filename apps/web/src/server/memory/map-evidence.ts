@@ -11,6 +11,8 @@ export function mapEvidence(row: {
   skills: string[] | null;
   verification_status: "unverified" | "verified" | "rejected";
   excluded_from_ai: boolean;
+  start_date?: string | null;
+  end_date?: string | null;
 }): MemoryEvidence {
   return {
     id: row.id,
@@ -23,5 +25,7 @@ export function mapEvidence(row: {
     skills: row.skills ?? [],
     verificationStatus: row.verification_status,
     excludedFromAi: row.excluded_from_ai,
+    startDate: row.start_date ?? null,
+    endDate: row.end_date ?? null,
   };
 }

@@ -32,14 +32,13 @@ export function ScoreIndicator({
       <p className="mt-1 font-mono text-3xl tracking-tight">
         {typeof score === "number" ? (
           <>
-            {score}
-            <span className="text-lg text-ink-muted"> / 100</span>
+            {score} <span className="text-lg text-ink-muted">/ 100</span>
           </>
         ) : (
           "—"
         )}
       </p>
-      {typeof score === "number" ? <Progress value={score} label="Match from verified evidence" /> : null}
+      {typeof score === "number" ? <Progress value={score} label="Weighted from verified evidence" /> : null}
     </div>
   );
 }

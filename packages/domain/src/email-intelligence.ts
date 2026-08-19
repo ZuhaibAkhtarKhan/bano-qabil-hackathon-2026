@@ -132,7 +132,7 @@ const CATEGORY_RULES: Array<{
 const INTERVIEW_DATE_PATTERNS = [
   /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.{0,30}\d{1,2}(:\d{2})?\s*(am|pm)/i,
   /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s+\d{1,2}(,\s*\d{4})?\b/i,
-  /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/,
+  /\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/,
   /\b\d{1,2}:\d{2}\s*(am|pm)\s*([-–]\s*\d{1,2}:\d{2}\s*(am|pm))?/i,
 ];
 

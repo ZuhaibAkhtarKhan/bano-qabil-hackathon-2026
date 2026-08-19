@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  FIT_INDEX_WEIGHTS,
-  computeFitIndex,
-  evaluateEligibility,
-  type MemoryEvidence,
-} from "../src/matching";
+import { FIT_INDEX_WEIGHTS, computeFitIndex } from "../src/intelligence/fit-index";
+import { evaluateEligibility } from "../src/intelligence/eligibility";
+import type { MemoryEvidence } from "../src/intelligence/types";
 
 const evidence: MemoryEvidence[] = [
   {

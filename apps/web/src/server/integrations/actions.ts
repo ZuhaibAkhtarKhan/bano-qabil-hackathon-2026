@@ -203,6 +203,45 @@ export async function confirmCalendarEvent(formData: FormData) {
   redirect(integrationPath());
 }
 
+export async function dismissCalendarEvent(formData: FormData) {
+  const { user, supabase } = await requireWorkspace();
+  const calendarEventId = String(formData.get("calendarEventId") ?? "");
+
+  const { data: event } = await supabase
+    .from("calendar_events")
+    .select("integration_id, external_id")
+    .eq("id", calendarEventId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!event) redirect(`${integrationPath()}?error=not_found`);
+
+  if (event.external_id) {
+    const { data: token } = await supabase
+      .from("integration_tokens")
+      .select("access_token, refresh_token")
+      .eq("integration_id", event.integration_id)
+      .maybeSingle();
+
+    if (token?.access_token) {
+      await deleteCalendarEvent({
+        supabase,
+        userId: user.id,
+        integrationId: event.integration_id as string,
+        calendarEventId,
+        accessToken: token.access_token as string,
+        refreshToken: token.refresh_token as string | null,
+      });
+      revalidatePath(integrationPath());
+      redirect(integrationPath());
+    }
+  }
+
+  await supabase.from("calendar_events").delete().eq("id", calendarEventId).eq("user_id", user.id);
+  revalidatePath(integrationPath());
+  redirect(integrationPath());
+}
+
 // ── Correct email association ─────────────────────────────────────────────────
 
 export async function correctEmailAssociation(formData: FormData) {

@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  classifyRequirementKind,
-  evaluateEligibility,
-  rankEvidenceForQuestion,
-  type MemoryEvidence,
-} from "../src/matching";
+import { classifyRequirementKind, evaluateEligibility } from "../src/intelligence/eligibility";
+import { rankEvidenceForQuestion } from "../src/matching";
+import type { MemoryEvidence } from "../src/intelligence/types";
 
 /**
  * AI evaluation fixtures. These lock expected structured outcomes for

@@ -11,6 +11,7 @@ import {
   disconnectIntegration,
   triggerGmailSync,
   confirmCalendarEvent,
+  dismissCalendarEvent,
 } from "@/server/integrations/actions";
 
 const EMAIL_CATEGORY_LABELS: Record<string, string> = {
@@ -210,6 +211,12 @@ export default async function IntegrationsPage({
                     ) : (
                       <p className="text-sm text-ink-muted">Connect Google Calendar to confirm.</p>
                     )}
+                    <form action={dismissCalendarEvent}>
+                      <input type="hidden" name="calendarEventId" value={ev.id} />
+                      <Button type="submit" variant="ghost" size="sm">
+                        Dismiss
+                      </Button>
+                    </form>
                   </div>
                 </Card>
               </li>

@@ -49,7 +49,7 @@ export default async function DashboardPage() {
 
       <dl className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Memory" value={`${completeness.percent}%`} hint="Identity, consent, verified evidence, documents" />
-        <MetricCard label="Active" value={buckets.active.length} hint="Draft, preparing, ready" />
+        <MetricCard label="Active" value={buckets.active.length} hint="Saved, analyzing, ready, in progress, review required" />
         <MetricCard label="Evidence" value={verifiedEvidenceCount} hint={`${documentCount} files · ${resumeCount} resumes`} />
         <MetricCard label="Attention" value={buckets.attention.length + notifications.filter((item) => !item.read_at).length} hint="Reviews, missing facts, unread notices" />
       </dl>
@@ -165,7 +165,7 @@ export default async function DashboardPage() {
             <h2 className="font-display text-2xl">Interviews</h2>
             <p className="mt-1 font-mono text-xs text-ink-muted">{buckets.interviews.length}</p>
             {buckets.interviews.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-muted">No interview or assessment stages recorded.</p>
+              <p className="mt-3 text-sm text-ink-muted">No under-review or interview stages recorded.</p>
             ) : (
               <ul className="mt-4 grid gap-3">
                 {buckets.interviews.map((row) => (

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  classifyRequirementKind,
-  evaluateEligibility,
-  type MemoryEvidence,
-} from "../src/matching";
+import { classifyRequirementKind, evaluateEligibility } from "../src/intelligence/eligibility";
+import type { MemoryEvidence } from "../src/intelligence/types";
 
 const evidence: MemoryEvidence[] = [
   {

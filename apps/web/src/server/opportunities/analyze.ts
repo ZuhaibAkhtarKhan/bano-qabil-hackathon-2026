@@ -216,7 +216,7 @@ export async function ensureApplication(
     .insert({
       user_id: userId,
       opportunity_id: opportunityId,
-      status: "draft",
+      status: "saved",
       deadline_at: deadlineAt,
       next_action: "Review analyzed requirements and verify eligibility",
     })
