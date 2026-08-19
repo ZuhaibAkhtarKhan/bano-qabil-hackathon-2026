@@ -3,16 +3,16 @@
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
+import { extractTextFromBuffer } from "@/lib/documents/extract-text";
 import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/server/jobs/runner";
-import { extractFromDocumentText } from "@/server/memory/extract-from-document";
+import { processDocumentVersion } from "@/server/documents/service";
 
 const MAX_BYTES = 8 * 1024 * 1024;
-const TEXT_TYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
 const ALLOWED_TYPES = new Set([
   "text/plain",
   "text/markdown",
@@ -31,16 +31,6 @@ function mimeFromName(name: string, reported: string): string {
     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   }
   return reported;
-}
-
-function chunkText(text: string): string[] {
-  const chunks: string[] = [];
-  let remaining = text.trim();
-  while (remaining.length > 0 && chunks.length < 40) {
-    chunks.push(remaining.slice(0, 1600));
-    remaining = remaining.slice(1600);
-  }
-  return chunks;
 }
 
 export async function uploadOnboardingResume(formData: FormData) {
@@ -114,39 +104,20 @@ export async function uploadOnboardingResume(formData: FormData) {
   await supabase.from("documents").update({ current_version_id: versionId }).eq("id", documentId);
   await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
 
-  const isText = TEXT_TYPES.has(mimeType);
-  const extractedText = isText ? buffer.toString("utf8").slice(0, 80_000) : null;
-  let notice: "uploaded" | "extracted" | "binary_stored" = isText ? "extracted" : "binary_stored";
-
   await runOwnedJob(
     supabase,
     { actor, type: "document_extract", inputRef: versionId },
     async () => {
-      if (extractedText) {
-        const chunks = chunkText(extractedText);
-        if (chunks.length > 0) {
-          await supabase.from("document_chunks").insert(
-            chunks.map((content, index) => ({
-              user_id: user.id,
-              document_version_id: versionId,
-              chunk_index: index,
-              content,
-            })),
-          );
-        }
-
-        await extractFromDocumentText({
-          supabase,
-          userId: user.id,
-          documentId,
-          versionId,
-          documentLabel: label,
-          extractedText,
-          profileDisplayName: profile.display_name,
-        });
-      }
-
-      await supabase.from("document_versions").update({ status: "ready" }).eq("id", versionId);
+      await processDocumentVersion({
+        supabase,
+        userId: user.id,
+        documentId,
+        versionId,
+        documentLabel: label,
+        profileDisplayName: profile.display_name,
+        buffer,
+        mimeType,
+      });
     },
   );
 
@@ -161,7 +132,7 @@ export async function uploadOnboardingResume(formData: FormData) {
     })
     .eq("id", user.id);
 
-  if (!isText) notice = "binary_stored";
+  const notice = extractTextFromBuffer(buffer, mimeType) ? "extracted" : "binary_stored";
 
   revalidatePath("/app/onboarding");
   revalidatePath("/app/memory");

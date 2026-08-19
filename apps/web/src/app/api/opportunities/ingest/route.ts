@@ -2,13 +2,12 @@ import { createApiEnvelopeSchema, opportunityIngestRequestSchema, uuidSchema } f
 import { z } from "zod";
 import { NextResponse } from "next/server";
 
-import { UnsafeUrlError } from "@/lib/security/public-url";
-import { getCurrentUserAndProfile } from "@/lib/profile";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/env";
-import { toActor } from "@/auth/actor";
+import { parsePublicHttpUrl, UnsafeUrlError } from "@/lib/security/public-url";
+import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
+import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 import { ingestOpportunityPage } from "@/server/opportunities/ingest";
+import { recordAuditEvent } from "@/server/audit";
 
 const envelope = createApiEnvelopeSchema(
   z.object({
@@ -20,60 +19,73 @@ const envelope = createApiEnvelopeSchema(
   }),
 );
 
+export function OPTIONS(request: Request) {
+  return extensionPreflight(request);
+}
+
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
 
-  if (!isSupabaseConfigured()) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "NOT_CONFIGURED", message: "Supabase is not configured." },
-        requestId,
-      }),
-      { status: 503 },
-    );
-  }
-
-  const { user, profile } = await getCurrentUserAndProfile();
-  if (!user || !profile) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "UNAUTHENTICATED", message: "Sign in required." },
-        requestId,
-      }),
-      { status: 401 },
-    );
+  let session;
+  try {
+    session = await requireApiSession(request);
+  } catch (error) {
+    if (error instanceof ApiAuthError) {
+      return withExtensionCors(request, apiAuthResponse(error, envelope, requestId));
+    }
+    throw error;
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "INVALID_JSON", message: "Request body must be JSON." },
-        requestId,
-      }),
-      { status: 400 },
+    return withExtensionCors(
+      request,
+      NextResponse.json(
+        envelope.parse({
+          data: null,
+          error: { code: "INVALID_JSON", message: "Request body must be JSON." },
+          requestId,
+        }),
+        { status: 400 },
+      ),
     );
   }
 
   const parsed = opportunityIngestRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "VALIDATION", message: "Invalid ingest payload." },
-        requestId,
-      }),
-      { status: 400 },
+    return withExtensionCors(
+      request,
+      NextResponse.json(
+        envelope.parse({
+          data: null,
+          error: { code: "VALIDATION", message: "Invalid ingest payload." },
+          requestId,
+        }),
+        { status: 400 },
+      ),
     );
   }
 
-  const supabase = await createServerSupabaseClient();
-  const actor = toActor(user, profile);
+  try {
+    parsePublicHttpUrl(parsed.data.url);
+  } catch (error) {
+    const code = error instanceof UnsafeUrlError ? "UNSAFE_URL" : "VALIDATION";
+    return withExtensionCors(
+      request,
+      NextResponse.json(
+        envelope.parse({
+          data: null,
+          error: { code, message: "Only public http(s) URLs can be ingested." },
+          requestId,
+        }),
+        { status: 422 },
+      ),
+    );
+  }
+
+  const { supabase, actor, user } = session;
 
   let pageText = parsed.data.metadata?.pageText ?? "";
   let canonicalUrl = parsed.data.url;
@@ -87,15 +99,20 @@ export async function POST(request: Request) {
       pageTitle = page.title;
     } catch (error) {
       const code = error instanceof UnsafeUrlError ? "UNSAFE_URL" : "PAGE_FETCH";
-      return NextResponse.json(
-        envelope.parse({
-          data: null,
-          error: { code, message: "Could not fetch the opportunity page." },
-          requestId,
-        }),
-        { status: 422 },
+      return withExtensionCors(
+        request,
+        NextResponse.json(
+          envelope.parse({
+            data: null,
+            error: { code, message: "Could not fetch the opportunity page." },
+            requestId,
+          }),
+          { status: 422 },
+        ),
       );
     }
+  } else {
+    canonicalUrl = parsePublicHttpUrl(parsed.data.url).toString();
   }
 
   try {
@@ -111,28 +128,40 @@ export async function POST(request: Request) {
       metadata: parsed.data.metadata ?? {},
     });
 
-    return NextResponse.json(
-      envelope.parse({
-        data: {
-          opportunityId: result.opportunityId,
-          applicationId: result.applicationId,
-          jobId: result.jobId || null,
-          duplicate: result.duplicate,
-          analysisStatus: result.duplicate ? "ready" : "pending",
-        },
-        error: null,
-        requestId,
-      }),
-      { status: result.duplicate ? 200 : 202 },
+    await recordAuditEvent(supabase, "opportunity.ingest", {
+      opportunityId: result.opportunityId,
+      duplicate: result.duplicate,
+      source: parsed.data.source,
+    });
+
+    return withExtensionCors(
+      request,
+      NextResponse.json(
+        envelope.parse({
+          data: {
+            opportunityId: result.opportunityId,
+            applicationId: result.applicationId,
+            jobId: result.jobId || null,
+            duplicate: result.duplicate,
+            analysisStatus: result.duplicate ? "ready" : "pending",
+          },
+          error: null,
+          requestId,
+        }),
+        { status: result.duplicate ? 200 : 202 },
+      ),
     );
   } catch {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "INGEST_FAILED", message: "Could not ingest opportunity." },
-        requestId,
-      }),
-      { status: 500 },
+    return withExtensionCors(
+      request,
+      NextResponse.json(
+        envelope.parse({
+          data: null,
+          error: { code: "INGEST_FAILED", message: "Could not ingest opportunity." },
+          requestId,
+        }),
+        { status: 500 },
+      ),
     );
   }
 }

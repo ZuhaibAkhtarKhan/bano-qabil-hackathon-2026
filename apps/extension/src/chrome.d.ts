@@ -1,11 +1,12 @@
 declare const chrome: {
   runtime: {
+    id: string;
     onInstalled: { addListener: (callback: () => void) => void };
     onMessage: {
       addListener: (
         callback: (
           message: { type?: string; [key: string]: unknown },
-          sender: unknown,
+          sender: { id?: string },
           sendResponse: (value: unknown) => void,
         ) => boolean | void,
       ) => void;

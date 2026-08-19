@@ -1,4 +1,10 @@
 /** Wrap untrusted webpage content so models treat it as data, not instructions. */
+export function wrapUntrustedDocumentContent(text: string, label?: string): string {
+  const trimmed = text.trim().slice(0, 24_000);
+  const header = label ? `Document label (reference only): ${label}\n\n` : "";
+  return `${header}<untrusted_document_content>\n${trimmed}\n</untrusted_document_content>`;
+}
+
 export function wrapUntrustedPageContent(text: string, sourceUrl?: string): string {
   const trimmed = text.trim().slice(0, 24_000);
   const header = sourceUrl ? `Source URL (reference only): ${sourceUrl}\n\n` : "";
@@ -23,5 +29,15 @@ Rules:
 - category must be one of: job, internship, scholarship, hackathon, grant, fellowship, university, accelerator, conference, ambassador, visa, other`;
 
 export const DISCOVERY_PARSE_INSTRUCTION = `Parse a natural-language opportunity discovery request into search filters.
-Return JSON { categories: string[], locations: string[], remoteOk: boolean, educationLevel: string|null, keywords: string[] }.
-Use empty arrays when unspecified. categories must use: job, internship, scholarship, hackathon, grant, fellowship, university, accelerator, conference, ambassador, visa, other.`;
+Return JSON {
+  categories: string[],
+  locations: string[],
+  remoteOk: boolean,
+  educationLevel: "undergraduate"|"graduate"|"any"|null,
+  experienceLevel: "internship"|"entry"|"mid"|"any"|null,
+  domain: string[],
+  skills: string[],
+  otherConstraints: string[],
+  keywords: string[]
+}.
+Use empty arrays when unspecified. Never invent employers. categories must use: job, internship, scholarship, hackathon, grant, fellowship, university, accelerator, conference, ambassador, visa, other.`;

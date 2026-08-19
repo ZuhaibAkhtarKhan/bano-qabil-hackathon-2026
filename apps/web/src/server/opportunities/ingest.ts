@@ -1,4 +1,5 @@
-import type { OpportunitySource } from "@1apply/contracts";
+import { opportunityCategorySchema, type OpportunitySource } from "@1apply/contracts";
+import { normalizeOpportunityUrl } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
@@ -10,7 +11,7 @@ import {
   runOpportunityAnalysisJob,
 } from "@/server/opportunities/analyze";
 import { opportunityExtractionSchema } from "@/infra/ai/openai";
-import { opportunityCategorySchema } from "@1apply/contracts";
+import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 
 export type IngestPageInput = {
   supabase: SupabaseClient;
@@ -25,13 +26,14 @@ export type IngestPageInput = {
 };
 
 export async function findDuplicateOpportunity(supabase: SupabaseClient, userId: string, canonicalUrl: string) {
+  const normalized = normalizeOpportunityUrl(canonicalUrl);
   const { data } = await supabase
     .from("opportunities")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("canonical_url", canonicalUrl)
-    .maybeSingle();
-  return data?.id as string | undefined;
+    .select("id, canonical_url")
+    .eq("user_id", userId);
+
+  const match = (data ?? []).find((row) => normalizeOpportunityUrl(String(row.canonical_url ?? "")) === normalized);
+  return match?.id as string | undefined;
 }
 
 export async function ingestOpportunityPage(input: IngestPageInput): Promise<{
@@ -52,7 +54,7 @@ export async function ingestOpportunityPage(input: IngestPageInput): Promise<{
       user_id: input.userId,
       source: input.source,
       source_url: input.sourceUrl,
-      canonical_url: input.canonicalUrl,
+      canonical_url: normalizeOpportunityUrl(input.canonicalUrl),
       title: (input.metadata?.title as string | undefined)?.slice(0, 180) || input.pageTitle.slice(0, 180) || input.canonicalUrl,
       category: "other",
       raw_excerpt: input.pageText.slice(0, 12_000),
@@ -88,6 +90,7 @@ export async function ingestOpportunityPage(input: IngestPageInput): Promise<{
 
 export async function createManualOpportunityRecord(input: {
   supabase: SupabaseClient;
+  actor: Actor;
   userId: string;
   title: string;
   organization: string | null;
@@ -145,6 +148,7 @@ export async function createManualOpportunityRecord(input: {
     extracted,
     source: "manual",
   });
+  await evaluateApplicationIntelligence(input.supabase, input.actor, applicationId, opportunity.id);
 
   return { opportunityId: opportunity.id, applicationId };
 }

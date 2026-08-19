@@ -1,6 +1,5 @@
 "use server";
 
-import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
 import { experienceKindSchema } from "@1apply/contracts";
@@ -11,8 +10,11 @@ import { loadAppConfig } from "@/config/env";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/server/jobs/runner";
-import { extractFromDocumentText } from "@/server/memory/extract-from-document";
+import { processDocumentVersion } from "@/server/documents/service";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
+import { recordAuditEvent } from "@/server/audit";
+import { extractTextFromBuffer } from "@/lib/documents/extract-text";
+import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 
 const MEMORY = "/app/memory";
 
@@ -148,6 +150,8 @@ export async function deleteMemoryEvidence(formData: FormData) {
 
   const { error } = await supabase.from("evidence_items").delete().eq("id", id).eq("user_id", user.id);
   if (error) redirectWith(sectionReturn(formData), { error: "save" });
+
+  await recordAuditEvent(supabase, "memory.evidence_deleted", { evidenceId: id });
 
   await syncMemoryConflicts(supabase, user.id);
   revalidatePath(MEMORY);
@@ -292,28 +296,6 @@ export async function resolveMemoryConflictAction(formData: FormData) {
   redirectWith(MEMORY, { notice: "conflict_resolved" });
 }
 
-const MAX_BYTES = 8 * 1024 * 1024;
-const TEXT_TYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
-const ALLOWED_TYPES = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/x-markdown",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-]);
-
-function mimeFromName(name: string, reported: string): string {
-  const lower = name.toLowerCase();
-  if (reported && ALLOWED_TYPES.has(reported)) return reported;
-  if (lower.endsWith(".txt")) return "text/plain";
-  if (lower.endsWith(".md")) return "text/markdown";
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  return reported;
-}
-
 export async function uploadMemoryDocument(formData: FormData) {
   const { user, profile, supabase, actor } = await requireWorkspace();
   const files = formData
@@ -325,16 +307,19 @@ export async function uploadMemoryDocument(formData: FormData) {
   if (files.length === 0) redirectWith(`${MEMORY}?section=supporting`, { error: "required" });
 
   let notice: "uploaded" | "extracted" | "binary_stored" | "conflict_detected" = "uploaded";
-  let conflictTotal = 0;
 
   for (const [index, file] of files.entries()) {
-    if (file.size > MAX_BYTES) redirectWith(`${MEMORY}?section=supporting`, { error: "upload" });
-
-    const mimeType = mimeFromName(file.name, file.type);
-    if (!ALLOWED_TYPES.has(mimeType)) redirectWith(`${MEMORY}?section=supporting`, { error: "upload" });
+    let upload;
+    try {
+      upload = await readValidatedUpload(file);
+    } catch (error) {
+      redirectWith(
+        `${MEMORY}?section=supporting`,
+        { error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload" },
+      );
+    }
 
     const label = files.length > 1 ? `${labelBase} (${index + 1})` : labelBase;
-    const buffer = Buffer.from(await file.arrayBuffer());
     const documentId = crypto.randomUUID();
     const versionId = crypto.randomUUID();
     const storagePath = documentStoragePath({
@@ -342,13 +327,13 @@ export async function uploadMemoryDocument(formData: FormData) {
       documentId,
       versionId,
       type: type === "resume" ? "resume" : "other",
-      fileName: file.name,
+      fileName: upload.sanitizedFilename,
     });
     const bucket = loadAppConfig().storageBucket;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(storagePath, buffer, { contentType: mimeType, upsert: false });
+      .upload(storagePath, upload.buffer, { contentType: upload.mimeType, upsert: false });
     if (uploadError) redirectWith(`${MEMORY}?section=supporting`, { error: "upload" });
 
     await supabase.from("documents").insert({
@@ -363,9 +348,9 @@ export async function uploadMemoryDocument(formData: FormData) {
       user_id: user.id,
       version_label: "v1",
       storage_path: storagePath,
-      file_hash: createHash("sha256").update(buffer).digest("hex"),
-      mime_type: mimeType,
-      byte_size: file.size,
+      file_hash: upload.fileHash,
+      mime_type: upload.mimeType,
+      byte_size: upload.buffer.length,
       status: "processing",
     });
     await supabase.from("documents").update({ current_version_id: versionId }).eq("id", documentId);
@@ -373,31 +358,25 @@ export async function uploadMemoryDocument(formData: FormData) {
       await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
     }
 
-    const isText = TEXT_TYPES.has(mimeType);
-    const extractedText = isText ? buffer.toString("utf8").slice(0, 80_000) : null;
-    if (isText) notice = "extracted";
+    const extractedText = extractTextFromBuffer(upload.buffer, upload.mimeType);
+    if (extractedText) notice = "extracted";
     else notice = "binary_stored";
 
+    await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId, source: "memory" });
+
     await runOwnedJob(supabase, { actor, type: "document_extract", inputRef: versionId }, async () => {
-      if (extractedText) {
-        const result = await extractFromDocumentText({
-          supabase,
-          userId: user.id,
-          documentId,
-          versionId,
-          documentLabel: label,
-          extractedText,
-          profileDisplayName: profile.display_name,
-        });
-        if (result.extracted && result.conflictCount) {
-          conflictTotal += result.conflictCount;
-        }
-      }
-      await supabase.from("document_versions").update({ status: "ready" }).eq("id", versionId);
+      await processDocumentVersion({
+        supabase,
+        userId: user.id,
+        documentId,
+        versionId,
+        documentLabel: label,
+        profileDisplayName: profile.display_name,
+        buffer: upload.buffer,
+        mimeType: upload.mimeType,
+      });
     });
   }
-
-  if (conflictTotal > 0) notice = "conflict_detected";
 
   revalidatePath(MEMORY);
   revalidatePath("/app/documents");

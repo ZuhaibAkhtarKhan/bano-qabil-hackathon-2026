@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { opportunityCategorySchema } from "@1apply/contracts";
 
+import { DiscoveryPanel } from "@/components/app/discovery-panel";
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,8 @@ import {
   createManualOpportunity,
   ingestOpportunityUrl,
   ingestPastedOpportunity,
-  queueDiscoveryRequest,
 } from "@/server/opportunities/actions";
-import { loadDiscoveryRequests } from "@/server/opportunities/queries";
+import { loadDiscoveryWorkspace } from "@/server/opportunities/queries";
 import { loadOpportunitiesWorkspace } from "@/server/workspace/queries";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -35,12 +35,12 @@ const TYPE_LABELS: Record<string, string> = {
 export default async function OpportunitiesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string; error?: string }>;
+  searchParams: Promise<{ notice?: string; error?: string; discovery?: string }>;
 }) {
-  const { notice, error } = await searchParams;
-  const [{ opportunities, applicationByOpportunity }, discoveryRequests] = await Promise.all([
+  const { notice, error, discovery } = await searchParams;
+  const [{ opportunities, applicationByOpportunity }, discoveryWorkspace] = await Promise.all([
     loadOpportunitiesWorkspace(),
-    loadDiscoveryRequests(),
+    loadDiscoveryWorkspace(discovery),
   ]);
 
   return (
@@ -48,7 +48,7 @@ export default async function OpportunitiesPage({
       <PageHeader
         eyebrow="Opportunities"
         title="Intake and intelligence"
-        body="Paste a link, enter details manually, or queue AI discovery. External page content is untrusted — instructions inside postings are ignored."
+        body="Paste a link, enter details manually, or discover sourced programs. External page content is untrusted — instructions inside postings are ignored."
       />
       <FlashBanner notice={notice} error={error} />
 
@@ -131,36 +131,14 @@ export default async function OpportunitiesPage({
         </form>
       </Card>
 
-      <Card className="mt-6 max-w-5xl p-6">
-        <h2 className="font-display text-2xl">AI discovery</h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          Architecture for queries like &ldquo;Find AI/ML internships in Pakistan or remote for undergrads.&rdquo; Matching feeds plug in here.
-        </p>
-        <form action={queueDiscoveryRequest} className="mt-4 grid gap-4">
-          <Field label="Discovery query" htmlFor="discovery-query">
-            <Textarea
-              id="discovery-query"
-              name="query"
-              rows={2}
-              required
-              placeholder="Find AI/ML internships in Pakistan or remote opportunities for undergraduate students."
-            />
-          </Field>
-          <Button type="submit" variant="ghost">
-            Queue discovery request
-          </Button>
-        </form>
-        {discoveryRequests.length > 0 ? (
-          <ul className="mt-4 grid gap-2 text-sm">
-            {discoveryRequests.map((item) => (
-              <li key={item.id} className="rounded-lg bg-sand/20 px-3 py-2">
-                <p className="font-medium">{item.query}</p>
-                <p className="mt-1 text-xs text-ink-muted">{item.result_summary ?? item.status}</p>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </Card>
+      <DiscoveryPanel
+        defaultQuery={
+          (discoveryWorkspace.active?.query as string | undefined) ??
+          "Find AI/ML internships in Pakistan or remote opportunities for undergraduate students."
+        }
+        results={discoveryWorkspace.results}
+        summary={(discoveryWorkspace.active?.result_summary as string | null) ?? null}
+      />
 
       {opportunities.length === 0 ? (
         <div className="mt-10">

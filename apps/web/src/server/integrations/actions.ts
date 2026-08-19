@@ -4,37 +4,27 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import { loadAppConfig } from "@/config/env";
-import {
-  buildAuthorizationUrl,
-  exchangeCodeForTokens,
-  revokeToken,
-  OAuthConfigError,
-  type OAuthKind,
-} from "@/server/integrations/google-oauth";
+import { buildAuthorizationUrl, oauthRedirectUri, revokeToken, OAuthConfigError } from "@/server/integrations/google-oauth";
+import { createOAuthState, storeOAuthState } from "@/server/integrations/oauth-state";
+import { unwrapTokenRow } from "@/server/integrations/token-crypto";
 import { syncGmailMessages } from "@/server/integrations/gmail-sync";
 import { confirmAndCreateCalendarEvent, deleteCalendarEvent } from "@/server/integrations/calendar-sync";
+import { emitDomainEvent } from "@/server/notifications/service";
 
 function integrationPath() {
   return "/app/integrations";
 }
 
-function appUrl(): string {
-  return loadAppConfig().appUrl.replace(/\/$/, "");
+async function startOAuth(kind: "gmail" | "google_calendar", userId: string) {
+  const payload = createOAuthState(kind, userId);
+  await storeOAuthState(payload);
+  return buildAuthorizationUrl({ kind, state: payload.token, redirectUri: oauthRedirectUri(kind) });
 }
-
-function redirectUri(kind: OAuthKind): string {
-  return `${appUrl()}/api/integrations/callback?kind=${kind}`;
-}
-
-// ── Connect Gmail ─────────────────────────────────────────────────────────────
 
 export async function connectGmail() {
   const { user } = await requireWorkspace();
   try {
-    const state = encodeURIComponent(JSON.stringify({ userId: user.id, kind: "gmail", nonce: crypto.randomUUID() }));
-    const url = buildAuthorizationUrl({ kind: "gmail", state, redirectUri: redirectUri("gmail") });
-    redirect(url);
+    redirect(await startOAuth("gmail", user.id));
   } catch (err) {
     if (err instanceof OAuthConfigError) {
       redirect(`${integrationPath()}?error=oauth_not_configured`);
@@ -43,16 +33,10 @@ export async function connectGmail() {
   }
 }
 
-// ── Connect Calendar ──────────────────────────────────────────────────────────
-
 export async function connectCalendar() {
   const { user } = await requireWorkspace();
   try {
-    const state = encodeURIComponent(
-      JSON.stringify({ userId: user.id, kind: "google_calendar", nonce: crypto.randomUUID() }),
-    );
-    const url = buildAuthorizationUrl({ kind: "google_calendar", state, redirectUri: redirectUri("google_calendar") });
-    redirect(url);
+    redirect(await startOAuth("google_calendar", user.id));
   } catch (err) {
     if (err instanceof OAuthConfigError) {
       redirect(`${integrationPath()}?error=oauth_not_configured`);
@@ -86,15 +70,24 @@ export async function disconnectIntegration(formData: FormData) {
     .maybeSingle();
 
   if (token?.access_token) {
-    await revokeToken(token.access_token).catch(() => {/* best-effort */});
+    const secrets = unwrapTokenRow(token);
+    await revokeToken(secrets.accessToken).catch(() => {
+      /* best-effort */
+    });
+    if (secrets.refreshToken) {
+      await revokeToken(secrets.refreshToken).catch(() => {
+        /* best-effort */
+      });
+    }
   }
 
   await supabase.from("integration_tokens").delete().eq("integration_id", integrationId);
   await supabase.from("integrations").update({ status: "revoked" }).eq("id", integrationId);
 
-  await supabase.from("notifications").insert({
-    user_id: user.id,
-    application_id: null,
+  await emitDomainEvent(supabase, {
+    name: "integration.disconnected",
+    userId: user.id,
+    subjectId: integrationId,
     title: "Integration disconnected",
     body: "Access token revoked. Sync will not run. Reconnect from Integrations.",
   });
@@ -146,18 +139,20 @@ export async function triggerGmailSync(formData: FormData) {
     };
   });
 
+  const secrets = unwrapTokenRow(token);
   const result = await syncGmailMessages({
     supabase,
     userId: user.id,
     integrationId,
-    accessToken: token.access_token as string,
-    refreshToken: token.refresh_token as string | null,
+    accessToken: secrets.accessToken,
+    refreshToken: secrets.refreshToken,
     applications: candidates,
   });
 
-  await supabase.from("notifications").insert({
-    user_id: user.id,
-    application_id: null,
+  await emitDomainEvent(supabase, {
+    name: "email.synced",
+    userId: user.id,
+    subjectId: integrationId,
     title: "Gmail sync complete",
     body: `Processed ${result.processed} emails · ${result.classified} relevant · ${result.associated} associated · ${result.interviewsDetected} interview(s) detected.${result.errors.length ? ` ${result.errors.length} error(s).` : ""}`,
   });
@@ -190,13 +185,14 @@ export async function confirmCalendarEvent(formData: FormData) {
 
   if (!token?.access_token) redirect(`${integrationPath()}?error=no_token`);
 
+  const secrets = unwrapTokenRow(token);
   await confirmAndCreateCalendarEvent({
     supabase,
     userId: user.id,
     integrationId,
     calendarEventId,
-    accessToken: token.access_token as string,
-    refreshToken: token.refresh_token as string | null,
+    accessToken: secrets.accessToken,
+    refreshToken: secrets.refreshToken,
   });
 
   revalidatePath(integrationPath());
@@ -224,13 +220,14 @@ export async function dismissCalendarEvent(formData: FormData) {
       .maybeSingle();
 
     if (token?.access_token) {
+      const secrets = unwrapTokenRow(token);
       await deleteCalendarEvent({
         supabase,
         userId: user.id,
         integrationId: event.integration_id as string,
         calendarEventId,
-        accessToken: token.access_token as string,
-        refreshToken: token.refresh_token as string | null,
+        accessToken: secrets.accessToken,
+        refreshToken: secrets.refreshToken,
       });
       revalidatePath(integrationPath());
       redirect(integrationPath());
@@ -257,70 +254,4 @@ export async function correctEmailAssociation(formData: FormData) {
 
   revalidatePath(integrationPath());
   redirect(integrationPath());
-}
-
-// ── Handle OAuth callback (called from route handler) ────────────────────────
-
-export async function handleOAuthCallback(input: {
-  code: string;
-  kind: OAuthKind;
-  userId: string;
-}): Promise<{ success: boolean; error?: string }> {
-  const { createServerSupabaseClient } = await import("@/lib/supabase/server");
-  const supabase = await createServerSupabaseClient();
-
-  try {
-    const tokens = await exchangeCodeForTokens({ code: input.code, redirectUri: redirectUri(input.kind) });
-
-    // Upsert integration row
-    const { data: integration, error: intErr } = await supabase
-      .from("integrations")
-      .upsert(
-        {
-          user_id: input.userId,
-          provider: "google",
-          kind: input.kind,
-          status: "connected",
-          scopes: input.kind === "gmail"
-            ? ["https://www.googleapis.com/auth/gmail.readonly"]
-            : ["https://www.googleapis.com/auth/calendar.events"],
-          account_label: tokens.email || null,
-        },
-        { onConflict: "user_id,provider,kind" },
-      )
-      .select("id")
-      .single();
-
-    if (intErr || !integration) {
-      return { success: false, error: intErr?.message ?? "Could not upsert integration." };
-    }
-
-    // Store token (server-side only)
-    await supabase
-      .from("integration_tokens")
-      .upsert(
-        {
-          integration_id: integration.id,
-          user_id: input.userId,
-          access_token: tokens.accessToken,
-          refresh_token: tokens.refreshToken,
-          expires_at: new Date(Date.now() + tokens.expiresIn * 1000).toISOString(),
-          scopes: input.kind === "gmail"
-            ? ["https://www.googleapis.com/auth/gmail.readonly"]
-            : ["https://www.googleapis.com/auth/calendar.events"],
-        },
-        { onConflict: "integration_id" },
-      );
-
-    await supabase.from("notifications").insert({
-      user_id: input.userId,
-      application_id: null,
-      title: `${input.kind === "gmail" ? "Gmail" : "Google Calendar"} connected`,
-      body: `Connected as ${tokens.email || "unknown"}. No passwords stored.`,
-    });
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: String(err) };
-  }
 }

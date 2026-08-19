@@ -1,7 +1,8 @@
 /**
  * Google OAuth 2.0 helpers.
  * Secrets stay server-side. No passwords are ever requested or stored.
- * Access tokens are encrypted in Supabase via the integration_tokens table (never in browser).
+ * Access tokens are stored server-side only (AES-GCM when an OAuth secret is configured).
+ * They are never sent to the browser or extension.
  */
 
 import { loadAppConfig } from "@/config/env";
@@ -45,6 +46,10 @@ export class OAuthTokenError extends Error {
     super(message);
     this.name = "OAuthTokenError";
   }
+}
+
+export function oauthRedirectUri(kind: OAuthKind): string {
+  return `${loadAppConfig().appUrl.replace(/\/$/, "")}/api/integrations/callback?kind=${kind}`;
 }
 
 export function buildAuthorizationUrl(input: {

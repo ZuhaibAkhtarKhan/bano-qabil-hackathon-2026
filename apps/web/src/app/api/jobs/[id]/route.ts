@@ -2,9 +2,7 @@ import { createApiEnvelopeSchema, toJobLifecycle, uuidSchema } from "@1apply/con
 import { z } from "zod";
 import { NextResponse } from "next/server";
 
-import { getCurrentUserAndProfile } from "@/lib/profile";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/env";
+import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 
 const envelope = createApiEnvelopeSchema(
   z.object({
@@ -16,39 +14,23 @@ const envelope = createApiEnvelopeSchema(
   }),
 );
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const requestId = crypto.randomUUID();
   const { id } = await context.params;
 
-  if (!isSupabaseConfigured()) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "NOT_CONFIGURED", message: "Supabase is not configured." },
-        requestId,
-      }),
-      { status: 503 },
-    );
+  let session;
+  try {
+    session = await requireApiSession(request);
+  } catch (error) {
+    if (error instanceof ApiAuthError) return apiAuthResponse(error, envelope, requestId);
+    throw error;
   }
 
-  const { user } = await getCurrentUserAndProfile();
-  if (!user) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "UNAUTHENTICATED", message: "Sign in required." },
-        requestId,
-      }),
-      { status: 401 },
-    );
-  }
-
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
+  const { data, error } = await session.supabase
     .from("jobs")
     .select("id, type, state, attempts, error_code")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("user_id", session.user.id)
     .maybeSingle();
 
   if (error || !data) {

@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertSafePathSegment,
+  assertUploadMagicBytes,
   chunkDocumentText,
   resolveUploadMimeType,
   sanitizeFileName,
   UploadValidationError,
 } from "@/lib/documents/upload-security";
+import { extractTextFromBuffer } from "@/lib/documents/extract-text";
 import { nextVersionLabel } from "@/lib/documents/versioning";
 import { documentStoragePath } from "@/infra/storage/documents";
 import { createDocumentReadUrl } from "@/infra/storage/documents";
@@ -19,10 +21,23 @@ describe("upload security", () => {
     expect(() => assertSafePathSegment("../bad")).toThrow(UploadValidationError);
   });
 
-  it("resolves allowed mime types from extension", () => {
-    expect(resolveUploadMimeType("resume.pdf", "")).toBe("application/pdf");
+  it("requires extension and reported mime types to agree", () => {
+    expect(resolveUploadMimeType("resume.pdf", "application/pdf")).toBe("application/pdf");
     expect(resolveUploadMimeType("notes.txt", "application/octet-stream")).toBe("text/plain");
-    expect(resolveUploadMimeType("virus.exe", "application/octet-stream")).toBeNull();
+    expect(resolveUploadMimeType("virus.exe", "application/pdf")).toBeNull();
+    expect(resolveUploadMimeType("resume.pdf", "text/plain")).toBeNull();
+  });
+
+  it("rejects spoofed PDF magic bytes", () => {
+    expect(() => assertUploadMagicBytes(Buffer.from("not a pdf"), "application/pdf")).toThrow(UploadValidationError);
+    expect(() => assertUploadMagicBytes(Buffer.from("%PDF-1.7"), "application/pdf")).not.toThrow();
+  });
+
+  it("extracts text from a simple uncompressed PDF and refuses encrypted PDFs", () => {
+    const pdf = Buffer.from("%PDF-1.4\nstream\nBT (Amina Khan Python NED) Tj ET\nendstream\n", "utf8");
+    expect(extractTextFromBuffer(pdf, "application/pdf")).toMatch(/Amina Khan/);
+    const encrypted = Buffer.from("%PDF-1.4\n/Encrypt 12 0 R\nstream\nBT (secret) Tj ET\nendstream\n", "utf8");
+    expect(extractTextFromBuffer(encrypted, "application/pdf")).toBeNull();
   });
 
   it("chunks long text without dropping content boundaries", () => {

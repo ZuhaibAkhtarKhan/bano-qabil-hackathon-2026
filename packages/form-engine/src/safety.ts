@@ -34,6 +34,7 @@ const SENSITIVE = [
   /demographic/i,
   /date of birth|birthdate|dob\b/i,
   /passport|national.?id/i,
+  /ssn|social.?security/i,
   /legal.?name.?attestation/i,
 ];
 
@@ -69,6 +70,10 @@ export function isSensitiveField(field: {
 
 export function proposedFillTargets(fields: DetectedField[]): DetectedField[] {
   return fields.filter((field) => !isProtectedControl(field) && field.type !== "file");
+}
+
+export function fillTargetAllowed(fieldKey: string, type: string): boolean {
+  return !isProtectedControl({ name: fieldKey, label: fieldKey, type, id: fieldKey });
 }
 
 export function isForbiddenFillAction(action: string): boolean {

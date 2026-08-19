@@ -1,5 +1,6 @@
 import {
   assertFillActionAllowed,
+  fillTargetAllowed,
   inspectPage,
   inventoryFromDocument,
 } from "@1apply/form-engine";
@@ -68,10 +69,19 @@ if (!root.__1APPLY_LISTENERS) {
 
     if (message?.type === "FILL") {
       assertFillActionAllowed("setValue");
+      const expectedOrigin = String(message.origin ?? "");
+      if (expectedOrigin && location.origin !== expectedOrigin) {
+        sendResponse({ type: "FILL_RESULT", filled: [], error: "Origin mismatch" });
+        return false;
+      }
       const results: Array<{ fieldKey: string; filled: boolean; skippedReason?: string }> = [];
       for (const mapping of (message.mappings ?? []) as FillPayload[]) {
         if (!mapping.value) {
           results.push({ fieldKey: mapping.fieldKey, filled: false, skippedReason: "Empty value" });
+          continue;
+        }
+        if (!fillTargetAllowed(mapping.fieldKey, mapping.type)) {
+          results.push({ fieldKey: mapping.fieldKey, filled: false, skippedReason: "Protected control" });
           continue;
         }
         const el = findControl(mapping.fieldKey);

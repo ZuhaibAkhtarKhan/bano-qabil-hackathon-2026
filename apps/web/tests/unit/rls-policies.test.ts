@@ -55,4 +55,13 @@ describe("foundation RLS migration", () => {
     expect(migration).toContain("create policy audit_events_select_own");
     expect(migration).not.toContain("create policy audit_events_insert");
   });
+
+  it("lets a user delete their own profile row for account deletion", () => {
+    const deletion = readFileSync(
+      path.resolve(__dirname, "../../../../supabase/migrations/20260819180000_account_deletion.sql"),
+      "utf8",
+    );
+    expect(deletion).toContain("create policy profiles_delete_own");
+    expect(deletion).toContain("id = auth.uid()");
+  });
 });

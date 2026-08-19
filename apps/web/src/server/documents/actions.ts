@@ -7,6 +7,7 @@ import { documentTypeSchema } from "@1apply/contracts";
 
 import { createDocumentReadUrl } from "@/infra/storage/documents";
 import { logError } from "@/lib/log";
+import { extractTextFromBuffer } from "@/lib/documents/extract-text";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import {
@@ -19,6 +20,7 @@ import {
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/server/jobs/runner";
 import { reindexUserRetrievalCorpus } from "@/services/embeddings";
+import { recordAuditEvent } from "@/server/audit";
 
 const DOCUMENTS = "/app/documents";
 
@@ -107,6 +109,8 @@ export async function uploadDocument(formData: FormData) {
     redirectWith(DOCUMENTS, { error: "upload" });
   }
 
+  await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId });
+
   if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
     await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
   }
@@ -126,7 +130,7 @@ export async function uploadDocument(formData: FormData) {
   revalidatePath("/app");
   revalidatePath(DOCUMENTS);
   revalidatePath("/app/memory");
-  redirectWith(DOCUMENTS, { notice: upload.isText ? "extracted" : "binary_stored" });
+  redirectWith(DOCUMENTS, { notice: extractTextFromBuffer(upload.buffer, upload.mimeType) ? "extracted" : "binary_stored" });
 }
 
 export async function uploadDocumentVersion(formData: FormData) {
@@ -187,7 +191,7 @@ export async function uploadDocumentVersion(formData: FormData) {
   revalidatePath(DOCUMENTS);
   revalidatePath(documentPath(documentId));
   revalidatePath("/app/memory");
-  redirectWith(documentPath(documentId), { notice: upload.isText ? "extracted" : "binary_stored" });
+  redirectWith(documentPath(documentId), { notice: extractTextFromBuffer(upload.buffer, upload.mimeType) ? "extracted" : "binary_stored" });
 }
 
 export async function setCurrentVersion(formData: FormData) {
@@ -215,6 +219,7 @@ export async function downloadDocumentVersion(formData: FormData) {
   try {
     const version = await assertOwnedVersion(supabase, actor, versionId);
     const signedUrl = await createDocumentReadUrl(supabase, actor, version.storage_path, 120);
+    await recordAuditEvent(supabase, "document.downloaded", { versionId });
     redirect(signedUrl);
   } catch (error) {
     logError("documents.download_failed", { versionId, error: String(error) });

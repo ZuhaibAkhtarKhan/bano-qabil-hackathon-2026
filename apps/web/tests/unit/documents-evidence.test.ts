@@ -38,8 +38,8 @@ describe("submission snapshots", () => {
     });
 
     expect(manifest.documentManifest).toEqual([
-      { documentId: "doc-resume", documentVersionId: "v2-old" },
-      { documentId: "doc-cover", documentVersionId: "v1" },
+      { documentId: "doc-resume", documentVersionId: "v2-old", label: "" },
+      { documentId: "doc-cover", documentVersionId: "v1", label: "" },
     ]);
     expect(manifest.answerManifest).toHaveLength(1);
   });

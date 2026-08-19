@@ -1,4 +1,5 @@
 import { requireWorkspace } from "@/server/auth/require-workspace";
+import { rankedFromRow } from "@/server/opportunities/discover";
 
 export async function loadOpportunityDetail(opportunityId: string) {
   const { user, supabase } = await requireWorkspace();
@@ -54,12 +55,33 @@ export async function loadOpportunityDetail(opportunityId: string) {
   };
 }
 
-export async function loadDiscoveryRequests(limit = 5) {
+export async function loadDiscoveryWorkspace(requestId?: string) {
   const { supabase } = await requireWorkspace();
-  const { data } = await supabase
+  const { data: requests } = await supabase
     .from("discovery_requests")
     .select("id, query, status, filters, result_summary, created_at")
     .order("created_at", { ascending: false })
-    .limit(limit);
-  return data ?? [];
+    .limit(8);
+
+  const latest = requestId
+    ? (requests ?? []).find((item) => item.id === requestId) ?? null
+    : (requests ?? [])[0] ?? null;
+
+  if (!latest) {
+    return { requests: requests ?? [], active: null, results: [] as ReturnType<typeof rankedFromRow>[] };
+  }
+
+  const { data: rows } = await supabase
+    .from("discovery_results")
+    .select(
+      "provider, source_url, canonical_url, title, organization, category, location, remote, excerpt, deadline_at, quality, rank_score, relevance, eligibility_preview, fit_preview, reasons, requirements, already_saved, opportunity_id",
+    )
+    .eq("request_id", latest.id)
+    .order("rank_score", { ascending: false });
+
+  return {
+    requests: requests ?? [],
+    active: latest,
+    results: (rows ?? []).map(rankedFromRow),
+  };
 }

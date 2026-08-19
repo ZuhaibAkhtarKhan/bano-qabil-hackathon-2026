@@ -36,13 +36,15 @@ describe("lengthWarnings", () => {
 });
 
 describe("freezeSubmissionManifest", () => {
-  it("copies answer and document ids so later edits cannot mutate the snapshot", () => {
-    const answers = [{ questionId: "q1", answerVersionId: "a1" }];
-    const documents = [{ documentId: "d1", documentVersionId: "v1" }];
+  it("copies answer text and document ids so later edits cannot mutate the snapshot", () => {
+    const answers = [{ questionId: "q1", answerVersionId: "a1", prompt: "Why?", text: "I trained a model at NED." }];
+    const documents = [{ documentId: "d1", documentVersionId: "v1", label: "AI resume" }];
     const snapshot = freezeSubmissionManifest({ answers, documents });
     answers[0]!.answerVersionId = "changed";
+    answers[0]!.text = "changed";
     documents[0]!.documentVersionId = "changed";
     expect(snapshot.answerManifest[0]?.answerVersionId).toBe("a1");
+    expect(snapshot.answerManifest[0]?.text).toBe("I trained a model at NED.");
     expect(snapshot.documentManifest[0]?.documentVersionId).toBe("v1");
   });
 });

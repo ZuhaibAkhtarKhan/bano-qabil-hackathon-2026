@@ -150,6 +150,11 @@ export type NotificationRow = {
   read_at: string | null;
   created_at: string;
   application_id: string | null;
+  opportunity_id?: string | null;
+  category?: string | null;
+  priority?: number | null;
+  action_url?: string | null;
+  event_name?: string | null;
 };
 
 export function asOne<T>(value: T | T[] | null | undefined): T | null {

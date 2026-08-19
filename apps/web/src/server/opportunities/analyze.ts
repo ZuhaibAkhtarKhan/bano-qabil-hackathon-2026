@@ -1,6 +1,10 @@
 import type { OpportunitySource } from "@1apply/contracts";
 import { discoveryFiltersSchema, opportunityCategorySchema } from "@1apply/contracts";
-import { classifyRequirementKind } from "@1apply/domain";
+import {
+  classifyRequirementKind,
+  mergeDiscoveryCriteria,
+  parseDiscoveryCriteria,
+} from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 
@@ -11,6 +15,7 @@ import {
   wrapUntrustedPageContent,
 } from "@/lib/opportunities/untrusted";
 import { opportunityExtractionSchema, tryGetAiProvider } from "@/infra/ai/openai";
+import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 
 type Extraction = z.infer<typeof opportunityExtractionSchema>;
 
@@ -72,10 +77,22 @@ export async function extractOpportunityFromText(pageText: string, sourceUrl?: s
 }
 
 export async function parseDiscoveryQuery(query: string) {
+  const fallback = parseDiscoveryCriteria(query);
+  const asFilters = () =>
+    discoveryFiltersSchema.parse({
+      categories: fallback.categories,
+      locations: fallback.locations,
+      remoteOk: fallback.remoteOk,
+      educationLevel: fallback.educationLevel,
+      experienceLevel: fallback.experienceLevel,
+      domain: fallback.domain,
+      skills: fallback.skills,
+      otherConstraints: fallback.otherConstraints,
+      keywords: fallback.keywords,
+    });
+
   const provider = tryGetAiProvider();
-  if (!provider) {
-    return discoveryFiltersSchema.parse({ keywords: query.split(/\s+/).slice(0, 12) });
-  }
+  if (!provider) return asFilters();
 
   try {
     const raw = await provider.completeStructured({
@@ -84,9 +101,42 @@ export async function parseDiscoveryQuery(query: string) {
       untrustedData: wrapUntrustedPageContent(query),
     });
     const parsed = discoveryFiltersSchema.safeParse(raw);
-    return parsed.success ? parsed.data : discoveryFiltersSchema.parse({ keywords: [query] });
+    if (!parsed.success) return asFilters();
+    const merged = mergeDiscoveryCriteria(fallback, {
+      categories: parsed.data.categories,
+      locations: parsed.data.locations,
+      remoteOk: parsed.data.remoteOk,
+      educationLevel:
+        parsed.data.educationLevel === "undergraduate" ||
+        parsed.data.educationLevel === "graduate" ||
+        parsed.data.educationLevel === "any"
+          ? parsed.data.educationLevel
+          : fallback.educationLevel,
+      experienceLevel:
+        parsed.data.experienceLevel === "internship" ||
+        parsed.data.experienceLevel === "entry" ||
+        parsed.data.experienceLevel === "mid" ||
+        parsed.data.experienceLevel === "any"
+          ? parsed.data.experienceLevel
+          : fallback.experienceLevel,
+      domain: parsed.data.domain,
+      skills: parsed.data.skills,
+      otherConstraints: parsed.data.otherConstraints,
+      keywords: parsed.data.keywords,
+    });
+    return discoveryFiltersSchema.parse({
+      categories: merged.categories,
+      locations: merged.locations,
+      remoteOk: merged.remoteOk,
+      educationLevel: merged.educationLevel,
+      experienceLevel: merged.experienceLevel,
+      domain: merged.domain,
+      skills: merged.skills,
+      otherConstraints: merged.otherConstraints,
+      keywords: merged.keywords,
+    });
   } catch {
-    return discoveryFiltersSchema.parse({ keywords: [query] });
+    return asFilters();
   }
 }
 
@@ -254,5 +304,6 @@ export async function runOpportunityAnalysisJob(input: {
     extracted,
     source: input.source,
   });
+  await evaluateApplicationIntelligence(input.supabase, input.actor, input.applicationId, input.opportunityId);
   return { status: "ready" as const };
 }

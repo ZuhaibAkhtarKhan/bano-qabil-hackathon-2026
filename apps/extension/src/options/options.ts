@@ -1,4 +1,5 @@
 import { loadSession, saveSession } from "../api/client";
+import { isPrivilegedJwt } from "../shared/jwt";
 
 const appUrl = document.getElementById("appUrl") as HTMLInputElement;
 const token = document.getElementById("token") as HTMLInputElement;
@@ -11,8 +12,13 @@ async function hydrate() {
 }
 
 document.getElementById("save")!.addEventListener("click", async () => {
-  await saveSession({ appBaseUrl: appUrl.value, deviceToken: token.value.trim() });
-  logEl.textContent = "Saved. The token stays in this browser profile only.";
+  const deviceToken = token.value.trim();
+  if (deviceToken && isPrivilegedJwt(deviceToken)) {
+    logEl.textContent = "That token is privileged and cannot be stored in the extension.";
+    return;
+  }
+  await saveSession({ appBaseUrl: appUrl.value, deviceToken });
+  logEl.textContent = "Saved. Use a user session token, never a service-role key.";
 });
 
 void hydrate();

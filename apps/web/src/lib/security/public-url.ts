@@ -12,11 +12,17 @@ function isBlockedHostname(hostname: string): boolean {
   return false;
 }
 
-function isPrivateIpv4(hostname: string): boolean {
+function parseIpv4(hostname: string): number[] | null {
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
-  if (!match) return false;
+  if (!match) return null;
   const octets = match.slice(1).map((part) => Number(part));
-  if (octets.some((octet) => Number.isNaN(octet) || octet > 255)) return true;
+  if (octets.some((octet) => Number.isNaN(octet) || octet > 255)) return [255, 255, 255, 255];
+  return octets;
+}
+
+export function isPrivateIpv4(hostname: string): boolean {
+  const octets = parseIpv4(hostname);
+  if (!octets) return false;
   const [a, b] = octets;
   if (a === undefined || b === undefined) return true;
   if (a === 10 || a === 127 || a === 0 || a === 255) return true;
@@ -27,11 +33,28 @@ function isPrivateIpv4(hostname: string): boolean {
   return false;
 }
 
-function isPrivateIpv6(hostname: string): boolean {
+function mappedIpv4(host: string): string | null {
+  const dotted = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(host);
+  if (dotted) return dotted[1] ?? null;
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(host);
+  if (!hex || !hex[1] || !hex[2]) return null;
+  const hi = Number.parseInt(hex[1], 16);
+  const lo = Number.parseInt(hex[2], 16);
+  return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+}
+
+export function isPrivateIpv6(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (host === "::1" || host === "0:0:0:0:0:0:0:1") return true;
-  if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return true;
-  return host.includes("::ffff:127.") || host.includes("::ffff:10.") || host.includes("::ffff:192.168.");
+  if (host === "::" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return true;
+  const mapped = mappedIpv4(host);
+  if (mapped && isPrivateIpv4(mapped)) return true;
+  return false;
+}
+
+export function isPrivateIpAddress(address: string): boolean {
+  const host = address.replace(/^\[|\]$/g, "");
+  return isPrivateIpv4(host) || isPrivateIpv6(host);
 }
 
 export class UnsafeUrlError extends Error {

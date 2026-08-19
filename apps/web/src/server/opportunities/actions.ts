@@ -1,21 +1,24 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { opportunityCategorySchema } from "@1apply/contracts";
+import { normalizeOpportunityUrl } from "@1apply/domain";
 
 import { UnsafeUrlError } from "@/lib/security/public-url";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 import { runOwnedJob } from "@/server/jobs/runner";
-import { runOpportunityAnalysisJob } from "@/server/opportunities/analyze";
+import { parseDiscoveryQuery, runOpportunityAnalysisJob } from "@/server/opportunities/analyze";
+import { runOpportunityDiscovery } from "@/server/opportunities/discover";
 import {
   createManualOpportunityRecord,
+  findDuplicateOpportunity,
   ingestOpportunityPage,
   ingestPastedContent,
 } from "@/server/opportunities/ingest";
-import { parseDiscoveryQuery } from "@/server/opportunities/analyze";
 
 function splitLines(value: FormDataEntryValue | null): string[] {
   return String(value ?? "")
@@ -38,7 +41,7 @@ function opportunityPath(id: string) {
 }
 
 export async function createManualOpportunity(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const title = String(formData.get("title") ?? "").trim();
   const categoryParsed = opportunityCategorySchema.safeParse(String(formData.get("category") ?? "other"));
   if (!title || !categoryParsed.success) {
@@ -47,6 +50,7 @@ export async function createManualOpportunity(formData: FormData) {
 
   const { opportunityId } = await createManualOpportunityRecord({
     supabase,
+    actor,
     userId: user.id,
     title,
     organization: String(formData.get("organization") ?? "").trim() || null,
@@ -158,22 +162,92 @@ export async function reanalyzeOpportunity(formData: FormData) {
 }
 
 export async function queueDiscoveryRequest(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const query = String(formData.get("query") ?? "").trim();
   if (query.length < 8) redirectWith("/app/opportunities", { error: "required" });
 
-  const filters = await parseDiscoveryQuery(query);
+  const category = opportunityCategorySchema.safeParse(String(formData.get("filterCategory") ?? ""));
+  const location = String(formData.get("filterLocation") ?? "").trim();
+  const remote = String(formData.get("filterRemote") ?? "") === "on";
 
-  await supabase.from("discovery_requests").insert({
-    user_id: user.id,
-    query,
-    status: "completed",
-    filters,
-    result_summary:
-      "Discovery request recorded. Matching against indexed opportunities will run here — paste links manually for now.",
-    completed_at: new Date().toISOString(),
+  const parsedFilters = await parseDiscoveryQuery(query);
+  const extraFilters = {
+    categories: category.success ? [category.data] : [],
+    locations: location ? [location] : [],
+    remoteOk: remote || parsedFilters.remoteOk,
+  };
+
+  let discoveryId = "";
+  const run = async () => {
+    const result = await runOpportunityDiscovery({
+      supabase,
+      actor,
+      query,
+      parsedFilters,
+      extraFilters,
+    });
+    discoveryId = result.requestId;
+  };
+
+  try {
+    await runOwnedJob(supabase, { actor, type: "opportunity_discover", inputRef: user.id }, run);
+  } catch {
+    if (!discoveryId) await run();
+  }
+
+  revalidatePath("/app/opportunities");
+  redirect(`/app/opportunities?notice=discovery_ready&discovery=${discoveryId}#discovery`);
+}
+
+export async function saveDiscoveredOpportunity(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const sourceUrl = String(formData.get("sourceUrl") ?? "").trim();
+  const excerpt = String(formData.get("excerpt") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  if (!sourceUrl) redirectWith("/app/opportunities", { error: "required" }, "discovery");
+
+  const canonicalUrl = normalizeOpportunityUrl(sourceUrl);
+  const duplicateId = await findDuplicateOpportunity(supabase, user.id, canonicalUrl);
+  if (duplicateId) {
+    revalidatePath("/app/opportunities");
+    redirectWith(opportunityPath(duplicateId), { notice: "duplicate_opportunity" });
+  }
+
+  let pageText = excerpt;
+  let pageTitle = title || canonicalUrl;
+  let fetchedUrl = canonicalUrl;
+  try {
+    const page = await fetchPublicPageText(sourceUrl);
+    pageText = page.text || excerpt;
+    pageTitle = page.title || title || pageTitle;
+    fetchedUrl = page.url;
+  } catch (error) {
+    if (error instanceof UnsafeUrlError) redirectWith("/app/opportunities", { error: "unsafe_url" }, "discovery");
+    if (!excerpt) redirectWith("/app/opportunities", { error: "page_fetch" }, "discovery");
+  }
+
+  const result = await ingestOpportunityPage({
+    supabase,
+    actor,
+    userId: user.id,
+    source: "discovery",
+    sourceUrl,
+    canonicalUrl: normalizeOpportunityUrl(fetchedUrl),
+    pageText: pageText || `${title}\n${sourceUrl}`,
+    pageTitle,
+    metadata: {
+      title,
+      organization: String(formData.get("organization") ?? "").trim() || null,
+      category: String(formData.get("category") ?? "").trim() || null,
+      location: String(formData.get("location") ?? "").trim() || null,
+      discovered: true,
+    },
   });
 
   revalidatePath("/app/opportunities");
-  redirectWith("/app/opportunities", { notice: "discovery_queued" });
+  revalidatePath("/app/applications");
+  redirectWith(
+    opportunityPath(result.opportunityId),
+    { notice: result.duplicate ? "duplicate_opportunity" : "analyzing" },
+  );
 }

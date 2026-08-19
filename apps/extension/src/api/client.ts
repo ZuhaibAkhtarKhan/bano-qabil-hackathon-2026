@@ -41,7 +41,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${session.deviceToken}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${session.appBaseUrl}${path}`, { ...init, headers });
+  const response = await fetch(`${session.appBaseUrl}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   const json = (await response.json()) as Envelope<T>;
   if (!response.ok || json.error || json.data == null) {
     throw new ExtensionApiError(json.error?.code ?? "REQUEST_FAILED", json.error?.message ?? "Request failed.");

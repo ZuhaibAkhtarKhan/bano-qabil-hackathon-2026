@@ -7,9 +7,35 @@ import { redirect } from "next/navigation";
 import { logError, logInfo } from "@/lib/log";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { safeOnboardingReturn } from "@/lib/auth-errors";
+import { revokeToken } from "@/server/integrations/google-oauth";
+import { unwrapTokenRow } from "@/server/integrations/token-crypto";
+import { recordAuditEvent } from "@/server/audit";
 
 export async function signOut() {
   const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user) {
+    const { data: tokens } = await supabase
+      .from("integration_tokens")
+      .select("access_token, refresh_token")
+      .eq("user_id", user.id);
+    for (const row of tokens ?? []) {
+      const secrets = unwrapTokenRow(row);
+      await revokeToken(secrets.accessToken).catch(() => {
+        /* best-effort */
+      });
+      if (secrets.refreshToken) {
+        await revokeToken(secrets.refreshToken).catch(() => {
+          /* best-effort */
+        });
+      }
+    }
+    await supabase.from("integration_tokens").delete().eq("user_id", user.id);
+    await supabase.from("integrations").update({ status: "revoked" }).eq("user_id", user.id);
+    await recordAuditEvent(supabase, "auth.sign_out", {});
+  }
   await supabase.auth.signOut();
   logInfo("auth.sign_out");
   redirect("/");

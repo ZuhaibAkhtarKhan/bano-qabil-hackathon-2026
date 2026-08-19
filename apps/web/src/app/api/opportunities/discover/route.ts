@@ -7,10 +7,10 @@ import {
 import { z } from "zod";
 import { NextResponse } from "next/server";
 
-import { getCurrentUserAndProfile } from "@/lib/profile";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/env";
 import { parseDiscoveryQuery } from "@/server/opportunities/analyze";
+import { runOpportunityDiscovery } from "@/server/opportunities/discover";
+import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
+import { recordAuditEvent } from "@/server/audit";
 
 const envelope = createApiEnvelopeSchema(
   z.object({
@@ -18,33 +18,19 @@ const envelope = createApiEnvelopeSchema(
     status: z.enum(["pending", "processing", "completed", "failed"]),
     filters: discoveryFiltersSchema,
     resultSummary: z.string().nullable(),
+    resultCount: z.number().int().nonnegative(),
   }),
 );
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
 
-  if (!isSupabaseConfigured()) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "NOT_CONFIGURED", message: "Supabase is not configured." },
-        requestId,
-      }),
-      { status: 503 },
-    );
-  }
-
-  const { user } = await getCurrentUserAndProfile();
-  if (!user) {
-    return NextResponse.json(
-      envelope.parse({
-        data: null,
-        error: { code: "UNAUTHENTICATED", message: "Sign in required." },
-        requestId,
-      }),
-      { status: 401 },
-    );
+  let session;
+  try {
+    session = await requireApiSession(request);
+  } catch (error) {
+    if (error instanceof ApiAuthError) return apiAuthResponse(error, envelope, requestId);
+    throw error;
   }
 
   let body: unknown;
@@ -73,46 +59,44 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = await createServerSupabaseClient();
+  const { supabase, actor } = session;
   const filters = await parseDiscoveryQuery(parsed.data.query);
 
-  const { data, error } = await supabase
-    .from("discovery_requests")
-    .insert({
-      user_id: user.id,
+  try {
+    const result = await runOpportunityDiscovery({
+      supabase,
+      actor,
       query: parsed.data.query,
-      status: "completed",
-      filters,
-      result_summary:
-        "Discovery architecture ready. Parsed filters stored — external feed matching will plug in here.",
-      completed_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
+      parsedFilters: filters,
+    });
 
-  if (error || !data) {
+    await recordAuditEvent(supabase, "opportunity.discover", {
+      requestId: result.requestId,
+      resultCount: result.results.length,
+    });
+
+    return NextResponse.json(
+      envelope.parse({
+        data: {
+          requestId: result.requestId,
+          status: "completed",
+          filters: result.filters,
+          resultSummary: result.summary,
+          resultCount: result.results.length,
+        },
+        error: null,
+        requestId,
+      }),
+      { status: 202 },
+    );
+  } catch {
     return NextResponse.json(
       envelope.parse({
         data: null,
-        error: { code: "SAVE_FAILED", message: "Could not queue discovery request." },
+        error: { code: "SAVE_FAILED", message: "Could not run discovery." },
         requestId,
       }),
       { status: 500 },
     );
   }
-
-  return NextResponse.json(
-    envelope.parse({
-      data: {
-        requestId: data.id,
-        status: "completed",
-        filters,
-        resultSummary:
-          "Discovery architecture ready. Parsed filters stored — external feed matching will plug in here.",
-      },
-      error: null,
-      requestId,
-    }),
-    { status: 202 },
-  );
 }

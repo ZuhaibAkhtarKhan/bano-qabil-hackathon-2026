@@ -41,13 +41,40 @@ export function assertSafePathSegment(value: string): void {
   }
 }
 
-export function resolveUploadMimeType(fileName: string, reported: string): string | null {
+function extensionMime(fileName: string): string | null {
   const lower = fileName.toLowerCase();
-  if (reported && ALLOWED_UPLOAD_MIME_TYPES.has(reported)) return reported;
   for (const [ext, mime] of Object.entries(MIME_BY_EXTENSION)) {
     if (lower.endsWith(ext)) return mime;
   }
   return null;
+}
+
+export function resolveUploadMimeType(fileName: string, reported: string): string | null {
+  const fromExt = extensionMime(fileName);
+  if (!fromExt) return null;
+  if (!reported || reported === "application/octet-stream") return fromExt;
+  if (!ALLOWED_UPLOAD_MIME_TYPES.has(reported)) return null;
+  if (reported === fromExt) return fromExt;
+  if (TEXT_MIME_TYPES.has(reported) && TEXT_MIME_TYPES.has(fromExt)) return fromExt;
+  return null;
+}
+
+export function assertUploadMagicBytes(buffer: Buffer, mimeType: string): void {
+  if (mimeType === "application/pdf") {
+    if (!buffer.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+      throw new UploadValidationError("upload", "File contents do not match the PDF type");
+    }
+    return;
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
+      throw new UploadValidationError("upload", "File contents do not match the DOCX type");
+    }
+    return;
+  }
+  if (TEXT_MIME_TYPES.has(mimeType) && buffer.includes(0)) {
+    throw new UploadValidationError("upload", "Text uploads cannot contain binary data");
+  }
 }
 
 export function chunkDocumentText(text: string, chunkSize = 1600, maxChunks = 40): string[] {
@@ -89,6 +116,7 @@ export async function readValidatedUpload(file: File): Promise<{
   if (buffer.length > DOCUMENT_MAX_BYTES) {
     throw new UploadValidationError("upload", "File exceeds size limit");
   }
+  assertUploadMagicBytes(buffer, mimeType);
 
   return {
     buffer,
@@ -100,7 +128,4 @@ export async function readValidatedUpload(file: File): Promise<{
   };
 }
 
-export function extractTextFromBuffer(buffer: Buffer, mimeType: string): string | null {
-  if (!TEXT_MIME_TYPES.has(mimeType)) return null;
-  return buffer.toString("utf8").slice(0, 80_000);
-}
+export { extractTextFromBuffer } from "@/lib/documents/extract-text";

@@ -6,6 +6,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { OAuthTokenError, refreshAccessToken } from "./google-oauth";
+import { encryptSecret } from "./token-crypto";
+import { emitDomainEvent } from "@/server/notifications/service";
 
 const CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
@@ -94,7 +96,10 @@ export async function confirmAndCreateCalendarEvent(input: {
         accessToken = refreshed.accessToken;
         await supabase
           .from("integration_tokens")
-          .update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString() })
+          .update({
+            access_token: encryptSecret(accessToken),
+            expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString(),
+          })
           .eq("integration_id", integrationId);
         created = await calendarFetch<typeof created>(accessToken, CALENDAR_EVENTS_URL, "POST", body);
       } catch (refreshErr) {
@@ -111,9 +116,11 @@ export async function confirmAndCreateCalendarEvent(input: {
     .update({ confirmed: true, external_id: created.id })
     .eq("id", calendarEventId);
 
-  await supabase.from("notifications").insert({
-    user_id: userId,
-    application_id: event.application_id,
+  await emitDomainEvent(supabase, {
+    name: "calendar.confirmed",
+    userId,
+    applicationId: event.application_id as string | null,
+    subjectId: calendarEventId,
     title: "Calendar event created",
     body: `"${event.title}" has been added to your Google Calendar.`,
   });

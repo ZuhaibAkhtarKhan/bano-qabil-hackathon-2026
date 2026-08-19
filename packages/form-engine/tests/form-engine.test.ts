@@ -5,6 +5,7 @@ import {
   assertFillActionAllowed,
   detectAccountCreation,
   detectCaptcha,
+  fillTargetAllowed,
   inspectPage,
   inventoryFromDocument,
   isProtectedControl,
@@ -183,5 +184,7 @@ describe("autofill never submits", () => {
     expect(() => assertFillActionAllowed("bypassCaptcha")).toThrow(/CAPTCHA/i);
     expect(() => assertFillActionAllowed("createAccount")).toThrow(/accounts/i);
     expect(() => assertFillActionAllowed("setValue")).not.toThrow();
+    expect(fillTargetAllowed("password", "password")).toBe(false);
+    expect(fillTargetAllowed("full_name", "text")).toBe(true);
   });
 });

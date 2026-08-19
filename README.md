@@ -2,7 +2,9 @@
 
 Create once. Apply everywhere.
 
-Production architecture for an evidence-grounded application operating system. Product features are layered on this foundation; the Chrome extension does not fill or submit yet.
+Evidence-grounded application operating system: Application Memory, opportunity analysis, eligibility, Fit Index, grounded answers, controlled autofill, and submission snapshots.
+
+The Chrome extension never clicks submit. Fill requires a user session token in Options and a fill-plan from the signed-in app.
 
 ## Layout
 

@@ -13,6 +13,8 @@ import {
 } from "@1apply/domain";
 
 import { OAuthTokenError, refreshAccessToken } from "./google-oauth";
+import { encryptSecret } from "./token-crypto";
+import { emitDomainEvent } from "@/server/notifications/service";
 
 const GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 const GMAIL_THREADS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/threads";
@@ -84,7 +86,10 @@ export async function syncGmailMessages(input: {
         accessToken = refreshed.accessToken;
         await supabase
           .from("integration_tokens")
-          .update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString() })
+          .update({
+            access_token: encryptSecret(accessToken),
+            expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString(),
+          })
           .eq("integration_id", integrationId);
         listData = await gmailFetch<typeof listData>(
           accessToken,
@@ -183,9 +188,11 @@ export async function syncGmailMessages(input: {
             offer: "Offer email detected",
             interview_invitation: "Interview invitation detected",
           };
-          await supabase.from("notifications").insert({
-            user_id: userId,
-            application_id: applicationId,
+          await emitDomainEvent(supabase, {
+            name: classification.category === "interview_invitation" ? "email.interview_detected" : "application.status_changed",
+            userId,
+            applicationId,
+            subjectId: String(emailEvent?.id ?? messageId),
             title: titles[classification.category] ?? classification.category,
             body: `Email from ${senderDomain}: "${subject.slice(0, 120)}"`,
           });
@@ -225,9 +232,11 @@ export async function syncGmailMessages(input: {
           });
           result.interviewsDetected++;
 
-          await supabase.from("notifications").insert({
-            user_id: userId,
-            application_id: applicationId,
+          await emitDomainEvent(supabase, {
+            name: "calendar.proposed",
+            userId,
+            applicationId,
+            subjectId: String(emailEvent.id),
             title: "Interview detected — confirm calendar event",
             body: `${proposed.title}. ${proposed.notes} Confirm in Integrations to add to your calendar.`,
           });

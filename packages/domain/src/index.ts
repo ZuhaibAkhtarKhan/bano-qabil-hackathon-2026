@@ -90,6 +90,31 @@ export {
 } from "./deadline-intelligence";
 
 export {
+  deduplicateDiscoveries,
+  emptyDiscoveryCriteria,
+  filterDiscoveries,
+  mergeDiscoveryCriteria,
+  normalizeOpportunityUrl,
+  parseDiscoveryCriteria,
+  rankDiscoveries,
+  runDiscoveryPipeline,
+  type DiscoveryCandidate,
+  type DiscoveryCriteria,
+  type DiscoveryPreferences,
+  type EducationLevel,
+  type ExperienceLevel,
+  type RankedDiscovery,
+} from "./discovery";
+
+export { sourcedDiscoveryCatalog } from "./discovery-catalog";
+
+export { notificationDraftFromEvent, notificationIdempotencyKey, NOTIFICATION_CATEGORIES, DOMAIN_EVENT_NAMES, type DomainEvent, type DomainEventName, type NotificationCategory, type NotificationDraft, type NotificationPriority } from "./notifications";
+
+export { planAutomation, AUTOMATION_KINDS, type AutomationDecision, type AutomationKind, type ApplicationAutomationSnapshot } from "./automation";
+
+export { assessOperatingLoop, loopContinuity, OPERATING_LOOP_STAGES, type LoopStageResult, type OperatingLoopSnapshot } from "./operating-loop";
+
+export {
   classifyEmail,
   associateEmailToApplication,
   buildProposedCalendarEvent,

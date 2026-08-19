@@ -18,6 +18,7 @@ export type EmailClassification = {
   category: EmailCategory;
   confidence: number;
   reason: string;
+  subject: string;
   interviewDetected: boolean;
   interviewDateHints: string[];
 };
@@ -90,6 +91,7 @@ const CATEGORY_RULES: Array<{
       /technical (round|screen|interview)/i,
       /(hr|recruiter|hiring).{0,30}(call|interview|chat)/i,
       /calendly|cal\.com|doodle|greenhouse\.io|lever\.co/i,
+      /\binterview\b/i,
     ],
     weight: 0.9,
   },
@@ -109,8 +111,8 @@ const CATEGORY_RULES: Array<{
     category: "application_received",
     patterns: [
       /thank you for (applying|your application|submitting)/i,
-      /application (received|submitted|confirmed)/i,
-      /we have received your application/i,
+      /application.{0,60}(received|submitted|confirmed)/i,
+      /we (have )?received your application/i,
       /confirmation.{0,40}application/i,
       /your application (is|has been) (under|being) review/i,
     ],
@@ -124,6 +126,7 @@ const CATEGORY_RULES: Array<{
       /we (need|require|would like).{0,60}(additional|more|further)/i,
       /background check/i,
       /references? (required|needed|request)/i,
+      /next steps/i,
     ],
     weight: 0.8,
   },
@@ -137,7 +140,7 @@ const INTERVIEW_DATE_PATTERNS = [
 ];
 
 const APPLICATION_KEYWORDS =
-  /\b(application|applied|applying|position|role|internship|fellowship|scholarship|hackathon|grant|vacancy|opening)\b/i;
+  /\b(application|applied|applying|applicant|position|role|intern|internship|fellow|fellowship|scholarship|hackathon|grant|vacancy|opening|interview|recruiter|recruiting|candidate)\b/i;
 
 export function classifyEmail(signal: EmailSignal): EmailClassification {
   const haystack = `${signal.subject} ${signal.snippet}`.toLowerCase();
@@ -147,6 +150,7 @@ export function classifyEmail(signal: EmailSignal): EmailClassification {
       category: "irrelevant",
       confidence: 0.9,
       reason: "No application-related keywords found.",
+      subject: signal.subject,
       interviewDetected: false,
       interviewDateHints: [],
     };
@@ -181,6 +185,7 @@ export function classifyEmail(signal: EmailSignal): EmailClassification {
       category: "irrelevant",
       confidence: 0.5,
       reason: "Application keywords present but no strong category match.",
+      subject: signal.subject,
       interviewDetected: false,
       interviewDateHints: [],
     };
@@ -190,6 +195,7 @@ export function classifyEmail(signal: EmailSignal): EmailClassification {
     category: best.category,
     confidence: best.score,
     reason: best.reason,
+    subject: signal.subject,
     interviewDetected: best.category === "interview_invitation",
     interviewDateHints,
   };

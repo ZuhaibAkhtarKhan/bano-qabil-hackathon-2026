@@ -14,6 +14,8 @@ type InventoryResponse = {
   };
   url: string;
   title: string;
+  tabId: number;
+  origin: string;
 };
 
 type Mapping = {
@@ -36,6 +38,18 @@ async function activeTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+function tabOrigin(tab: chrome.tabs.Tab): string {
+  if (!tab.url) throw new Error("The active tab has no URL.");
+  const parsed = new URL(tab.url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Open a public http(s) page first.");
+  }
+  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1") {
+    throw new Error("Local pages cannot be ingested or filled.");
+  }
+  return parsed.origin;
+}
+
 async function ensureContentScript(tabId: number): Promise<void> {
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
 }
@@ -49,7 +63,12 @@ chrome.runtime.onInstalled.addListener(() => {
   console.info("1-Apply extension installed. Fill is user-invoked and never submits.");
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id && sender.id !== chrome.runtime.id) {
+    sendResponse({ error: "Unknown sender." });
+    return false;
+  }
+
   const task = (async () => {
     if (message?.type === "PING") return { ok: true, neverSubmit: true };
     if (message?.type === "SESSION") return fetchSession();
@@ -57,12 +76,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === "SAVE_PAGE") {
       const tab = await activeTab();
-      if (!tab.id || !tab.url || tab.url.startsWith("chrome://")) {
-        throw new Error("Open a public opportunity page, then try Save to 1-Apply.");
-      }
+      if (!tab.id) throw new Error("No active tab.");
+      const origin = tabOrigin(tab);
       const meta = await sendToTab<{ url: string; title: string; excerpt: string }>(tab.id, { type: "GET_PAGE_META" });
+      const pageUrl = meta.url || tab.url || "";
+      if (new URL(pageUrl).origin !== origin) {
+        throw new Error("Page origin changed. Refresh and try again.");
+      }
       return ingestOpportunity({
-        url: meta.url || tab.url,
+        url: pageUrl,
         title: meta.title || tab.title || undefined,
         excerpt: meta.excerpt,
         pageText: meta.excerpt,
@@ -72,7 +94,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "SCAN_FORM") {
       const tab = await activeTab();
       if (!tab.id) throw new Error("No active tab.");
-      return sendToTab<InventoryResponse>(tab.id, { type: "INVENTORY" });
+      const origin = tabOrigin(tab);
+      const inventory = await sendToTab<InventoryResponse>(tab.id, { type: "INVENTORY" });
+      return { ...inventory, tabId: tab.id, origin };
     }
 
     if (message?.type === "CREATE_FILL_PLAN") {
@@ -86,9 +110,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "FILL_APPROVED") {
       const tab = await activeTab();
       if (!tab.id) throw new Error("No active tab.");
+      const origin = tabOrigin(tab);
+      const expectedOrigin = String(message.origin ?? "");
+      const expectedTabId = Number(message.tabId);
+      if (!expectedOrigin || origin !== expectedOrigin) {
+        throw new Error("Page origin changed. Scan this page again.");
+      }
+      if (expectedTabId && expectedTabId !== tab.id) {
+        throw new Error("Active tab changed. Scan this page again.");
+      }
       const mappings = (message.mappings as Mapping[]).filter((item) => item.approvalState === "approved" && item.proposedValue);
       return sendToTab(tab.id, {
         type: "FILL",
+        origin,
         mappings: mappings.map((item) => ({ fieldKey: item.fieldKey, value: item.proposedValue, type: item.fieldType })),
       });
     }

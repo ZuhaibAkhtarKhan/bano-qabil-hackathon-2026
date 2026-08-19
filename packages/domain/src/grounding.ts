@@ -59,12 +59,21 @@ export function lengthWarnings(
 }
 
 export function freezeSubmissionManifest(input: {
-  answers: Array<{ questionId: string; answerVersionId: string }>;
-  documents: Array<{ documentId: string; documentVersionId: string }>;
+  answers: Array<{ questionId: string; answerVersionId: string; prompt?: string; text?: string }>;
+  documents: Array<{ documentId: string; documentVersionId: string; label?: string }>;
 }) {
   return {
     submittedAt: new Date().toISOString(),
-    answerManifest: input.answers.map((item) => ({ ...item })),
-    documentManifest: input.documents.map((item) => ({ ...item })),
+    answerManifest: input.answers.map((item) => ({
+      questionId: item.questionId,
+      answerVersionId: item.answerVersionId,
+      prompt: item.prompt ?? "",
+      text: item.text ?? "",
+    })),
+    documentManifest: input.documents.map((item) => ({
+      documentId: item.documentId,
+      documentVersionId: item.documentVersionId,
+      label: item.label ?? "",
+    })),
   };
 }

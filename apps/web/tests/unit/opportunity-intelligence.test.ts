@@ -21,6 +21,14 @@ describe("opportunity ingest contracts", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("rejects oversized untrusted page text", () => {
+    const parsed = opportunityIngestRequestSchema.safeParse({
+      url: "https://example.com/jobs/123",
+      metadata: { pageText: "x".repeat(20_001) },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it("validates discovery queries", () => {
     const parsed = opportunityDiscoveryRequestSchema.safeParse({
       query: "Find AI/ML internships in Pakistan or remote for undergraduates",
@@ -73,6 +81,13 @@ describe("opportunity intelligence migration", () => {
 describe("ingest API route", () => {
   it("exports POST handler", async () => {
     const mod = await import("@/app/api/opportunities/ingest/route");
+    expect(typeof mod.POST).toBe("function");
+  }, 15_000);
+});
+
+describe("extension fill-plan API", () => {
+  it("exports POST handler", async () => {
+    const mod = await import("@/app/api/applications/[id]/fill-plan/route");
     expect(typeof mod.POST).toBe("function");
   }, 15_000);
 });

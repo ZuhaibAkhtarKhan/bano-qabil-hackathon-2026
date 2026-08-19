@@ -1,6 +1,7 @@
 import {
   computeDeadlineInfo,
   evaluateSubmissionGuard,
+  assessOperatingLoop,
   type SubmissionInput,
 } from "@1apply/domain";
 import { applicationStatusSchema } from "@1apply/contracts";
@@ -108,6 +109,24 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
     fieldMappingsPending: mappingReviewCount,
   });
   const submitted = normalizedStatus === "submitted" || snapshots.length > 0;
+  const loop = assessOperatingLoop({
+    hasOpportunity: Boolean(opportunity),
+    opportunityAnalyzed: opportunity?.analysis_status === "ready" || (data.eligibility?.length ?? 0) > 0,
+    hasEligibility: (data.eligibility?.length ?? 0) > 0,
+    hasFit: Boolean(data.fit),
+    hasResumeMatch: data.resumeMatches.length > 0,
+    hasGeneratedAnswer: questions.some((question) => Boolean(question.answer)),
+    hasApprovedAnswer: approvedAnswers > 0,
+    hasAutofillMapping: data.fieldMappings.length > 0,
+    hasSubmissionSnapshot: snapshots.length > 0,
+    hasTrackingEvent: data.events.length > 0 || data.statusHistory.length > 0,
+    hasEmailEvent: (data.emailEvents?.length ?? 0) > 0,
+    hasCalendarEvent: (data.calendarEvents?.length ?? 0) > 0,
+    hasVerifiedMemory: (data.evidence ?? []).some(
+      (item) => item.verificationStatus === "verified" && !item.excludedFromAi,
+    ),
+    hasNextApplication: false,
+  });
 
   const timelineItems = [
     ...data.statusHistory.map((item) => ({
@@ -144,6 +163,18 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
         actions={<StatusPill tone={applicationTone(application.status)}>{applicationStatusLabel(application.status)}</StatusPill>}
       />
       <FlashBanner notice={notice} error={error} />
+
+      <ol className="mt-6 flex flex-wrap gap-2" aria-label="Application operating loop">
+        {loop.map((stage) => (
+          <li
+            key={stage.id}
+            title={stage.detail}
+            className={`rounded-full border px-2.5 py-1 text-[11px] ${stage.done ? "border-teal/30 bg-mint-soft text-teal" : "border-line bg-white text-ink-muted"}`}
+          >
+            {stage.label}
+          </li>
+        ))}
+      </ol>
 
       <nav className="mt-8 flex flex-wrap gap-2" aria-label="Workspace steps">
         {spine.map((item) => (
@@ -360,7 +391,10 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
             </StatusPill>
           </div>
           {data.fieldMappings.length === 0 ? (
-            <p className="mt-4 text-sm text-ink-muted">No field mappings recorded yet. Autofill remains opt-in and preview-first.</p>
+            <p className="mt-4 text-sm text-ink-muted">
+              No field mappings yet. Open the Chrome extension on the host form, scan fields, then approve a fill plan.
+              Mappings appear here after a fill-plan is created. 1-Apply never clicks submit.
+            </p>
           ) : (
             <ul className="mt-6 grid gap-3">
               {data.fieldMappings.slice(0, 8).map((item) => (

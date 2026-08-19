@@ -13,6 +13,11 @@ describe("parsePublicHttpUrl", () => {
     expect(() => parsePublicHttpUrl("http://127.0.0.1/admin")).toThrow(UnsafeUrlError);
   });
 
+  it("rejects IPv6-mapped loopback", () => {
+    expect(() => parsePublicHttpUrl("http://[::ffff:127.0.0.1]/admin")).toThrow(UnsafeUrlError);
+    expect(() => parsePublicHttpUrl("http://[::ffff:7f00:1]/admin")).toThrow(UnsafeUrlError);
+  });
+
   it("rejects metadata and private networks", () => {
     expect(() => parsePublicHttpUrl("http://169.254.169.254/latest/meta-data")).toThrow(UnsafeUrlError);
     expect(() => parsePublicHttpUrl("http://10.0.0.8/internal")).toThrow(UnsafeUrlError);

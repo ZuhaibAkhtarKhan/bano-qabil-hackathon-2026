@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { documentExtractionSchema, tryGetAiProvider } from "@/server/ai/openai";
 import { logError } from "@/lib/log";
+import { wrapUntrustedDocumentContent } from "@/lib/opportunities/untrusted";
 import { planDocumentExtraction } from "@/server/memory/plan-extraction";
 import { loadConflictCandidates, persistDocumentExtraction } from "@/server/memory/persist-extraction";
 
@@ -24,7 +25,7 @@ export async function extractFromDocumentText(input: {
     const raw = await provider.completeStructured({
       schemaName: "documentExtraction",
       instruction: `Extract only facts the document states about ${input.profileDisplayName ?? "the applicant"}. Return JSON {displayName, headline, phone, locationCity, locationCountry, links:[{kind,url}], skills:[], evidence:[{title,kind,organization,situation,action,outcome,skills[],startDate,endDate,excerpt}]}. Map kinds to education, employment, project, leadership, volunteering, achievement, certification, or research. Include graduation/end years in endDate when present. Never invent employers, dates, skills, or outcomes. If unsure, omit the item.`,
-      untrustedData: input.extractedText,
+      untrustedData: wrapUntrustedDocumentContent(input.extractedText, input.documentLabel),
     });
     const parsed = documentExtractionSchema.safeParse(raw);
     if (!parsed.success) {

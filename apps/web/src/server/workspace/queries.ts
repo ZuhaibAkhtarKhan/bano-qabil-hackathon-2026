@@ -26,19 +26,22 @@ export async function loadDashboard() {
     supabase
       .from("evidence_items")
       .select("id", { count: "exact", head: true })
+      .eq("user_id", profile.id)
       .eq("verification_status", "verified")
       .eq("excluded_from_ai", false),
-    supabase.from("documents").select("id", { count: "exact", head: true }),
+    supabase.from("documents").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
     supabase
       .from("applications")
       .select(
         "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source_url ), fit_evaluations ( score )",
       )
+      .eq("user_id", profile.id)
       .order("updated_at", { ascending: false })
       .limit(40),
     supabase
       .from("notifications")
-      .select("id, title, body, read_at, created_at, application_id")
+      .select("id, title, body, read_at, created_at, application_id, opportunity_id, category, priority, action_url")
+      .eq("user_id", profile.id)
       .order("created_at", { ascending: false })
       .limit(12),
     supabase
@@ -46,9 +49,10 @@ export async function loadDashboard() {
       .select(
         "id, title, organization, category, source, source_url, location, analysis_status, deadline_at, created_at",
       )
+      .eq("user_id", profile.id)
       .order("created_at", { ascending: false })
       .limit(8),
-    supabase.from("documents").select("id", { count: "exact", head: true }).eq("type", "resume"),
+    supabase.from("documents").select("id", { count: "exact", head: true }).eq("type", "resume").eq("user_id", profile.id),
   ]);
 
   const completeness = computeProfileCompleteness({
@@ -84,6 +88,7 @@ export async function loadProfileWorkspace() {
     .select(
       "id, title, kind, organization, situation, action, outcome, skills, source, verification_status, excluded_from_ai, created_at",
     )
+    .eq("user_id", profile.id)
     .order("created_at", { ascending: false });
 
   return {
@@ -103,27 +108,30 @@ export async function loadProfileWorkspace() {
 }
 
 export async function loadDocumentsWorkspace() {
-  const { supabase } = await requireWorkspace();
+  const { profile, supabase } = await requireWorkspace();
   const { data } = await supabase
     .from("documents")
     .select(
       "id, type, label, current_version_id, created_at, document_versions ( id, version_label, mime_type, byte_size, status, original_filename, created_at )",
     )
+    .eq("user_id", profile.id)
     .order("created_at", { ascending: false });
   return { documents: (data ?? []) as DocumentListRow[] };
 }
 
 export async function loadOpportunitiesWorkspace() {
-  const { supabase } = await requireWorkspace();
+  const { profile, supabase } = await requireWorkspace();
   const { data: opportunities } = await supabase
     .from("opportunities")
     .select(
       "id, title, organization, category, source, source_url, location, analysis_status, deadline_at, created_at",
     )
+    .eq("user_id", profile.id)
     .order("created_at", { ascending: false });
   const { data: applications } = await supabase
     .from("applications")
-    .select("id, opportunity_id, status");
+    .select("id, opportunity_id, status")
+    .eq("user_id", profile.id);
   const applicationByOpportunity = new Map(
     (applications ?? []).map((row: { id: string; opportunity_id: string; status: string }) => [
       row.opportunity_id,
@@ -137,12 +145,13 @@ export async function loadOpportunitiesWorkspace() {
 }
 
 export async function loadApplicationsWorkspace() {
-  const { supabase } = await requireWorkspace();
+  const { profile, supabase } = await requireWorkspace();
   const { data } = await supabase
     .from("applications")
     .select(
       "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source_url ), fit_evaluations ( score )",
     )
+    .eq("user_id", profile.id)
     .order("updated_at", { ascending: false });
   return { applications: (data ?? []) as ApplicationListRow[] };
 }
@@ -156,6 +165,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
       "id, status, deadline_at, next_action, submitted_at, persona, opportunity_id, created_at, updated_at",
     )
     .eq("id", applicationId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (!application) return null;
@@ -350,7 +360,7 @@ export async function loadNotificationsWorkspace() {
   const { supabase } = await requireWorkspace();
   const { data } = await supabase
     .from("notifications")
-    .select("id, title, body, read_at, created_at, application_id")
+    .select("id, title, body, read_at, created_at, application_id, opportunity_id, category, priority, action_url")
     .order("created_at", { ascending: false })
     .limit(50);
   return { notifications: (data ?? []) as NotificationRow[] };

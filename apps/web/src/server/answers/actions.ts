@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { logError } from "@/lib/log";
+import { emitDomainEvent } from "@/server/notifications/service";
 import { generateAnswer } from "./generate";
 
 function revalidateApplication(id: string) {
@@ -46,6 +47,17 @@ export async function generateAnswerAction(formData: FormData) {
 
   try {
     const result = await generateAnswer(supabase, actor, parsed.data);
+    await emitDomainEvent(supabase, {
+      name: result.state === "needs_review" || result.warnings.includes("INSUFFICIENT_EVIDENCE") ? "answer.needs_review" : "answer.generated",
+      userId: actor.userId,
+      applicationId: parsed.data.applicationId,
+      subjectId: result.answerId,
+      title: result.state === "needs_review" ? "Answer needs review" : "Answer draft ready",
+      body:
+        result.state === "needs_review"
+          ? "A draft was stored but needs your review before it can be used in a snapshot."
+          : "A grounded draft is ready. Review citations, then approve it.",
+    });
     revalidateApplication(parsed.data.applicationId);
     return { error: null, result };
   } catch (err) {
@@ -117,6 +129,15 @@ export async function approveAnswerAction(formData: FormData) {
       approved_text: approvedText,
     })
     .eq("id", answerId);
+
+  await emitDomainEvent(supabase, {
+    name: "answer.approved",
+    userId: actor.userId,
+    applicationId,
+    subjectId: answerId,
+    title: "Answer approved",
+    body: "Approved text can now enter a submission snapshot.",
+  });
 
   revalidateApplication(applicationId);
   return { error: null };

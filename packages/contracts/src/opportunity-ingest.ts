@@ -3,13 +3,13 @@ import { z } from "zod";
 import { opportunityCategorySchema, opportunitySourceSchema } from "./enums";
 
 export const opportunityIngestRequestSchema = z.object({
-  url: z.string().url(),
+  url: z.string().url().max(2048),
   source: opportunitySourceSchema.default("extension"),
   metadata: z
     .object({
-      title: z.string().optional(),
-      excerpt: z.string().optional(),
-      pageText: z.string().optional(),
+      title: z.string().max(500).optional(),
+      excerpt: z.string().max(8_000).optional(),
+      pageText: z.string().max(20_000).optional(),
     })
     .optional(),
 });
@@ -23,6 +23,10 @@ export const discoveryFiltersSchema = z.object({
   locations: z.array(z.string()).default([]),
   remoteOk: z.boolean().default(false),
   educationLevel: z.string().nullable().optional(),
+  experienceLevel: z.string().nullable().optional(),
+  domain: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
+  otherConstraints: z.array(z.string()).default([]),
   keywords: z.array(z.string()).default([]),
 });
 

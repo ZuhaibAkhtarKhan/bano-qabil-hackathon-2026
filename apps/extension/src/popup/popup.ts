@@ -22,6 +22,7 @@ const applicationEl = document.getElementById("application") as HTMLSelectElemen
 let mappings: Mapping[] = [];
 let lastFields: unknown[] = [];
 let lastOrigin = "";
+let lastTabId = 0;
 
 function log(text: string) {
   logEl.textContent = text;
@@ -112,10 +113,13 @@ document.getElementById("scan")!.addEventListener("click", async () => {
       fields: unknown[];
       url: string;
       title: string;
+      tabId: number;
+      origin: string;
       hazards?: { captcha?: boolean; captchaMessage?: string | null; accountCreation?: boolean; accountMessage?: string | null; unsupported?: boolean; unsupportedReason?: string | null };
     }>({ type: "SCAN_FORM" });
     lastFields = inventory.fields;
-    lastOrigin = inventory.url;
+    lastOrigin = inventory.origin || new URL(inventory.url).origin;
+    lastTabId = inventory.tabId;
     const hazard = inventory.hazards;
     const messages = [hazard?.captchaMessage, hazard?.accountMessage, hazard?.unsupportedReason].filter(Boolean);
     hazardEl.textContent = messages.join(" ");
@@ -147,6 +151,8 @@ document.getElementById("fill")!.addEventListener("click", async () => {
     const result = await send<{ filled: Array<{ fieldKey: string; filled: boolean }> }>({
       type: "FILL_APPROVED",
       mappings,
+      origin: lastOrigin,
+      tabId: lastTabId,
     });
     const count = result.filled?.filter((item) => item.filled).length ?? 0;
     log(`Filled ${count} approved field(s). Submit remains yours.`);

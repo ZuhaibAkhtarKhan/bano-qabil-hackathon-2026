@@ -90,6 +90,7 @@ export const jobTypeSchema = z.enum([
   "document_extract",
   "document_embed",
   "opportunity_analyze",
+  "opportunity_discover",
   "eligibility_evaluate",
   "answer_draft",
   "resume_match",
@@ -140,6 +141,27 @@ export const notificationStateSchema = z.enum([
   "submission_completed",
   "submission_failed",
 ]);
+
+export const notificationCategorySchema = z.enum([
+  "deadline_approaching",
+  "application_incomplete",
+  "missing_information",
+  "missing_document",
+  "answer_ready",
+  "answer_needs_review",
+  "captcha_required",
+  "account_action_required",
+  "submission_completed",
+  "submission_failed",
+  "interview_detected",
+  "interview_reminder",
+  "application_status_changed",
+]);
+export const notificationPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
+export const notificationChannelSchema = z.enum(["in_app", "email"]);
+export type NotificationCategory = z.infer<typeof notificationCategorySchema>;
+export type NotificationPriority = z.infer<typeof notificationPrioritySchema>;
+export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
 
 export const deadlineUrgencySchema = z.enum(["none", "upcoming", "soon", "imminent", "overdue"]);
 

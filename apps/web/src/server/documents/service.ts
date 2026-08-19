@@ -223,7 +223,7 @@ export async function processDocumentVersion(input: {
   profileDisplayName: string | null;
   buffer: Buffer;
   mimeType: string;
-}): Promise<{ extracted: boolean; embedded: boolean }> {
+}): Promise<{ extracted: boolean; embedded: boolean; textExtracted: boolean }> {
   const extractedText = extractTextFromBuffer(input.buffer, input.mimeType);
   let extracted = false;
   let embedded = false;
@@ -261,5 +261,5 @@ export async function processDocumentVersion(input: {
   }
 
   await input.supabase.from("document_versions").update({ status: "ready" }).eq("id", input.versionId);
-  return { extracted, embedded };
+  return { extracted, embedded, textExtracted: Boolean(extractedText) };
 }
