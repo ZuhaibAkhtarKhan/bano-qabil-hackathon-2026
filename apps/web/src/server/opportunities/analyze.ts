@@ -1,5 +1,6 @@
 import type { OpportunitySource } from "@1apply/contracts";
 import { discoveryFiltersSchema, opportunityCategorySchema } from "@1apply/contracts";
+import { classifyRequirementKind } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 
@@ -28,18 +29,18 @@ export function mergeRequirementRows(extracted: Extraction) {
     rows.push({
       text: item.text,
       hard: item.hard,
-      kind: item.kind ?? "general",
+      kind: classifyRequirementKind(item.text, item.kind),
       sourceSpan: item.sourceSpan ?? null,
     });
   }
   for (const text of extracted.eligibilityCriteria) {
-    rows.push({ text, hard: true, kind: "eligibility", sourceSpan: "eligibility" });
+    rows.push({ text, hard: true, kind: classifyRequirementKind(text, "eligibility"), sourceSpan: "eligibility" });
   }
   for (const text of extracted.skills) {
-    rows.push({ text: `Skill: ${text}`, hard: false, kind: "skill", sourceSpan: "skills" });
+    rows.push({ text: `Skill: ${text}`, hard: false, kind: classifyRequirementKind(text, "skill"), sourceSpan: "skills" });
   }
   for (const text of extracted.experienceRequirements) {
-    rows.push({ text, hard: false, kind: "experience", sourceSpan: "experience" });
+    rows.push({ text, hard: false, kind: classifyRequirementKind(text, "experience"), sourceSpan: "experience" });
   }
 
   const seen = new Set<string>();

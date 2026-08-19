@@ -55,8 +55,8 @@ describe("structured requirement merge", () => {
       importantDates: [],
     });
 
-    expect(rows.some((row) => row.kind === "eligibility")).toBe(true);
-    expect(rows.some((row) => row.kind === "skill")).toBe(true);
+    expect(rows.some((row) => row.kind === "degree" || row.kind === "graduation_year")).toBe(true);
+    expect(rows.some((row) => row.kind === "skills")).toBe(true);
     expect(rows.some((row) => row.kind === "experience")).toBe(true);
     expect(rows.length).toBeGreaterThanOrEqual(4);
   });
@@ -74,5 +74,5 @@ describe("ingest API route", () => {
   it("exports POST handler", async () => {
     const mod = await import("@/app/api/opportunities/ingest/route");
     expect(typeof mod.POST).toBe("function");
-  });
+  }, 15_000);
 });

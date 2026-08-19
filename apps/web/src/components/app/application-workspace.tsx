@@ -1,17 +1,23 @@
 import Link from "next/link";
 import { applicationStatusSchema } from "@1apply/contracts";
+import {
+  computeDeadlineInfo,
+  evaluateSubmissionGuard,
+  type SubmissionInput,
+} from "@1apply/domain";
 
 import { FlashBanner } from "@/components/app/flash-banner";
+import { EligibilityPanel } from "@/components/app/intelligence/eligibility-panel";
+import { FitIndexPanel } from "@/components/app/intelligence/fit-index-panel";
+import { ResumeMatchPanel } from "@/components/app/intelligence/resume-match-panel";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ScoreIndicator } from "@/components/ui/data";
 import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { SemanticBadge, StatusPill } from "@/components/ui/status-pill";
 import {
   addQuestion,
-  addRequirement,
   analyzeApplication,
   approveAnswer,
   attachDocument,
@@ -28,6 +34,8 @@ import type { loadApplicationWorkspace } from "@/server/workspace/queries";
 const spine = [
   { href: "#analyze", label: "Analyze" },
   { href: "#eligibility", label: "Eligibility" },
+  { href: "#fit", label: "Fit Index" },
+  { href: "#resumes", label: "Resumes" },
   { href: "#answers", label: "Answers" },
   { href: "#documents", label: "Documents" },
   { href: "#review", label: "Review" },
@@ -44,7 +52,7 @@ export function ApplicationWorkspace({
   notice?: string;
   error?: string;
 }) {
-  const { application, opportunity, questions, eligibility, fit, evidenceRows, documents, attached, snapshots } = data;
+  const { application, opportunity, questions, eligibility, fit, evidenceRows, documents, attached, snapshots, requirements } = data;
   const verified = evidenceRows.filter((item) => item.verification_status === "verified" && !item.excluded_from_ai);
   const submitted = application.status === "submitted" || snapshots.length > 0;
 
@@ -100,76 +108,11 @@ export function ApplicationWorkspace({
         </Card>
       </section>
 
-      <section id="eligibility" className="mt-8 scroll-mt-8">
-        <Card className="p-6">
-        <h2 className="font-display text-2xl">Eligibility and Fit</h2>
-        <p className="mt-2 text-sm text-ink-muted">
-          Assistance only — not an official eligibility decision. Unverified evidence never counts as met.
-        </p>
-        {fit ? (
-          <div className="mt-6 grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]">
-            <ScoreIndicator score={fit.score} />
-            <dl className="grid gap-3 sm:grid-cols-4">
-              {[
-                ["Skills", fit.skills_match],
-                ["Experience", fit.experience_match],
-                ["Education", fit.education_match],
-                ["Projects", fit.project_relevance],
-              ].map(([label, value]) => (
-                <div key={String(label)} className="rounded-2xl bg-canvas p-4">
-                  <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-muted">{label}</dt>
-                  <dd className="mt-1 font-mono text-2xl">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        ) : (
-          <p className="mt-4 text-sm text-ink-muted">Run analysis to compute a Fit Index from verified evidence.</p>
-        )}
-        <ul className="mt-6 grid gap-3">
-          {eligibility.length === 0 ? (
-            <li className="text-sm text-ink-muted">No requirements yet. Add them so matching has something to check.</li>
-          ) : (
-            eligibility.map((item) => (
-              <li key={item.id} className="rounded-xl border border-line p-4 text-sm">
-                <StatusPill
-                  tone={item.state === "met" ? "mint" : item.state === "not_met" ? "coral" : "sand"}
-                >
-                  {item.state.replace("_", " ")}
-                </StatusPill>
-                <p className="mt-2">{item.explanation}</p>
-              </li>
-            ))
-          )}
-        </ul>
-        <form action={addRequirement} className="mt-6 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-          <input type="hidden" name="applicationId" value={application.id} />
-          <Field label="Add requirement" htmlFor={`requirement-${application.id}`}>
-            <Input id={`requirement-${application.id}`} name="text" required placeholder="Must be available full-time" />
-          </Field>
-          <label className="flex min-h-11 items-center gap-2 text-sm">
-            <input type="checkbox" name="hard" />
-            Hard
-          </label>
-          <Button type="submit" variant="secondary">
-            Add
-          </Button>
-        </form>
-        {data.resumeMatches.length > 0 ? (
-          <div className="mt-6">
-            <h3 className="text-sm font-medium">Resume match</h3>
-            <ul className="mt-2 grid gap-2 text-sm">
-              {data.resumeMatches.map((item) => (
-                <li key={item.id}>
-                  Score {item.score}
-                  {item.suggestion ? ` — ${item.suggestion}` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        </Card>
-      </section>
+      <div className="mt-8 grid gap-8">
+        <EligibilityPanel applicationId={application.id} eligibility={eligibility} requirements={requirements} />
+        <FitIndexPanel fit={fit} />
+        <ResumeMatchPanel matches={data.resumeMatches} documents={documents} />
+      </div>
 
       <section id="answers" className="mt-8 scroll-mt-8">
         <Card className="p-6">
@@ -376,6 +319,11 @@ export function ApplicationWorkspace({
         <p className="mt-2 text-sm text-ink-muted">
           Marking submitted freezes a snapshot. It does not contact the host, fill a form, or send unanswered questions.
         </p>
+
+        <DeadlineDisplay deadlineAt={application.deadline_at} />
+
+        <SubmissionChecklist data={data} />
+
         <ul className="mt-4 grid gap-2">
           {data.reviewItems.length === 0 ? (
             <li className="text-sm text-ink-muted">No open review items.</li>
@@ -412,6 +360,9 @@ export function ApplicationWorkspace({
                   documentId: string;
                   documentVersionId: string;
                 }>;
+                const guardData = snapshot.guard_result as { checks?: Array<{ passed: boolean }> } | null;
+                const passedCount = guardData?.checks?.filter((c) => c.passed).length ?? 0;
+                const totalCount = guardData?.checks?.length ?? 0;
                 return (
                   <li key={snapshot.id} className="rounded-lg border border-line/60 px-3 py-2">
                     <p>
@@ -423,6 +374,7 @@ export function ApplicationWorkspace({
                       {manifest.length} document version{manifest.length === 1 ? "" : "s"} frozen ·{" "}
                       {((snapshot.answer_manifest ?? []) as unknown[]).length} approved answer
                       {((snapshot.answer_manifest ?? []) as unknown[]).length === 1 ? "" : "s"}
+                      {totalCount > 0 ? ` · Guard: ${passedCount}/${totalCount} checks passed` : ""}
                     </p>
                   </li>
                 );
@@ -455,6 +407,167 @@ export function ApplicationWorkspace({
         </div>
         </Card>
       </section>
+
+      {/* ── Application timeline ───────────────────────────────── */}
+      <ApplicationTimeline emailEvents={data.emailEvents ?? []} calendarEvents={data.calendarEvents ?? []} submittedAt={application.submitted_at} />
     </WorkspaceMain>
+  );
+}
+
+const EMAIL_KIND_LABELS: Record<string, string> = {
+  application_received: "Application received",
+  interview_invitation: "Interview invitation",
+  assessment: "Assessment",
+  rejection: "Rejection",
+  offer: "Offer",
+  follow_up_request: "Follow-up request",
+};
+
+function ApplicationTimeline({
+  emailEvents,
+  calendarEvents,
+  submittedAt,
+}: {
+  emailEvents: Array<{ id: string; event_kind: string; subject: string | null; sender_domain: string | null; occurred_at: string; interview_detected: boolean; confirmed?: boolean }>;
+  calendarEvents: Array<{ id: string; title: string; starts_at: string; confirmed: boolean; location: string | null; meeting_url: string | null }>;
+  submittedAt: string | null;
+}) {
+  const fmt = (iso: string) =>
+    new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
+
+  const events: Array<{ date: string; kind: string; label: string; detail: string; tone: "mint" | "coral" | "sand" | "muted" }> = [];
+
+  if (submittedAt) {
+    events.push({ date: submittedAt, kind: "submitted", label: "Submitted", detail: "Application snapshot frozen.", tone: "mint" });
+  }
+  for (const e of emailEvents) {
+    events.push({
+      date: e.occurred_at,
+      kind: e.event_kind,
+      label: EMAIL_KIND_LABELS[e.event_kind] ?? e.event_kind,
+      detail: [e.sender_domain ?? "", e.subject ? `"${e.subject.slice(0, 80)}"` : ""].filter(Boolean).join(" · "),
+      tone: e.event_kind === "rejection" ? "coral" : e.event_kind === "offer" || e.event_kind === "interview_invitation" ? "mint" : "sand",
+    });
+  }
+  for (const c of calendarEvents) {
+    events.push({
+      date: c.starts_at,
+      kind: c.confirmed ? "interview_scheduled" : "interview_pending",
+      label: c.confirmed ? "Interview scheduled" : "Interview (pending confirmation)",
+      detail: [c.title, c.location, c.meeting_url].filter(Boolean).join(" · ").slice(0, 120),
+      tone: c.confirmed ? "mint" : "sand",
+    });
+  }
+
+  events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  if (events.length === 0) return null;
+
+  return (
+    <section className="mt-10">
+      <Card>
+        <h2 className="text-base font-semibold">Application timeline</h2>
+        <ol className="mt-4 space-y-4">
+          {events.map((ev, i) => (
+            <li key={i} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <span
+                  className={`h-3 w-3 rounded-full mt-1 ${ev.tone === "mint" ? "bg-mint" : ev.tone === "coral" ? "bg-coral" : ev.tone === "sand" ? "bg-sand" : "bg-ink-muted/30"}`}
+                />
+                {i < events.length - 1 && <div className="mt-1 h-full w-px bg-line" />}
+              </div>
+              <div className="pb-4">
+                <p className="text-sm font-medium">{ev.label}</p>
+                <p className="text-xs text-ink-muted">{fmt(ev.date)}</p>
+                {ev.detail && <p className="mt-0.5 text-xs text-ink-muted">{ev.detail}</p>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </Card>
+    </section>
+  );
+}
+
+function DeadlineDisplay({ deadlineAt }: { deadlineAt: string | null }) {
+  if (!deadlineAt) return null;
+  const info = computeDeadlineInfo(deadlineAt, null);
+  const tones: Record<string, string> = {
+    overdue: "bg-coral-soft text-coral border-coral/20",
+    imminent: "bg-coral-soft text-coral border-coral/20",
+    soon: "bg-sand-soft text-sand border-sand/20",
+    upcoming: "bg-mint-soft text-teal border-teal/20",
+    none: "bg-canvas text-ink-muted border-line",
+  };
+  return (
+    <div className={`mt-4 rounded-xl border p-3 text-sm ${tones[info.urgency] ?? tones.none}`}>
+      <p className="font-medium">{info.label}</p>
+      {info.hoursRemaining !== null && info.hoursRemaining > 0 ? (
+        <p className="mt-1 text-xs">
+          {info.hoursRemaining < 24
+            ? `${Math.round(info.hoursRemaining)} hours remaining`
+            : `${Math.round(info.hoursRemaining / 24)} days remaining`}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SubmissionChecklist({ data }: { data: Workspace }) {
+  const { application, questions, eligibility, fit, attached, snapshots, reviewItems, resumeMatches } = data;
+  const approved = questions.filter((q) => q.approved);
+  const recommended = resumeMatches.find((r) => (r as { recommended?: boolean }).recommended);
+
+  const guardInput: SubmissionInput = {
+    applicationId: application.id,
+    status: application.status,
+    questions: questions.map((q) => ({ id: q.id, prompt: q.prompt })),
+    approvedAnswerIds: new Map(approved.map((q) => [q.id, q.approved!.id])),
+    attachedDocumentIds: attached.map((a) => a.document_id as string),
+    resumeMatchRecommended: recommended ? (recommended.document_id as string) : null,
+    eligibilityResults: eligibility.map((e) => ({
+      state: e.state as string,
+      explanation: e.explanation as string,
+    })),
+    reviewItems: reviewItems.map((r) => ({
+      resolved: r.resolved as boolean,
+      prompt: r.prompt as string,
+    })),
+    snapshots: snapshots.map((s) => ({ id: s.id as string })),
+    fitScore: fit?.score as number | null ?? null,
+    fitMissing: (fit?.missing as string[]) ?? [],
+    hasSignatureField: false,
+    hasPaymentField: false,
+    hasCaptcha: false,
+    hasSecurityChallenge: false,
+    userAuthenticated: true,
+  };
+
+  const guard = evaluateSubmissionGuard(guardInput);
+
+  return (
+    <div className="mt-4 rounded-xl border border-line bg-white p-4">
+      <h3 className="text-sm font-medium">
+        Submission checklist — {guard.safe ? "Ready" : `${guard.blockers.length} blocker(s)`}
+      </h3>
+      <ul className="mt-3 grid gap-1.5">
+        {guard.checks.map((check) => (
+          <li key={check.kind} className="flex items-start gap-2 text-sm">
+            <span className={`mt-0.5 inline-block h-4 w-4 flex-shrink-0 rounded-full text-center text-[10px] leading-4 font-bold ${check.passed ? "bg-mint text-teal" : check.blocking ? "bg-coral-soft text-coral" : "bg-sand-soft text-sand"}`}>
+              {check.passed ? "\u2713" : check.blocking ? "\u2717" : "!"}
+            </span>
+            <span>
+              <span className="font-medium">{check.label}</span>
+              <span className="text-ink-muted"> — {check.reason}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {guard.warnings.length > 0 ? (
+        <p className="mt-3 text-xs text-ink-muted">
+          {guard.warnings.length} warning(s) — review before submitting, but these won&apos;t block the snapshot.
+        </p>
+      ) : null}
+    </div>
   );
 }

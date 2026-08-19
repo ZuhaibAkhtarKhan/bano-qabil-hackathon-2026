@@ -1,12 +1,17 @@
 {
   "name": "@1apply/extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@1apply/form-engine": "*"
   },
   "devDependencies": {
+    "esbuild": "0.25.5",
     "typescript": "5.9.2"
   }
 }

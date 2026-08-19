@@ -3,17 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <title>1-Apply</title>
-    <style>
-      body {
-        font: 14px/1.4 system-ui, sans-serif;
-        margin: 16px;
-        width: 280px;
-        color: #0e0e0e;
-      }
-    </style>
+    <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <p><strong>1-Apply</strong></p>
-    <p>Autofill is not live. This extension will never click submit, CAPTCHA, signature, or payment controls.</p>
+    <header>
+      <p class="eyebrow">1-Apply</p>
+      <h1>Prepare, don’t submit</h1>
+    </header>
+    <p id="status" class="muted">Connect the extension in Options if Save to 1-Apply is disabled.</p>
+    <div class="row">
+      <button id="save" type="button">Save to 1-Apply</button>
+      <button id="scan" type="button" class="secondary">Scan form</button>
+    </div>
+    <label class="field">
+      Application
+      <select id="application"></select>
+    </label>
+    <p id="hazard" class="hazard hidden"></p>
+    <section id="preview" class="hidden">
+      <h2>Preview</h2>
+      <p class="muted">Field · Value · Source · Confidence. Approve what 1-Apply may fill. Submit stays yours.</p>
+      <div id="rows"></div>
+      <button id="fill" type="button">Fill approved fields</button>
+    </section>
+    <p id="log" class="log"></p>
+    <p class="footer"><button id="options" type="button" class="ghost">Options</button></p>
+    <script src="popup.js" type="module"></script>
   </body>
 </html>

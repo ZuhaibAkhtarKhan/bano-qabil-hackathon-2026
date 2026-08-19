@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 
 import { applicationStatusSchema } from "@1apply/contracts";
+import {
+  evaluateSubmissionGuard,
+  type SubmissionInput,
+} from "@1apply/domain";
 
 import {
   groundedDraftModelSchema,
@@ -10,6 +14,7 @@ import {
 } from "@/server/ai/openai";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import {
+  classifyRequirementKind,
   computeFitIndex,
   evaluateEligibility,
   rankResumes,
@@ -73,6 +78,7 @@ export async function addRequirement(formData: FormData) {
     opportunity_id: application.opportunity_id,
     text,
     hard: String(formData.get("hard") ?? "") === "on",
+    kind: classifyRequirementKind(text),
     confidence: 1,
     source_span: "manual",
   });
@@ -124,17 +130,38 @@ export async function analyzeApplication(formData: FormData) {
     supabase,
     { actor, type: "eligibility_evaluate", inputRef: applicationId },
     async () => {
-      const [{ data: opportunity }, { data: requirements }, evidence] = await Promise.all([
+      const [{ data: opportunity }, { data: requirements }, { data: profile }, evidence] = await Promise.all([
         supabase
           .from("opportunities")
           .select("id, title, organization, raw_excerpt, location, category")
           .eq("id", application.opportunity_id)
           .single(),
-        supabase.from("requirements").select("id, text, hard").eq("opportunity_id", application.opportunity_id),
+        supabase.from("requirements").select("id, text, hard, kind").eq("opportunity_id", application.opportunity_id),
+        supabase
+          .from("profiles")
+          .select("location_city, location_country, availability, work_authorization")
+          .eq("id", user.id)
+          .maybeSingle(),
         loadEvidence(supabase),
       ]);
 
-      const eligibility = evaluateEligibility(requirements ?? [], evidence);
+      const candidate = {
+        locationCity: profile?.location_city ?? null,
+        locationCountry: profile?.location_country ?? null,
+        availability: profile?.availability ?? null,
+        workAuthorization: profile?.work_authorization ?? null,
+      };
+
+      const eligibility = evaluateEligibility(
+        (requirements ?? []).map((item) => ({
+          id: item.id,
+          text: item.text,
+          hard: item.hard,
+          kind: item.kind,
+        })),
+        evidence,
+        candidate,
+      );
       await supabase.from("eligibility_results").delete().eq("application_id", applicationId);
       if (eligibility[0]?.requirementId !== "none") {
         await supabase.from("eligibility_results").insert(
@@ -145,6 +172,8 @@ export async function analyzeApplication(formData: FormData) {
             state: item.state,
             explanation: item.explanation,
             evidence_id: item.evidenceId,
+            requirement_kind: item.kind,
+            display_state: item.displayState,
           })),
         );
       }
@@ -160,7 +189,7 @@ export async function analyzeApplication(formData: FormData) {
         .filter(Boolean)
         .join(" ");
 
-      const fit = computeFitIndex({ eligibility, evidence, opportunityText });
+      const fit = computeFitIndex({ eligibility, evidence, opportunityText, profile: candidate });
       await supabase.from("fit_evaluations").delete().eq("application_id", applicationId);
       await supabase.from("fit_evaluations").insert({
         user_id: user.id,
@@ -172,12 +201,27 @@ export async function analyzeApplication(formData: FormData) {
         project_relevance: fit.projectRelevance,
         eligibility: fit.eligibility,
         missing: fit.missing,
+        strengths: fit.strengths,
+        explanation: fit.explanation,
+        should_apply: fit.shouldApply,
+        factors: fit.factors,
       });
 
       const { data: documents } = await supabase
         .from("documents")
         .select("id, label, type, current_version_id")
-        .eq("type", "resume");
+        .in("type", ["resume", "resume_variant"]);
+      const versionIds = (documents ?? [])
+        .map((item) => item.current_version_id as string | null)
+        .filter((id): id is string => Boolean(id));
+      const { data: chunks } = versionIds.length
+        ? await supabase.from("document_chunks").select("document_version_id, content").in("document_version_id", versionIds)
+        : { data: [] as Array<{ document_version_id: string; content: string }> };
+      const contentByVersion = new Map<string, string>();
+      for (const chunk of chunks ?? []) {
+        const previous = contentByVersion.get(chunk.document_version_id) ?? "";
+        contentByVersion.set(chunk.document_version_id, `${previous} ${chunk.content}`.trim());
+      }
       const resumes = (documents ?? [])
         .filter((item) => item.current_version_id)
         .map((item) => ({
@@ -185,6 +229,7 @@ export async function analyzeApplication(formData: FormData) {
           documentVersionId: item.current_version_id as string,
           label: item.label as string,
           type: item.type as string,
+          content: contentByVersion.get(item.current_version_id as string) ?? "",
         }));
       const ranked = rankResumes(opportunityText, resumes);
       await supabase.from("resume_matches").delete().eq("application_id", applicationId);
@@ -197,6 +242,9 @@ export async function analyzeApplication(formData: FormData) {
             document_version_id: item.documentVersionId,
             score: item.score,
             suggestion: item.suggestion,
+            track: item.track,
+            explanation: item.explanation,
+            recommended: item.recommended,
           })),
         );
       }
@@ -480,7 +528,7 @@ export async function markSubmitted(formData: FormData) {
   const applicationId = String(formData.get("applicationId") ?? "");
   const { data: application } = await supabase
     .from("applications")
-    .select("id, status")
+    .select("id, status, deadline_at")
     .eq("id", applicationId)
     .maybeSingle();
   if (!application) {
@@ -490,11 +538,40 @@ export async function markSubmitted(formData: FormData) {
     redirectWith(applicationPath(applicationId), { notice: "already_submitted" }, "review");
   }
 
-  const [{ data: questions }, { data: attached }] = await Promise.all([
+  const [
+    { data: questions },
+    { data: attached },
+    { data: eligibilityResults },
+    { data: reviewItems },
+    { data: snapshots },
+    { data: fitRow },
+    { data: resumeMatches },
+  ] = await Promise.all([
     supabase.from("application_questions").select("id, prompt").eq("application_id", applicationId),
     supabase
       .from("application_documents")
       .select("document_id, document_version_id")
+      .eq("application_id", applicationId),
+    supabase
+      .from("eligibility_results")
+      .select("state, explanation")
+      .eq("application_id", applicationId),
+    supabase
+      .from("review_items")
+      .select("resolved, prompt")
+      .eq("application_id", applicationId),
+    supabase
+      .from("submission_snapshots")
+      .select("id")
+      .eq("application_id", applicationId),
+    supabase
+      .from("fit_evaluations")
+      .select("score, missing")
+      .eq("application_id", applicationId)
+      .maybeSingle(),
+    supabase
+      .from("resume_matches")
+      .select("document_id, recommended")
       .eq("application_id", applicationId),
   ]);
 
@@ -509,6 +586,88 @@ export async function markSubmitted(formData: FormData) {
       .map((row) => [row.question_id, row.id]),
   );
 
+  const recommended = (resumeMatches ?? []).find(
+    (item) => (item as { recommended?: boolean }).recommended,
+  );
+
+  const guardInput: SubmissionInput = {
+    applicationId,
+    status: application.status,
+    questions: (questions ?? []).map((q) => ({ id: q.id, prompt: q.prompt })),
+    approvedAnswerIds: approvedByQuestion,
+    attachedDocumentIds: (attached ?? []).map((item) => item.document_id as string),
+    resumeMatchRecommended: recommended ? (recommended.document_id as string) : null,
+    eligibilityResults: (eligibilityResults ?? []).map((e) => ({
+      state: e.state as string,
+      explanation: e.explanation as string,
+    })),
+    reviewItems: (reviewItems ?? []).map((r) => ({
+      resolved: r.resolved as boolean,
+      prompt: r.prompt as string,
+    })),
+    snapshots: (snapshots ?? []).map((s) => ({ id: s.id as string })),
+    fitScore: fitRow?.score as number | null ?? null,
+    fitMissing: (fitRow?.missing as string[]) ?? [],
+    hasSignatureField: false,
+    hasPaymentField: false,
+    hasCaptcha: false,
+    hasSecurityChallenge: false,
+    userAuthenticated: true,
+  };
+
+  const guard = evaluateSubmissionGuard(guardInput);
+
+  await supabase.from("submission_attempts").insert({
+    user_id: user.id,
+    application_id: applicationId,
+    idempotency_key: guard.idempotencyKey,
+    status: guard.safe ? "pending" : "failed",
+    guard_result: guard,
+    error_message: guard.safe
+      ? null
+      : guard.blockers.map((b) => b.reason).join("; "),
+  });
+
+  if (!guard.safe) {
+    const blockerText = guard.blockers.map((b) => `${b.label}: ${b.reason}`).join("\n");
+    await notify(
+      supabase,
+      user.id,
+      applicationId,
+      "Submission blocked",
+      `${guard.blockers.length} blocking issue(s) prevent submission:\n${blockerText}`,
+    );
+    revalidateApplication(applicationId);
+    redirectWith(applicationPath(applicationId), { error: "snapshot" }, "review");
+  }
+
+  const { data: duplicateAttempt } = await supabase
+    .from("submission_attempts")
+    .select("id")
+    .eq("application_id", applicationId)
+    .eq("idempotency_key", guard.idempotencyKey)
+    .eq("status", "completed")
+    .maybeSingle();
+
+  if (duplicateAttempt) {
+    await supabase
+      .from("submission_attempts")
+      .update({ status: "duplicate" })
+      .eq("application_id", applicationId)
+      .eq("idempotency_key", guard.idempotencyKey)
+      .neq("status", "completed");
+
+    await notify(
+      supabase,
+      user.id,
+      applicationId,
+      "Duplicate submission prevented",
+      "An identical submission already exists. No new snapshot was created.",
+    );
+    revalidateApplication(applicationId);
+    redirectWith(applicationPath(applicationId), { notice: "already_submitted" }, "review");
+  }
+
   const unanswered = (questions ?? []).filter((question) => !approvedByQuestion.has(question.id));
   if (unanswered.length > 0) {
     await notify(
@@ -519,6 +678,19 @@ export async function markSubmitted(formData: FormData) {
       `${unanswered.length} question(s) had no approved answer. 1-Apply never submits on your behalf.`,
     );
   }
+
+  const { data: opportunity } = await supabase
+    .from("opportunities")
+    .select("id, title, organization, source_url, category, location, deadline_at, raw_excerpt")
+    .eq("id", (await supabase.from("applications").select("opportunity_id").eq("id", applicationId).single()).data!.opportunity_id)
+    .single();
+
+  const evidenceIds = [...new Set(
+    (approved ?? [])
+      .filter((row) => (questions ?? []).some((q) => q.id === row.question_id))
+      .map(() => [])
+      .flat(),
+  )];
 
   const snapshot = freezeSubmissionManifest({
     answers: [...approvedByQuestion.entries()].map(([questionId, answerVersionId]) => ({
@@ -531,16 +703,49 @@ export async function markSubmitted(formData: FormData) {
     })),
   });
 
-  const { error } = await supabase.from("submission_snapshots").insert({
-    user_id: user.id,
-    application_id: applicationId,
-    submitted_at: snapshot.submittedAt,
-    answer_manifest: snapshot.answerManifest,
-    document_manifest: snapshot.documentManifest,
-  });
+  const { data: snapshotRow, error } = await supabase
+    .from("submission_snapshots")
+    .insert({
+      user_id: user.id,
+      application_id: applicationId,
+      submitted_at: snapshot.submittedAt,
+      answer_manifest: snapshot.answerManifest,
+      document_manifest: snapshot.documentManifest,
+      opportunity_snapshot: opportunity
+        ? {
+            title: opportunity.title,
+            organization: opportunity.organization,
+            sourceUrl: opportunity.source_url,
+            category: opportunity.category,
+            location: opportunity.location,
+            deadlineAt: opportunity.deadline_at,
+            excerpt: (opportunity.raw_excerpt ?? "").slice(0, 2000),
+          }
+        : null,
+      evidence_manifest: evidenceIds,
+      idempotency_key: guard.idempotencyKey,
+      guard_result: guard,
+    })
+    .select("id")
+    .single();
+
   if (error) {
+    await supabase
+      .from("submission_attempts")
+      .update({ status: "failed", error_message: error.message })
+      .eq("application_id", applicationId)
+      .eq("idempotency_key", guard.idempotencyKey)
+      .eq("status", "pending");
+
     redirectWith(applicationPath(applicationId), { error: "snapshot" }, "review");
   }
+
+  await supabase
+    .from("submission_attempts")
+    .update({ status: "completed", snapshot_id: snapshotRow.id })
+    .eq("application_id", applicationId)
+    .eq("idempotency_key", guard.idempotencyKey)
+    .eq("status", "pending");
 
   await supabase
     .from("applications")
@@ -556,7 +761,7 @@ export async function markSubmitted(formData: FormData) {
     user.id,
     applicationId,
     "Submission snapshot frozen",
-    "Approved answers and attached document versions were recorded. You still submit to the host yourself.",
+    `Approved answers and attached document versions were recorded. Guard passed ${guard.checks.filter((c) => c.passed).length}/${guard.checks.length} checks. You still submit to the host yourself.`,
   );
 
   revalidateApplication(applicationId);

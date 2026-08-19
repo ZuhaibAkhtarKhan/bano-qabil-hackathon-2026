@@ -57,7 +57,18 @@ export const opportunityExtractionSchema = z.object({
       text: z.string(),
       hard: z.boolean(),
       kind: z
-        .enum(["eligibility", "skill", "experience", "education", "document", "general"])
+        .enum([
+          "eligibility",
+          "skill",
+          "experience",
+          "education",
+          "degree",
+          "graduation_year",
+          "location",
+          "availability",
+          "document",
+          "general",
+        ])
         .default("general"),
       sourceSpan: z.string().nullable().optional(),
     }),

@@ -37,6 +37,7 @@ Apply migrations in order:
 - `supabase/migrations/20260818040000_memory.sql`
 - `supabase/migrations/20260818050000_documents_evidence.sql`
 - `supabase/migrations/20260818060000_opportunity_intelligence.sql`
+- `supabase/migrations/20260818070000_phase8_intelligence.sql`
 
 ```bash
 npm run lint

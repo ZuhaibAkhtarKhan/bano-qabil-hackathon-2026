@@ -4,6 +4,8 @@ export {
   documentTypeSchema,
   documentVersionStatusSchema,
   eligibilityStateSchema,
+  requirementKindSchema,
+  resumeTrackSchema,
   experienceKindSchema,
   extractionStatusSchema,
   jobLifecycleSchema,
@@ -20,6 +22,8 @@ export {
   type DocumentType,
   type DocumentVersionStatus,
   type EligibilityState,
+  type RequirementKind,
+  type ResumeTrack,
   type ExperienceKind,
   type ExtractionStatus,
   type JobLifecycle,
@@ -32,6 +36,10 @@ export {
   type ReminderChannel,
   type ReminderStatus,
   type VerificationStatus,
+  notificationStateSchema,
+  deadlineUrgencySchema,
+  type NotificationState,
+  type DeadlineUrgency,
 } from "./enums";
 
 export {
@@ -74,10 +82,12 @@ export {
   fitIndexSchema,
   opportunityRecordSchema,
   requirementRecordSchema,
+  resumeMatchSchema,
   type EligibilityResult,
   type FitIndex,
   type OpportunityRecord,
   type RequirementRecord,
+  type ResumeMatch,
 } from "./opportunities";
 
 export {
@@ -130,3 +140,16 @@ export {
   type ProfileLink,
   type SkillRecord,
 } from "./architecture";
+
+export {
+  calendarEventRecordSchema,
+  emailCategorySchema,
+  emailEventRecordSchema,
+  integrationTokenSchema,
+  oauthStateSchema,
+  type CalendarEventRecord,
+  type EmailCategory,
+  type EmailEventRecord,
+  type IntegrationToken,
+  type OAuthState,
+} from "./integrations";

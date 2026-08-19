@@ -53,6 +53,7 @@ describe("dashboard buckets", () => {
       deadlines: [],
       attention: [],
       recent: [],
+      prioritized: [],
     });
   });
 

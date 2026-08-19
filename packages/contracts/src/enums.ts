@@ -45,7 +45,31 @@ export const applicationStatusSchema = z.enum([
   "withdrawn",
   "archived",
 ]);
-export const eligibilityStateSchema = z.enum(["met", "not_met", "unclear", "not_evaluated"]);
+export const eligibilityStateSchema = z.enum([
+  "met",
+  "not_met",
+  "unclear",
+  "not_evaluated",
+  "partial",
+  "needs_confirmation",
+]);
+export const requirementKindSchema = z.enum([
+  "education",
+  "degree",
+  "graduation_year",
+  "location",
+  "experience",
+  "skills",
+  "availability",
+  "other",
+]);
+export const resumeTrackSchema = z.enum([
+  "software_engineering",
+  "ai_ml",
+  "web_development",
+  "research",
+  "general",
+]);
 export const jobStateSchema = z.enum([
   "queued",
   "running",
@@ -99,6 +123,22 @@ export const memoryConflictStatusSchema = z.enum(["open", "resolved"]);
 export const reminderChannelSchema = z.enum(["in_app", "email"]);
 export const reminderStatusSchema = z.enum(["scheduled", "sent", "cancelled"]);
 
+export const notificationStateSchema = z.enum([
+  "incomplete",
+  "deadline_approaching",
+  "human_action_required",
+  "answer_required",
+  "document_required",
+  "submission_ready",
+  "submission_completed",
+  "submission_failed",
+]);
+
+export const deadlineUrgencySchema = z.enum(["none", "upcoming", "soon", "imminent", "overdue"]);
+
+export type NotificationState = z.infer<typeof notificationStateSchema>;
+export type DeadlineUrgency = z.infer<typeof deadlineUrgencySchema>;
+
 export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
 export type DocumentType = z.infer<typeof documentTypeSchema>;
 export type DocumentVersionStatus = z.infer<typeof documentVersionStatusSchema>;
@@ -106,6 +146,8 @@ export type OpportunityCategory = z.infer<typeof opportunityCategorySchema>;
 export type OpportunitySource = z.infer<typeof opportunitySourceSchema>;
 export type ApplicationStatus = z.infer<typeof applicationStatusSchema>;
 export type EligibilityState = z.infer<typeof eligibilityStateSchema>;
+export type RequirementKind = z.infer<typeof requirementKindSchema>;
+export type ResumeTrack = z.infer<typeof resumeTrackSchema>;
 export type JobState = z.infer<typeof jobStateSchema>;
 export type JobLifecycle = z.infer<typeof jobLifecycleSchema>;
 export type JobType = z.infer<typeof jobTypeSchema>;

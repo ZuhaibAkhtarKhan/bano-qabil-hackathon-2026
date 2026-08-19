@@ -53,12 +53,13 @@ describe("eligibility", () => {
     expect(verdict?.evidenceId).toBe("11111111-1111-4111-8111-111111111111");
   });
 
-  it("stays unclear instead of inventing a miss or a pass", () => {
+  it("keeps unknown availability as NEEDS CONFIRMATION instead of inventing a miss or a pass", () => {
     const [verdict] = evaluateEligibility(
       [{ id: "r1", text: "Six month full-time availability in Zurich", hard: true }],
       evidence,
     );
-    expect(verdict?.state).toBe("unclear");
+    expect(verdict?.state).toBe("needs_confirmation");
+    expect(verdict?.displayState).toBe("NEEDS CONFIRMATION");
   });
 });
 
@@ -93,6 +94,6 @@ describe("resume matching", () => {
     const [best] = rankResumes("machine learning research residency", [
       { documentId: "d1", documentVersionId: "v1", label: "General resume", type: "resume" },
     ]);
-    expect(best?.suggestion).toContain("weak lexical match");
+    expect(best?.suggestion?.toLowerCase()).toContain("do not invent");
   });
 });

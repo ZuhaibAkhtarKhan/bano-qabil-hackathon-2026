@@ -43,7 +43,7 @@ export function ApplicationSummary({ row }: { row: ApplicationListRow }) {
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <div>
           <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-muted">Fit Index</dt>
-          <dd className="mt-1 font-mono text-xl">{fit ? fit.score : "—"}</dd>
+          <dd className="mt-1 font-mono text-xl">{fit ? `${fit.score} / 100` : "—"}</dd>
         </div>
         <div className="sm:col-span-2">
           <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-muted">Next action</dt>

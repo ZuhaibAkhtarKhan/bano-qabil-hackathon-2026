@@ -29,6 +29,8 @@ export const FLASH = {
   conflict_resolved: "Conflict resolved. The chosen value is verified; other sources were rejected.",
   conflict_detected: "New facts were extracted. Review conflicts before verifying.",
   version_selected: "Selected version is now the latest for this document.",
+  submission_blocked: "Submission blocked. See the checklist for blocking issues.",
+  duplicate_prevented: "Duplicate submission prevented. An identical snapshot already exists.",
 } as const;
 
 export const ERRORS = {

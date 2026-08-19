@@ -180,8 +180,10 @@ export async function loadApplicationWorkspace(applicationId: string) {
     { data: reviewItems },
     { data: evidence },
     { data: documents },
+    { data: applicationEmailEvents },
+    { data: applicationCalendarEvents },
   ] = await Promise.all([
-    supabase.from("requirements").select("id, text, hard").eq("opportunity_id", application.opportunity_id),
+        supabase.from("requirements").select("id, text, hard, kind").eq("opportunity_id", application.opportunity_id),
     supabase
       .from("application_questions")
       .select("id, prompt, limit_value, limit_unit, sort_order")
@@ -193,18 +195,18 @@ export async function loadApplicationWorkspace(applicationId: string) {
       .order("created_at", { ascending: false }),
     supabase
       .from("eligibility_results")
-      .select("id, requirement_id, state, explanation, evidence_id")
+      .select("id, requirement_id, state, explanation, evidence_id, requirement_kind, display_state")
       .eq("application_id", applicationId),
     supabase
       .from("fit_evaluations")
       .select(
-        "score, skills_match, experience_match, education_match, project_relevance, eligibility, missing",
+        "score, skills_match, experience_match, education_match, project_relevance, eligibility, missing, strengths, explanation, should_apply, factors",
       )
       .eq("application_id", applicationId)
       .maybeSingle(),
     supabase
       .from("resume_matches")
-      .select("id, document_id, document_version_id, score, suggestion")
+      .select("id, document_id, document_version_id, score, suggestion, track, explanation, recommended")
       .eq("application_id", applicationId)
       .order("score", { ascending: false }),
     supabase
@@ -213,7 +215,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
       .eq("application_id", applicationId),
     supabase
       .from("submission_snapshots")
-      .select("id, submitted_at, answer_manifest, document_manifest")
+      .select("id, submitted_at, answer_manifest, document_manifest, opportunity_snapshot, evidence_manifest, field_manifest, idempotency_key, guard_result")
       .eq("application_id", applicationId)
       .order("submitted_at", { ascending: false }),
     supabase
@@ -233,6 +235,16 @@ export async function loadApplicationWorkspace(applicationId: string) {
         "id, type, label, current_version_id, document_versions ( id, version_label, status, created_at, original_filename )",
       )
       .eq("user_id", user.id),
+    supabase
+      .from("email_events")
+      .select("id, event_kind, subject, sender_domain, occurred_at, association_confidence, interview_detected, user_corrected, calendar_event_id")
+      .eq("application_id", applicationId)
+      .order("occurred_at", { ascending: false }),
+    supabase
+      .from("calendar_events")
+      .select("id, title, starts_at, ends_at, location, meeting_url, timezone, confirmed, notes")
+      .eq("application_id", applicationId)
+      .order("starts_at", { ascending: true }),
   ]);
 
   const answersByQuestion = new Map<string, NonNullable<typeof answers>>();
@@ -260,6 +272,28 @@ export async function loadApplicationWorkspace(applicationId: string) {
     evidence: ((evidence ?? []) as EvidenceRow[]).map(mapEvidence),
     evidenceRows: (evidence ?? []) as EvidenceRow[],
     documents: documents ?? [],
+    emailEvents: (applicationEmailEvents ?? []) as Array<{
+      id: string;
+      event_kind: string;
+      subject: string | null;
+      sender_domain: string | null;
+      occurred_at: string;
+      association_confidence: number | null;
+      interview_detected: boolean;
+      user_corrected: boolean;
+      calendar_event_id: string | null;
+    }>,
+    calendarEvents: (applicationCalendarEvents ?? []) as Array<{
+      id: string;
+      title: string;
+      starts_at: string;
+      ends_at: string | null;
+      location: string | null;
+      meeting_url: string | null;
+      timezone: string | null;
+      confirmed: boolean;
+      notes: string | null;
+    }>,
   };
 }
 
@@ -277,18 +311,57 @@ export async function loadNotificationsWorkspace() {
 
 export async function loadIntegrationsWorkspace() {
   const { supabase } = await requireWorkspace();
-  const { data } = await supabase
-    .from("integrations")
-    .select("id, provider, kind, status, account_label, created_at")
-    .order("created_at", { ascending: false });
+  const [{ data: integrations }, { data: emailEvents }, { data: calendarEvents }] = await Promise.all([
+    supabase
+      .from("integrations")
+      .select("id, provider, kind, status, account_label, created_at")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("email_events")
+      .select("id, event_kind, subject, from_address, sender_domain, occurred_at, application_id, association_confidence, interview_detected, user_corrected, calendar_event_id")
+      .order("occurred_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("calendar_events")
+      .select("id, title, starts_at, ends_at, location, meeting_url, timezone, confirmed, application_id, email_event_id, notes")
+      .order("starts_at", { ascending: true })
+      .limit(20),
+  ]);
+
   return {
-    integrations: (data ?? []) as Array<{
+    integrations: (integrations ?? []) as Array<{
       id: string;
       provider: string;
       kind: string;
       status: string;
       account_label: string | null;
       created_at: string;
+    }>,
+    emailEvents: (emailEvents ?? []) as Array<{
+      id: string;
+      event_kind: string;
+      subject: string | null;
+      from_address: string | null;
+      sender_domain: string | null;
+      occurred_at: string;
+      application_id: string | null;
+      association_confidence: number | null;
+      interview_detected: boolean;
+      user_corrected: boolean;
+      calendar_event_id: string | null;
+    }>,
+    calendarEvents: (calendarEvents ?? []) as Array<{
+      id: string;
+      title: string;
+      starts_at: string;
+      ends_at: string | null;
+      location: string | null;
+      meeting_url: string | null;
+      timezone: string | null;
+      confirmed: boolean;
+      application_id: string | null;
+      email_event_id: string | null;
+      notes: string | null;
     }>,
   };
 }

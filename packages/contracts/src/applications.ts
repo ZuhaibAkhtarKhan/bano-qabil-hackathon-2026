@@ -46,6 +46,11 @@ export const submissionSnapshotSchema = z.object({
       documentVersionId: uuidSchema,
     }),
   ),
+  opportunitySnapshot: z.record(z.string(), z.unknown()).nullable().optional(),
+  evidenceManifest: z.array(uuidSchema).nullable().optional(),
+  fieldManifest: z.array(z.record(z.string(), z.unknown())).nullable().optional(),
+  idempotencyKey: z.string().nullable().optional(),
+  guardResult: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export const fillPlanMappingSchema = z.object({

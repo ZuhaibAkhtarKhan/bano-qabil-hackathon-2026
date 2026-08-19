@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>1-Apply extension</title>
+    <link rel="stylesheet" href="popup.css" />
+    <style>body { width: auto; max-width: 40rem; margin: 2rem auto; }</style>
+  </head>
+  <body>
+    <p class="eyebrow">1-Apply</p>
+    <h1>Extension options</h1>
+    <p class="muted">No backend secrets live here. Pair with a token from 1-Apply Settings. The extension never submits, signs, pays, or bypasses CAPTCHA.</p>
+    <label class="field">App URL <input id="appUrl" type="url" placeholder="http://localhost:3000" /></label>
+    <label class="field">Pairing token <input id="token" type="password" autocomplete="off" /></label>
+    <div class="row">
+      <button id="save" type="button">Save connection</button>
+    </div>
+    <p id="log" class="log"></p>
+    <script src="options.js" type="module"></script>
+  </body>
+</html>

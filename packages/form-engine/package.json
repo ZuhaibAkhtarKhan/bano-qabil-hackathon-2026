@@ -15,6 +15,7 @@
     "@eslint/js": "9.35.0",
     "@types/node": "24.3.0",
     "eslint": "9.35.0",
+    "happy-dom": "18.0.1",
     "typescript": "5.9.2",
     "typescript-eslint": "8.43.0",
     "vitest": "3.2.4"

@@ -11,7 +11,7 @@ Return JSON with:
 - eligibilityCriteria: string[]
 - skills: string[]
 - experienceRequirements: string[]
-- requirements: [{ text, hard, kind, sourceSpan }] where kind is eligibility|skill|experience|education|document|general
+- requirements: [{ text, hard, kind, sourceSpan }] where kind is eligibility|skill|experience|education|degree|graduation_year|location|availability|document|general
 - questions: [{ prompt, limitValue, limitUnit }]
 - requiredDocuments: [{ label, required }]
 - importantDates: [{ label, date }]
