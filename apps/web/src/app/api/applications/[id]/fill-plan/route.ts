@@ -6,6 +6,9 @@ import { z } from "zod";
 import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
 import { loadMemoryCatalog } from "@/server/extension/memory-catalog";
+import { enrichAiAnswerableMappings } from "@/server/extension/enrich-ai-answers";
+import { enrichDocumentAttachments } from "@/server/extension/enrich-documents";
+import { enrichYesNoEligibilityMappings } from "@/server/extension/enrich-yes-no";
 import { recordAuditEvent } from "@/server/audit";
 
 const fieldSchema = z.object({
@@ -42,11 +45,26 @@ const envelope = createApiEnvelopeSchema(
         source: z.string(),
         confidence: z.number(),
         proposedValue: z.string(),
+        options: z
+          .array(z.object({ value: z.string(), label: z.string(), source: z.string() }))
+          .default([]),
         approvalState: z.string(),
         sensitive: z.boolean(),
         excludedByDefault: z.boolean(),
         reason: z.string(),
         fieldType: z.string(),
+        aiAnswerable: z.boolean().default(false),
+        showChip: z.boolean().default(false),
+        attachment: z
+          .object({
+            documentId: z.string(),
+            versionId: z.string(),
+            filename: z.string(),
+            mimeType: z.string(),
+            byteSize: z.number(),
+          })
+          .nullable()
+          .optional(),
       }),
     ),
   }),
@@ -130,7 +148,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     };
   });
   const catalog = await loadMemoryCatalog(session.supabase, session.actor, parsedId.data);
-  const mappings = mapFields(fields, catalog);
+  const mapped = mapFields(fields, catalog);
+  const withDocs = await enrichDocumentAttachments(session.supabase, session.user.id, mapped);
+  const withYesNo = await enrichYesNoEligibilityMappings(session.supabase, session.actor, withDocs);
+  const mappings = await enrichAiAnswerableMappings(session.supabase, session.actor, parsedId.data, withYesNo);
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
   const { data: fillSession, error } = await session.supabase

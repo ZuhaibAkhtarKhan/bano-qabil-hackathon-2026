@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -13,6 +13,7 @@ await esbuild.build({
   entryPoints: {
     background: "src/background/service-worker.ts",
     content: "src/content/content.ts",
+    bridge: "src/bridge/bridge.ts",
     popup: "src/popup/popup.ts",
     options: "src/options/options.ts",
   },
@@ -29,5 +30,7 @@ for (const file of ["manifest.json", "src/popup/popup.html", "src/popup/popup.cs
   const to = path.join(dist, path.basename(file) === "manifest.json" ? "manifest.json" : path.basename(file));
   copyFileSync(from, to);
 }
+
+cpSync(path.join(root, "icons"), path.join(dist, "icons"), { recursive: true });
 
 console.info("Extension written to dist/. Load unpacked from apps/extension/dist");

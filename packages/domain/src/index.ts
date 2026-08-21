@@ -106,6 +106,13 @@ export {
   type RankedDiscovery,
 } from "./discovery";
 
+export {
+  matchApplicationByUrl,
+  scoreUrlMatch,
+  urlsLikelySame,
+  type UrlMatchableApplication,
+} from "./url-match";
+
 export { sourcedDiscoveryCatalog } from "./discovery-catalog";
 
 export { notificationDraftFromEvent, notificationIdempotencyKey, NOTIFICATION_CATEGORIES, DOMAIN_EVENT_NAMES, type DomainEvent, type DomainEventName, type NotificationCategory, type NotificationDraft, type NotificationPriority } from "./notifications";

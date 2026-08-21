@@ -1,6 +1,6 @@
 {
   "name": "@1apply/extension",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "node build.mjs"
   },
   "dependencies": {
+    "@1apply/domain": "*",
     "@1apply/form-engine": "*"
   },
   "devDependencies": {

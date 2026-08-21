@@ -13,7 +13,7 @@ export const FLASH = {
   duplicate_file: "That file is already in your vault.",
   opportunity_created: "Opportunity saved. Review the structured analysis before applying.",
   analyzing: "Opportunity fetched. Structured analysis is running — review the detail page.",
-  duplicate_opportunity: "That URL is already in your workspace. Opening the existing opportunity.",
+  duplicate_opportunity: "This website is already added. Opening the existing opportunity.",
   discovery_ready: "Discovery ranked sourced listings. Save one to run the normal opportunity pipeline.",
   checks_ran: "Automation checks ran. Notices are user-scoped, idempotent for today, and nothing was submitted for you.",
   discovery_queued: "Discovery request recorded. External matching will plug into this pipeline.",

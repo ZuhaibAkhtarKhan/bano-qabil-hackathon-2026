@@ -55,7 +55,7 @@ export async function loadMemoryWorkspace() {
     supabase
       .from("documents")
       .select(
-        "id, type, label, current_version_id, created_at, document_versions ( id, version_label, mime_type, byte_size, status, created_at )",
+        "id, type, label, current_version_id, created_at, document_versions!document_id ( id, version_label, mime_type, byte_size, status, created_at )",
       )
       .order("created_at", { ascending: false }),
     supabase

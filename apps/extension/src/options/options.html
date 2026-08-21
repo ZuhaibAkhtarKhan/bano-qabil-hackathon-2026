@@ -9,11 +9,12 @@
   <body>
     <p class="eyebrow">1-Apply</p>
     <h1>Extension options</h1>
-    <p class="muted">No backend secrets live here. Pair with a token from 1-Apply Settings. The extension never submits, signs, pays, or bypasses CAPTCHA.</p>
-    <label class="field">App URL <input id="appUrl" type="url" placeholder="http://localhost:3000" /></label>
-    <label class="field">Pairing token <input id="token" type="password" autocomplete="off" /></label>
+    <p class="muted">
+      Talks to <code>http://localhost:3000</code> (hardcoded for local dev). Sign in to 1-Apply in this browser, then
+      connect. The extension uses that session for save, scan, and fill — never submit, sign, pay, or CAPTCHA bypass.
+    </p>
     <div class="row">
-      <button id="save" type="button">Save connection</button>
+      <button id="connect" type="button">Connect with website session</button>
     </div>
     <p id="log" class="log"></p>
     <script src="options.js" type="module"></script>

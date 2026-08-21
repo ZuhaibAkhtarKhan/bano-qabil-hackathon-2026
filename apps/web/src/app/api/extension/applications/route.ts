@@ -11,6 +11,8 @@ const envelope = createApiEnvelopeSchema(
       id: uuidSchema,
       title: z.string(),
       organization: z.string().nullable(),
+      sourceUrl: z.string().nullable(),
+      canonicalUrl: z.string().nullable(),
     }),
   ),
 );
@@ -25,17 +27,25 @@ export async function GET(request: Request) {
     const session = await requireApiSession(request);
     const { data } = await session.supabase
       .from("applications")
-      .select("id, opportunities ( title, organization )")
+      .select("id, opportunities ( title, organization, source_url, canonical_url )")
       .eq("user_id", session.user.id)
       .order("updated_at", { ascending: false })
-      .limit(40);
+      .limit(80);
 
     const rows = (data ?? []).map((row) => {
       const opportunity = Array.isArray(row.opportunities) ? row.opportunities[0] : row.opportunities;
+      const opp = opportunity as {
+        title?: string;
+        organization?: string | null;
+        source_url?: string | null;
+        canonical_url?: string | null;
+      } | null;
       return {
         id: row.id as string,
-        title: (opportunity as { title?: string } | null)?.title ?? "Untitled opportunity",
-        organization: (opportunity as { organization?: string | null } | null)?.organization ?? null,
+        title: opp?.title ?? "Untitled opportunity",
+        organization: opp?.organization ?? null,
+        sourceUrl: opp?.source_url ?? null,
+        canonicalUrl: opp?.canonical_url ?? null,
       };
     });
 

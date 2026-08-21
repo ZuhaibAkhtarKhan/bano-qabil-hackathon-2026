@@ -1,5 +1,6 @@
 import { computeProfileCompleteness } from "@1apply/contracts";
 
+import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import {
@@ -109,13 +110,16 @@ export async function loadProfileWorkspace() {
 
 export async function loadDocumentsWorkspace() {
   const { profile, supabase } = await requireWorkspace();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("documents")
     .select(
-      "id, type, label, current_version_id, created_at, document_versions ( id, version_label, mime_type, byte_size, status, original_filename, created_at )",
+      "id, type, label, current_version_id, created_at, document_versions!document_id ( id, version_label, mime_type, byte_size, status, original_filename, created_at )",
     )
     .eq("user_id", profile.id)
     .order("created_at", { ascending: false });
+  if (error) {
+    logError("documents.list_failed", { code: error.code, message: error.message });
+  }
   return { documents: (data ?? []) as DocumentListRow[] };
 }
 
@@ -273,7 +277,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
     supabase
       .from("documents")
       .select(
-        "id, type, label, current_version_id, document_versions ( id, version_label, status, created_at, original_filename )",
+        "id, type, label, current_version_id, document_versions!document_id ( id, version_label, status, created_at, original_filename )",
       )
       .eq("user_id", user.id),
     supabase

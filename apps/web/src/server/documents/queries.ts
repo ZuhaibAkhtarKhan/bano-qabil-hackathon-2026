@@ -7,7 +7,7 @@ export async function loadDocumentDetail(documentId: string) {
   const { data: document } = await supabase
     .from("documents")
     .select(
-      "id, type, label, current_version_id, created_at, updated_at, document_versions ( id, version_label, mime_type, byte_size, status, original_filename, source, storage_path, created_at )",
+      "id, type, label, current_version_id, created_at, updated_at, document_versions!document_id ( id, version_label, mime_type, byte_size, status, original_filename, source, storage_path, created_at )",
     )
     .eq("id", documentId)
     .eq("user_id", user.id)

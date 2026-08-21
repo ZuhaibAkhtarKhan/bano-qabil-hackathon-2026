@@ -4,7 +4,7 @@ Create once. Apply everywhere.
 
 Evidence-grounded application operating system: Application Memory, opportunity analysis, eligibility, Fit Index, grounded answers, controlled autofill, and submission snapshots.
 
-The Chrome extension never clicks submit. Fill requires a user session token in Options and a fill-plan from the signed-in app.
+The Chrome extension never clicks submit. It connects to your signed-in 1-Apply session in the same browser (no pasted tokens) and builds fill plans from Application Memory.
 
 ## Layout
 
@@ -20,6 +20,8 @@ supabase/migrations      PostgreSQL, RLS, pgvector, private storage
 ```
 
 UI does not call the model or own SQL. Server actions call services. Services use session-scoped infra. Domain logic lives in `@1apply/domain`.
+
+Full architecture, stack versions, tables, APIs, and data flows: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Run locally
 

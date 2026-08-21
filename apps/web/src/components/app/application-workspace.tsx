@@ -392,8 +392,8 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           </div>
           {data.fieldMappings.length === 0 ? (
             <p className="mt-4 text-sm text-ink-muted">
-              No field mappings yet. Open the Chrome extension on the host form, scan fields, then approve a fill plan.
-              Mappings appear here after a fill-plan is created. 1-Apply never clicks submit.
+              No field mappings yet. Open the Chrome extension on the host form and use Fill from memory. Suggestions
+              write into fields automatically; chips appear when alternates exist. 1-Apply never clicks submit.
             </p>
           ) : (
             <ul className="mt-6 grid gap-3">

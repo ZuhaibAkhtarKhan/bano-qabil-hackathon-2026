@@ -1,5 +1,5 @@
 import { opportunityCategorySchema, type OpportunitySource } from "@1apply/contracts";
-import { normalizeOpportunityUrl } from "@1apply/domain";
+import { normalizeOpportunityUrl, urlsLikelySame } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
@@ -26,13 +26,19 @@ export type IngestPageInput = {
 };
 
 export async function findDuplicateOpportunity(supabase: SupabaseClient, userId: string, canonicalUrl: string) {
-  const normalized = normalizeOpportunityUrl(canonicalUrl);
   const { data } = await supabase
     .from("opportunities")
-    .select("id, canonical_url")
+    .select("id, canonical_url, source_url")
     .eq("user_id", userId);
 
-  const match = (data ?? []).find((row) => normalizeOpportunityUrl(String(row.canonical_url ?? "")) === normalized);
+  const match = (data ?? []).find((row) => {
+    const canonical = String(row.canonical_url ?? "");
+    const source = String(row.source_url ?? "");
+    return (
+      (canonical && urlsLikelySame(canonicalUrl, canonical)) ||
+      (source && urlsLikelySame(canonicalUrl, source))
+    );
+  });
   return match?.id as string | undefined;
 }
 

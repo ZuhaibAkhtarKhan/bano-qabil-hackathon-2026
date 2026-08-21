@@ -1,6 +1,7 @@
 import { signOut } from "@/app/app/actions";
 import { requestAccountDeletion } from "@/server/account/actions";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
+import { ExtensionConnectCard } from "@/components/settings/extension-connect-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/field";
@@ -46,10 +47,10 @@ export default async function SettingsPage() {
         <Card className="p-6">
           <h2 className="text-base font-medium">Browser extension</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            In the extension Options page, set the app URL to <code>{appUrl}</code> and paste your Supabase user access
-            token (never the service-role key). Save to 1-Apply, scan, and fill then talk to{" "}
-            <code>/api/extension/session</code>, <code>/api/extension/applications</code>, and fill-plan.
+            The extension uses your signed-in session in this browser to save pages, list applications, and build fill
+            plans from Application Memory. It never clicks submit.
           </p>
+          <ExtensionConnectCard appUrl={appUrl} />
         </Card>
 
         <Card className="p-6">

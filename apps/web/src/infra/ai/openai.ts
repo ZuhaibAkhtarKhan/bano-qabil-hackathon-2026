@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { loadAppConfig } from "@/config/env";
+import { EMBEDDING_DIMENSIONS, loadAppConfig } from "@/config/env";
 import { logError } from "@/lib/log";
 import {
   AiNotConfiguredError,
@@ -148,6 +148,8 @@ class OpenAiCompatibleProvider implements AiProvider {
       body: JSON.stringify({
         model: config.embeddingModel,
         input: request.texts.slice(0, 32),
+        // Keep Gemini (and OpenAI) vectors aligned with pgvector(1536).
+        dimensions: EMBEDDING_DIMENSIONS,
       }),
       signal: AbortSignal.timeout(45_000),
     });
@@ -203,7 +205,8 @@ class OpenAiCompatibleProvider implements AiProvider {
       signal: AbortSignal.timeout(45_000),
     });
     if (!response.ok) {
-      logError("ai.http_failed", { status: response.status, schemaName });
+      const detail = (await response.text().catch(() => "")).slice(0, 400);
+      logError("ai.http_failed", { status: response.status, schemaName, detail, model: config.openaiModel, baseUrl: config.openaiBaseUrl });
       throw new Error("AI_HTTP_FAILED");
     }
     const json = (await response.json()) as {
