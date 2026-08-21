@@ -29,11 +29,16 @@ export const metadata: Metadata = {
     "An AI-powered personal application agent that remembers your experience, prepares grounded applications, and tracks everything you submit.",
   icons: {
     icon: [
-      { url: "/favicon.avif", type: "image/avif" },
-      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/favicon-16.png", sizes: "16x16", type: "image/png" },
+      {
+        url: "https://framerusercontent.com/images/gLFhEqHkbA2sg2o3baqeepLdAd8.jpg",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "https://framerusercontent.com/images/gLFhEqHkbA2sg2o3baqeepLdAd8.jpg",
+        media: "(prefers-color-scheme: dark)",
+      },
     ],
-    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+    apple: "https://framerusercontent.com/images/jHs1A6MsFVPXjf3M6V6P69y9Oo.png",
   },
 };
 

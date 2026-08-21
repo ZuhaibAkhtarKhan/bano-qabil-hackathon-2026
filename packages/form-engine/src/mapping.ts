@@ -935,9 +935,9 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
       ? "Sensitive field. Kept under explicit user control and never auto-filled."
       : treatAsAi
         ? "Open-ended question — open the 1-Apply assistant to draft from Application Memory, then Confirm to fill."
-        : proposedValue
+      : proposedValue
           ? `Mapped from ${options[0]?.source ?? "Application Memory"} (${best.rule.path}).`
-          : `Mapped to ${best.rule.path}, but no verified value is stored yet.`,
+        : `Mapped to ${best.rule.path}, but no verified value is stored yet.`,
     fieldType: field.type,
     aiAnswerable: treatAsAi,
     showChip: treatAsAi || options.length > 1,
