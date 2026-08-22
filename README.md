@@ -29,6 +29,7 @@ Full architecture, stack versions, tables, APIs, and data flows: [docs/ARCHITECT
 npm install
 cp .env.example apps/web/.env.local
 # Fill NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+# Optional: GROQ_API_KEY for posting rewrite (preferred) or OPENAI_API_KEY
 npm run dev
 ```
 

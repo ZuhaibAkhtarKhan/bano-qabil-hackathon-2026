@@ -6,8 +6,11 @@ export type AppConfig = {
   supabaseAnonKey: string | null;
   supabaseServiceRoleKeyConfigured: boolean;
   openaiConfigured: boolean;
+  groqConfigured: boolean;
+  aiConfigured: boolean;
   openaiBaseUrl: string;
   openaiModel: string;
+  groqModel: string;
   embeddingProvider: string;
   embeddingModel: string;
   storageBucket: string;
@@ -44,17 +47,25 @@ export function loadAppConfig(source: Record<string, string | undefined> = proce
     GOOGLE_OAUTH_CLIENT_SECRET: emptyToUndefined(source.GOOGLE_OAUTH_CLIENT_SECRET),
     GMAIL_SYNC_ENABLED: emptyToUndefined(source.GMAIL_SYNC_ENABLED),
     CALENDAR_SYNC_ENABLED: emptyToUndefined(source.CALENDAR_SYNC_ENABLED),
+    GROQ_API_KEY: emptyToUndefined(source.GROQ_API_KEY),
+    GROQ_MODEL: emptyToUndefined(source.GROQ_MODEL),
   });
 
   const openaiKey = parsed.OPENAI_API_KEY ?? "";
+  const groqKey = parsed.GROQ_API_KEY ?? "";
+  const openaiConfigured = Boolean(openaiKey) && !looksLikeSecretPlaceholder(openaiKey);
+  const groqConfigured = Boolean(groqKey) && !looksLikeSecretPlaceholder(groqKey);
   return {
     appUrl: parsed.NEXT_PUBLIC_APP_URL,
     supabaseUrl: parsed.NEXT_PUBLIC_SUPABASE_URL ?? null,
     supabaseAnonKey: parsed.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? null,
     supabaseServiceRoleKeyConfigured: !looksLikeSecretPlaceholder(parsed.SUPABASE_SERVICE_ROLE_KEY),
-    openaiConfigured: Boolean(openaiKey) && !looksLikeSecretPlaceholder(openaiKey),
+    openaiConfigured,
+    groqConfigured,
+    aiConfigured: openaiConfigured || groqConfigured,
     openaiBaseUrl: (parsed.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
     openaiModel: parsed.OPENAI_MODEL ?? "gpt-4o-mini",
+    groqModel: parsed.GROQ_MODEL ?? "openai/gpt-oss-20b",
     embeddingProvider: parsed.EMBEDDING_PROVIDER ?? "openai-compatible",
     embeddingModel: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
     storageBucket: parsed.STORAGE_BUCKET ?? "application-documents",

@@ -104,7 +104,17 @@ export const groundedDraftModelSchema = z.object({
 });
 
 export function isAiConfigured(): boolean {
-  return loadAppConfig().openaiConfigured;
+  return loadAppConfig().aiConfigured;
+}
+
+export function parseModelJson(content: string): unknown {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? trimmed).trim();
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  const slice = start >= 0 && end > start ? candidate.slice(start, end + 1) : candidate;
+  return JSON.parse(slice) as unknown;
 }
 
 class OpenAiCompatibleProvider implements AiProvider {
@@ -138,7 +148,7 @@ class OpenAiCompatibleProvider implements AiProvider {
 
   async embed(request: EmbeddingRequest): Promise<number[][]> {
     const config = loadAppConfig();
-    if (!config.openaiConfigured) throw new AiNotConfiguredError();
+    if (!config.openaiConfigured) return [];
     const response = await fetch(`${config.openaiBaseUrl}/embeddings`, {
       method: "POST",
       headers: {
@@ -172,15 +182,21 @@ class OpenAiCompatibleProvider implements AiProvider {
     schemaName?: string,
   ): Promise<unknown> {
     const config = loadAppConfig();
-    if (!config.openaiConfigured) throw new AiNotConfiguredError();
-    const response = await fetch(`${config.openaiBaseUrl}/chat/completions`, {
+    if (!config.aiConfigured) throw new AiNotConfiguredError();
+    const usingGroq = config.groqConfigured;
+    const apiKey = usingGroq ? process.env.GROQ_API_KEY : process.env.OPENAI_API_KEY;
+    const baseUrl = usingGroq ? "https://api.groq.com/openai/v1" : config.openaiBaseUrl;
+    const model = usingGroq ? config.groqModel : config.openaiModel;
+    const timeoutMs = usingGroq ? 20_000 : 45_000;
+    if (!apiKey) throw new AiNotConfiguredError();
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: config.openaiModel,
+        model,
         temperature: 0,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
         messages: [
@@ -202,11 +218,11 @@ class OpenAiCompatibleProvider implements AiProvider {
           },
         ],
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       const detail = (await response.text().catch(() => "")).slice(0, 400);
-      logError("ai.http_failed", { status: response.status, schemaName, detail, model: config.openaiModel, baseUrl: config.openaiBaseUrl });
+      logError("ai.http_failed", { status: response.status, schemaName, detail, model, baseUrl });
       throw new Error("AI_HTTP_FAILED");
     }
     const json = (await response.json()) as {
@@ -216,7 +232,7 @@ class OpenAiCompatibleProvider implements AiProvider {
     if (!content) throw new Error("AI_EMPTY");
     if (!jsonMode) return content;
     try {
-      return JSON.parse(content) as unknown;
+      return parseModelJson(content);
     } catch {
       throw new Error("AI_INVALID_JSON");
     }

@@ -19,6 +19,8 @@ export const envSchema = z.object({
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
   GMAIL_SYNC_ENABLED: z.enum(["true", "false"]).optional(),
   CALENDAR_SYNC_ENABLED: z.enum(["true", "false"]).optional(),
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_MODEL: z.string().optional(),
 });
 
 export const skillRecordSchema = z.object({

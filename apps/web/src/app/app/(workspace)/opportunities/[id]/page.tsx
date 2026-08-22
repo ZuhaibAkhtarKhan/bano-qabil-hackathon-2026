@@ -7,6 +7,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { reanalyzeOpportunity } from "@/server/opportunities/actions";
+import { decodeHtmlEntities } from "@/server/ingest/fetch-page";
 import { loadOpportunityDetail } from "@/server/opportunities/queries";
 
 function analysisTone(status: string): "mint" | "sand" | "coral" | "muted" {
@@ -175,7 +176,9 @@ export default async function OpportunityDetailPage({
         {opportunity.raw_excerpt ? (
           <Card className="p-6">
             <h2 className="text-lg font-medium">Original reference excerpt</h2>
-            <p className="mt-3 whitespace-pre-wrap text-sm text-ink-muted">{opportunity.raw_excerpt.slice(0, 4000)}</p>
+            <p className="mt-3 whitespace-pre-wrap text-sm text-ink-muted">
+              {decodeHtmlEntities(opportunity.raw_excerpt).slice(0, 4000)}
+            </p>
           </Card>
         ) : null}
       </div>
