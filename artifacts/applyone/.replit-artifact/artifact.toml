@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "1Apply"
+description = "A focused application workspace that helps people discover opportunities, organize their application pipeline, and generate grounded answers and supporting documents in one place."
+version = "1.0.0"
+id = "artifacts/applyone"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22900
+
+[services.development]
+run = "pnpm --filter @workspace/applyone run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/applyone", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/applyone/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22900"
+BASE_PATH = "/"

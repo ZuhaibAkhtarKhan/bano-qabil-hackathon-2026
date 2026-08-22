@@ -1,0 +1,21 @@
+{
+  "name": "1-apply",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "workers/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @1apply/web",
+    "build": "npm run build -w @1apply/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @1apply/web"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
