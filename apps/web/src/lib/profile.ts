@@ -22,6 +22,7 @@ export type ProfileRow = {
   onboarding_completed_at: string | null;
   onboarding_step: OnboardingStep;
   preferences: Record<string, unknown> | null;
+  timezone: string | null;
 };
 
 export { hasConsent, onboardingComplete, skippedDocuments };
@@ -47,7 +48,7 @@ export async function getCurrentUserAndProfile() {
   const { data: existing } = await supabase
     .from("profiles")
     .select(
-      "id, email, display_name, headline, phone, terms_accepted_at, ai_processing_accepted_at, onboarding_completed_at, onboarding_step, preferences",
+      "id, email, display_name, headline, phone, terms_accepted_at, ai_processing_accepted_at, onboarding_completed_at, onboarding_step, preferences, timezone",
     )
     .eq("id", user.id)
     .maybeSingle();
@@ -72,7 +73,7 @@ export async function getCurrentUserAndProfile() {
       onboarding_step: "consent",
     })
     .select(
-      "id, email, display_name, headline, phone, terms_accepted_at, ai_processing_accepted_at, onboarding_completed_at, onboarding_step, preferences",
+      "id, email, display_name, headline, phone, terms_accepted_at, ai_processing_accepted_at, onboarding_completed_at, onboarding_step, preferences, timezone",
     )
     .single();
 
@@ -169,6 +170,7 @@ export async function loadOnboardingProfileDetails() {
       portfolio_url: null,
       availability: null,
       work_authorization: null,
+      timezone: null,
     },
   };
 }

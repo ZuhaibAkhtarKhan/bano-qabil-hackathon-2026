@@ -94,6 +94,109 @@ export async function ingestOpportunityPage(input: IngestPageInput): Promise<{
   return { opportunityId: opportunity.id, applicationId, jobId, duplicate: false };
 }
 
+export async function createFetchFailedOpportunity(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  userId: string;
+  sourceUrl: string;
+  canonicalUrl: string;
+  fetchError: string;
+}) {
+  const duplicateId = await findDuplicateOpportunity(input.supabase, input.userId, input.canonicalUrl);
+  if (duplicateId) {
+    const applicationId = await ensureApplication(input.supabase, input.userId, duplicateId, null);
+    return { opportunityId: duplicateId, applicationId, duplicate: true };
+  }
+
+  let hostname = input.canonicalUrl;
+  try {
+    hostname = new URL(input.canonicalUrl).hostname;
+  } catch {
+    hostname = input.canonicalUrl.slice(0, 80);
+  }
+
+  const { data: opportunity, error } = await input.supabase
+    .from("opportunities")
+    .insert({
+      user_id: input.userId,
+      source: "url",
+      source_url: input.sourceUrl,
+      canonical_url: normalizeOpportunityUrl(input.canonicalUrl),
+      title: hostname.slice(0, 180),
+      category: "other",
+      analysis_status: "needs_input",
+      metadata: {
+        fetchError: input.fetchError,
+        fetchFailedAt: new Date().toISOString(),
+      },
+    })
+    .select("id")
+    .single();
+
+  if (error || !opportunity) throw new Error("OPPORTUNITY_CREATE_FAILED");
+
+  const applicationId = await ensureApplication(input.supabase, input.userId, opportunity.id, null);
+  return { opportunityId: opportunity.id as string, applicationId, duplicate: false };
+}
+
+export async function pasteIntoOpportunity(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  userId: string;
+  opportunityId: string;
+  pastedText: string;
+  title?: string | null;
+}) {
+  const { data: opportunity } = await input.supabase
+    .from("opportunities")
+    .select("id, title, metadata, source_url, canonical_url")
+    .eq("id", input.opportunityId)
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  if (!opportunity) throw new Error("OPPORTUNITY_NOT_FOUND");
+
+  const applicationId = await ensureApplication(input.supabase, input.userId, opportunity.id, null);
+  const previousMetadata = ((opportunity.metadata as Record<string, unknown> | null) ?? {});
+  const { fetchError: _fetchError, ...keptMetadata } = previousMetadata;
+  const metadata = {
+    ...keptMetadata,
+    pastedAt: new Date().toISOString(),
+  };
+
+  await input.supabase
+    .from("opportunities")
+    .update({
+      title: input.title?.trim()?.slice(0, 180) || opportunity.title,
+      raw_excerpt: input.pastedText.slice(0, 12_000),
+      analysis_status: "pending",
+      metadata,
+    })
+    .eq("id", opportunity.id);
+
+  const { id: jobId } = await runOwnedJob(
+    input.supabase,
+    { actor: input.actor, type: "opportunity_analyze", inputRef: opportunity.id },
+    async () => {
+      try {
+        await runOpportunityAnalysisJob({
+          supabase: input.supabase,
+          actor: input.actor,
+          userId: input.userId,
+          opportunityId: opportunity.id,
+          applicationId,
+          pageText: input.pastedText,
+          sourceUrl: (opportunity.canonical_url as string | null) ?? (opportunity.source_url as string | null) ?? undefined,
+          source: "manual",
+        });
+      } catch {
+        await markOpportunityAnalysisFailed(input.supabase, opportunity.id, "analysis_failed");
+      }
+    },
+  );
+
+  return { opportunityId: opportunity.id as string, applicationId, jobId };
+}
+
 export async function createManualOpportunityRecord(input: {
   supabase: SupabaseClient;
   actor: Actor;

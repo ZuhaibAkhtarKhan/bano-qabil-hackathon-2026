@@ -7,7 +7,7 @@ import { documentTypeSchema } from "@1apply/contracts";
 
 import { createDocumentReadUrl } from "@/infra/storage/documents";
 import { logError } from "@/lib/log";
-import { extractTextFromBuffer } from "@/lib/documents/extract-text";
+import { extractDocumentText } from "@/lib/documents/extract-text";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import {
@@ -130,7 +130,7 @@ export async function uploadDocument(formData: FormData) {
   revalidatePath("/app");
   revalidatePath(DOCUMENTS);
   revalidatePath("/app/memory");
-  redirectWith(DOCUMENTS, { notice: extractTextFromBuffer(upload.buffer, upload.mimeType) ? "extracted" : "binary_stored" });
+  redirectWith(DOCUMENTS, { notice: (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored" });
 }
 
 export async function uploadDocumentVersion(formData: FormData) {
@@ -191,7 +191,7 @@ export async function uploadDocumentVersion(formData: FormData) {
   revalidatePath(DOCUMENTS);
   revalidatePath(documentPath(documentId));
   revalidatePath("/app/memory");
-  redirectWith(documentPath(documentId), { notice: extractTextFromBuffer(upload.buffer, upload.mimeType) ? "extracted" : "binary_stored" });
+  redirectWith(documentPath(documentId), { notice: (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored" });
 }
 
 export async function setCurrentVersion(formData: FormData) {

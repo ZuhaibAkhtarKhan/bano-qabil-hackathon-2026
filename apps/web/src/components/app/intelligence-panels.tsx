@@ -182,6 +182,13 @@ export function EligibilityPanel({ data }: { data: Workspace }) {
                   </div>
                   <p className="mt-3 text-sm font-medium">{text}</p>
                   <p className="mt-2 text-sm text-ink-muted">{item.explanation}</p>
+                  {item.state === "unclear" || item.state === "not_met" || item.needs_confirmation ? (
+                    <p className="mt-3 text-sm">
+                      <Link href="/app/memory" className="text-teal underline">
+                        Add matching facts to Application Memory
+                      </Link>
+                    </p>
+                  ) : null}
                 </li>
               );
             })

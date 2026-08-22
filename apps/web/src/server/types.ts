@@ -13,6 +13,7 @@ export type ProfileDetails = {
   portfolio_url: string | null;
   availability: string | null;
   work_authorization: string | null;
+  timezone: string | null;
 };
 
 export type EvidenceRow = {

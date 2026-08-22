@@ -112,3 +112,38 @@ export function extractTextFromBuffer(buffer: Buffer, mimeType: string): string 
   }
   return null;
 }
+
+async function extractPdfWithUnpdf(buffer: Buffer): Promise<string | null> {
+  try {
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const result = await extractText(pdf, { mergePages: true });
+    const text = Array.isArray(result.text) ? result.text.join("\n") : String(result.text ?? "");
+    const cleaned = text.replace(/\s+/g, " ").trim();
+    return cleaned ? cleaned.slice(0, MAX_TEXT) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function extractDocxWithMammoth(buffer: Buffer): Promise<string | null> {
+  try {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer });
+    const cleaned = String(result.value ?? "").replace(/\s+/g, " ").trim();
+    return cleaned ? cleaned.slice(0, MAX_TEXT) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function extractDocumentText(buffer: Buffer, mimeType: string): Promise<string | null> {
+  const fallback = extractTextFromBuffer(buffer, mimeType);
+  if (mimeType === "application/pdf") {
+    return (await extractPdfWithUnpdf(buffer)) ?? fallback;
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    return (await extractDocxWithMammoth(buffer)) ?? fallback;
+  }
+  return fallback;
+}

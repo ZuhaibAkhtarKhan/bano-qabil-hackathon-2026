@@ -69,6 +69,30 @@ export function deadlineUrgencyTone(urgency: DeadlineUrgency): "coral" | "sand" 
 
 export { computeDeadlineInfo };
 
+export const APPLICATION_BOARD_COLUMNS = [
+  {
+    id: "pipeline",
+    title: "Preparing",
+    statuses: ["saved", "analyzing", "ready_to_apply", "in_progress", "review_required", "draft", "preparing", "ready"],
+  },
+  {
+    id: "submitted",
+    title: "Submitted / interviews",
+    statuses: ["submitted", "under_review", "assessment", "interview"],
+  },
+  {
+    id: "closed",
+    title: "Closed",
+    statuses: ["accepted", "offer", "rejected", "withdrawn", "archived"],
+  },
+] as const;
+
+export function boardColumnForStatus(status: string): (typeof APPLICATION_BOARD_COLUMNS)[number]["id"] {
+  const normalized = normalizeApplicationStatus(status as never);
+  const column = APPLICATION_BOARD_COLUMNS.find((item) => (item.statuses as readonly string[]).includes(normalized));
+  return column?.id ?? "pipeline";
+}
+
 export function applicationTitle(row: ApplicationListRow) {
   return asOne(row.opportunities)?.title ?? "Untitled opportunity";
 }

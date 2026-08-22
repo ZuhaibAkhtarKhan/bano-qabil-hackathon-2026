@@ -6,6 +6,7 @@ import { applicationStatusSchema } from "@1apply/contracts";
 import {
   classifyRequirementKind,
   evaluateSubmissionGuard,
+  parsePersona,
   type SubmissionInput,
 } from "@1apply/domain";
 
@@ -125,8 +126,81 @@ export async function addQuestion(formData: FormData) {
     source: "manual",
   });
 
+  const { count: applicationCount } = await supabase
+    .from("application_questions")
+    .select("id", { count: "exact", head: true })
+    .eq("application_id", applicationId);
+
+  await supabase.from("application_questions").insert({
+    user_id: user.id,
+    application_id: applicationId,
+    prompt,
+    limit_value: Number(formData.get("limitValue") || 0) || null,
+    limit_unit: String(formData.get("limitUnit") ?? "").trim() || null,
+    sort_order: applicationCount ?? 0,
+    source: "manual",
+  });
+
   revalidateApplication(applicationId);
   redirectWith(applicationPath(applicationId), { notice: "saved" }, "answers");
+}
+
+function parseDeadlineInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Date.parse(trimmed);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
+
+export async function updateApplicationPersona(formData: FormData) {
+  const { user, supabase } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "");
+  const persona = parsePersona(String(formData.get("persona") ?? "").trim()) ?? null;
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!application) {
+    redirectWith("/app/applications", { error: "not_found" });
+  }
+
+  const { error } = await supabase.from("applications").update({ persona }).eq("id", applicationId);
+  if (error) {
+    redirectWith(applicationPath(applicationId), { error: "save" });
+  }
+
+  revalidateApplication(applicationId);
+  redirectWith(applicationPath(applicationId), { notice: "saved" }, "opportunity");
+}
+
+export async function updateApplicationSchedule(formData: FormData) {
+  const { user, supabase } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "");
+  const deadlineAt = parseDeadlineInput(String(formData.get("deadline") ?? ""));
+  const timezone = String(formData.get("timezone") ?? "").trim() || null;
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!application) {
+    redirectWith("/app/applications", { error: "not_found" });
+  }
+
+  const { error } = await supabase
+    .from("applications")
+    .update({ deadline_at: deadlineAt, deadline_timezone: timezone })
+    .eq("id", applicationId);
+  if (error) {
+    redirectWith(applicationPath(applicationId), { error: "save" }, "opportunity");
+  }
+
+  revalidateApplication(applicationId);
+  redirectWith(applicationPath(applicationId), { notice: "saved" }, "opportunity");
 }
 
 export async function analyzeApplication(formData: FormData) {

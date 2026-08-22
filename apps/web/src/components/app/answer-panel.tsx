@@ -1,12 +1,15 @@
 "use client";
 
+import { suggestPreviousAnswers, type PreviousAnswerCandidate } from "@1apply/domain";
 import { useRef, useState, useTransition } from "react";
 
 import { cn } from "@/lib/cn";
 import { answerSemanticStatus } from "@/lib/status";
 import { approveAnswerAction, editAnswerAction, generateAnswerAction, rejectAnswerAction } from "@/server/answers/actions";
+import { addQuestion } from "@/server/applications/actions";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Field, Input, Select } from "@/components/ui/field";
 import { SemanticBadge } from "@/components/ui/status-pill";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,6 +55,8 @@ type QuestionData = {
   limitUnit: string | null;
   required: boolean;
 };
+
+export type PreviousAnswerSuggestion = PreviousAnswerCandidate;
 
 // ─── Evidence card ────────────────────────────────────────────────────────────
 
@@ -161,13 +166,17 @@ function GroundingBar({ score }: { score: number }) {
 // ─── Main answer panel ────────────────────────────────────────────────────────
 
 export function AnswerPanel({
+  applicationId,
   question,
   answer,
   availableEvidence,
+  previousSuggestions,
 }: {
+  applicationId: string;
   question: QuestionData;
   answer: AnswerData | null;
   availableEvidence: EvidenceItem[];
+  previousSuggestions: PreviousAnswerSuggestion[];
 }) {
   const [isPending, startTransition] = useTransition();
   const [editMode, setEditMode] = useState(false);
@@ -295,11 +304,27 @@ export function AnswerPanel({
         </div>
       )}
 
+      {previousSuggestions.length > 0 ? (
+        <details className="rounded-lg border border-line bg-canvas p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-ink-muted">
+            Similar approved answers ({previousSuggestions.length})
+          </summary>
+          <ul className="mt-3 grid gap-3">
+            {previousSuggestions.map((item) => (
+              <li key={item.id} className="text-xs text-ink-muted">
+                <p className="font-medium text-ink-base">{item.prompt}</p>
+                <p className="mt-1 whitespace-pre-wrap leading-relaxed">{item.text.slice(0, 500)}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
         {/* Generate form */}
         <form ref={formRef} action={submit} className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="applicationId" value={answer?.applicationId ?? ""} />
+          <input type="hidden" name="applicationId" value={applicationId} />
           <input type="hidden" name="questionId" value={question.id} />
           <input type="hidden" name="previousAnswerId" value={answer?.id ?? ""} />
           <input type="hidden" name="previousAnswerText" value={displayText} />
@@ -390,35 +415,63 @@ export function AnswerPanel({
 // ─── Answers section (list of questions) ─────────────────────────────────────
 
 export function AnswersSection({
+  applicationId,
   questions,
   answers,
   availableEvidence,
+  previousAnswers,
 }: {
   applicationId: string;
   questions: QuestionData[];
   answers: AnswerData[];
   availableEvidence: EvidenceItem[];
+  previousAnswers: PreviousAnswerSuggestion[];
 }) {
   const answerByQuestion = new Map(answers.map((a) => [a.questionId, a]));
 
-  if (questions.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-line p-8 text-center">
-        <p className="text-sm text-ink-muted">No questions found for this opportunity.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-4">
-      {questions.map((q) => (
-        <AnswerPanel
-          key={q.id}
-          question={q}
-          answer={answerByQuestion.get(q.id) ?? null}
-          availableEvidence={availableEvidence}
-        />
-      ))}
+      {questions.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line p-8 text-center">
+          <p className="text-sm text-ink-muted">No questions found for this opportunity. Add one from the posting.</p>
+        </div>
+      ) : (
+        questions.map((q) => (
+          <AnswerPanel
+            key={q.id}
+            applicationId={applicationId}
+            question={q}
+            answer={answerByQuestion.get(q.id) ?? null}
+            availableEvidence={availableEvidence}
+            previousSuggestions={suggestPreviousAnswers(q.prompt, previousAnswers, {
+              excludeQuestionId: q.id,
+              limit: 3,
+            })}
+          />
+        ))
+      )}
+      <Card className="p-5">
+        <p className="text-sm font-semibold text-ink-base">Add a question</p>
+        <p className="mt-1 text-xs text-ink-muted">Use the exact prompt from the host form. Drafts stay grounded in verified evidence.</p>
+        <form action={addQuestion} className="mt-4 grid gap-3 sm:grid-cols-[1fr_8rem_8rem_auto] sm:items-end">
+          <input type="hidden" name="applicationId" value={applicationId} />
+          <Field label="Prompt" htmlFor={`add-question-${applicationId}`}>
+            <Input id={`add-question-${applicationId}`} name="prompt" required placeholder="Why are you interested in this role?" />
+          </Field>
+          <Field label="Limit" htmlFor={`add-limit-${applicationId}`}>
+            <Input id={`add-limit-${applicationId}`} name="limitValue" type="number" min={0} placeholder="300" />
+          </Field>
+          <Field label="Unit" htmlFor={`add-unit-${applicationId}`}>
+            <Select id={`add-unit-${applicationId}`} name="limitUnit" defaultValue="words">
+              <option value="words">words</option>
+              <option value="characters">characters</option>
+            </Select>
+          </Field>
+          <Button type="submit" variant="secondary">
+            Add question
+          </Button>
+        </form>
+      </Card>
     </div>
   );
 }

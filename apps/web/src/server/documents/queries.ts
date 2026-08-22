@@ -15,6 +15,15 @@ export async function loadDocumentDetail(documentId: string) {
 
   if (!document) return null;
 
+  const { data: chunks } = document.current_version_id
+    ? await supabase
+        .from("document_chunks")
+        .select("chunk_index, content")
+        .eq("document_version_id", document.current_version_id)
+        .order("chunk_index", { ascending: true })
+        .limit(6)
+    : { data: [] as Array<{ chunk_index: number; content: string }> };
+
   const { data: attachedApplications } = await supabase
     .from("application_documents")
     .select("application_id, document_version_id, applications ( id, status, opportunities ( title, organization ) )")
@@ -46,5 +55,9 @@ export async function loadDocumentDetail(documentId: string) {
     document: document as DocumentListRow,
     attachedApplications: attachedApplications ?? [],
     snapshotUses,
+    extractedPreview: (chunks ?? [])
+      .map((chunk) => String(chunk.content ?? ""))
+      .join("\n\n")
+      .slice(0, 4000),
   };
 }

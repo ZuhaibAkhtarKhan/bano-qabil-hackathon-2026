@@ -128,4 +128,4 @@ export async function readValidatedUpload(file: File): Promise<{
   };
 }
 
-export { extractTextFromBuffer } from "@/lib/documents/extract-text";
+export { extractDocumentText, extractTextFromBuffer } from "@/lib/documents/extract-text";

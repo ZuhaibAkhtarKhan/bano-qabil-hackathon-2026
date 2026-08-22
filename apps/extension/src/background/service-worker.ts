@@ -400,7 +400,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!tab.id) throw new Error("No active tab.");
       const origin = tabOrigin(tab);
       await ensureHostAccess(origin);
-      const meta = await sendToTab<{ url: string; title: string; excerpt: string }>(tab.id, { type: "GET_PAGE_META" });
+      const meta = await sendToTab<{ url: string; title: string; excerpt: string; pageText?: string }>(tab.id, { type: "GET_PAGE_META" });
       const pageUrl = meta.url || tab.url || "";
       if (new URL(pageUrl).origin !== origin) {
         throw new Error("Page origin changed. Refresh and try again.");
@@ -409,7 +409,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         url: pageUrl,
         title: meta.title || tab.title || undefined,
         excerpt: meta.excerpt,
-        pageText: meta.excerpt,
+        pageText: meta.pageText || meta.excerpt,
       });
     }
 

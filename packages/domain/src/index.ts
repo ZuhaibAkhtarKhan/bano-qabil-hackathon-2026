@@ -115,6 +115,21 @@ export {
 
 export { sourcedDiscoveryCatalog } from "./discovery-catalog";
 
+export {
+  PERSONA_IDS,
+  PERSONA_PRESETS,
+  parsePersona,
+  personaBoostKinds,
+  type PersonaId,
+  type PersonaPreset,
+} from "./persona";
+
+export {
+  suggestPreviousAnswers,
+  type PreviousAnswerCandidate,
+  type RankedPreviousAnswer,
+} from "./previous-answers";
+
 export { notificationDraftFromEvent, notificationIdempotencyKey, NOTIFICATION_CATEGORIES, DOMAIN_EVENT_NAMES, type DomainEvent, type DomainEventName, type NotificationCategory, type NotificationDraft, type NotificationPriority } from "./notifications";
 
 export { planAutomation, AUTOMATION_KINDS, type AutomationDecision, type AutomationKind, type ApplicationAutomationSnapshot } from "./automation";

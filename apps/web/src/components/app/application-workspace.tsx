@@ -2,6 +2,7 @@ import {
   computeDeadlineInfo,
   evaluateSubmissionGuard,
   assessOperatingLoop,
+  PERSONA_PRESETS,
   type SubmissionInput,
 } from "@1apply/domain";
 import { applicationStatusSchema } from "@1apply/contracts";
@@ -19,7 +20,7 @@ import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress, Timeline } from "@/components/ui/data";
-import { Field, Select } from "@/components/ui/field";
+import { Field, Input, Select } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
   allowedTransitions,
@@ -28,7 +29,14 @@ import {
   normalizeApplicationStatus,
 } from "@/lib/application-workflow";
 import { applicationTone, formatDeadline } from "@/components/app/application-summary";
-import { attachDocument, markSubmitted, resolveReviewItem, updateApplicationStatus } from "@/server/applications/actions";
+import {
+  attachDocument,
+  markSubmitted,
+  resolveReviewItem,
+  updateApplicationPersona,
+  updateApplicationSchedule,
+  updateApplicationStatus,
+} from "@/server/applications/actions";
 import type { loadApplicationWorkspace } from "@/server/workspace/queries";
 
 const spine = [
@@ -47,6 +55,14 @@ type CurrentAnswer = NonNullable<Workspace["questions"][number]["answer"]>;
 
 function fmtDateTime(value: string) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function toDatetimeLocal(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 function coerceAnswer(answer: CurrentAnswer, applicationId: string) {
@@ -234,6 +250,44 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
               <dd className="mt-1">{application.next_action ?? "Analyze this opportunity"}</dd>
             </div>
           </dl>
+          <form action={updateApplicationSchedule} className="mt-6 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <input type="hidden" name="applicationId" value={application.id} />
+            <Field label="Deadline" htmlFor={`deadline-${application.id}`}>
+              <Input
+                id={`deadline-${application.id}`}
+                name="deadline"
+                type="datetime-local"
+                defaultValue={toDatetimeLocal(application.deadline_at)}
+              />
+            </Field>
+            <Field label="Timezone" htmlFor={`timezone-${application.id}`} hint="IANA name, for example Asia/Karachi">
+              <Input
+                id={`timezone-${application.id}`}
+                name="timezone"
+                defaultValue={application.deadline_timezone ?? ""}
+                placeholder="Asia/Karachi"
+              />
+            </Field>
+            <Button type="submit" variant="secondary">
+              Save schedule
+            </Button>
+          </form>
+          <form action={updateApplicationPersona} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <input type="hidden" name="applicationId" value={application.id} />
+            <Field label="Answer voice" htmlFor={`persona-${application.id}`}>
+              <Select id={`persona-${application.id}`} name="persona" defaultValue={application.persona ?? ""}>
+                <option value="">Default evidence ranking</option>
+                {PERSONA_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label} — {preset.description}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button type="submit" variant="secondary">
+              Save voice
+            </Button>
+          </form>
           {opportunity?.raw_excerpt ? (
             <p className="mt-6 max-h-40 overflow-auto rounded-xl bg-canvas p-4 text-sm leading-6 text-ink-muted">
               {opportunity.raw_excerpt.slice(0, 1200)}
@@ -376,6 +430,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
             outcome: e.outcome,
             skills: e.skills,
           }))}
+          previousAnswers={data.previousAnswers}
         />
       </section>
 

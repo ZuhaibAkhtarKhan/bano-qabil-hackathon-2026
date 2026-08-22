@@ -13,7 +13,7 @@ import { runOwnedJob } from "@/server/jobs/runner";
 import { processDocumentVersion } from "@/server/documents/service";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { recordAuditEvent } from "@/server/audit";
-import { extractTextFromBuffer } from "@/lib/documents/extract-text";
+import { extractDocumentText } from "@/lib/documents/extract-text";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 
 const MEMORY = "/app/memory";
@@ -51,6 +51,7 @@ export async function updateIdentity(formData: FormData) {
       location_country: String(formData.get("locationCountry") ?? "").trim() || null,
       availability: String(formData.get("availability") ?? "").trim() || null,
       work_authorization: String(formData.get("workAuthorization") ?? "").trim() || null,
+      timezone: String(formData.get("timezone") ?? "").trim() || null,
       linkedin_url: String(formData.get("linkedinUrl") ?? "").trim() || null,
       github_url: String(formData.get("githubUrl") ?? "").trim() || null,
       portfolio_url: String(formData.get("portfolioUrl") ?? "").trim() || null,
@@ -62,6 +63,16 @@ export async function updateIdentity(formData: FormData) {
   revalidatePath("/app");
   revalidatePath(MEMORY);
   redirectWith(sectionReturn(formData), { notice: "saved" });
+}
+
+export async function updateTimezone(formData: FormData) {
+  const { profile, supabase } = await requireWorkspace();
+  const timezone = String(formData.get("timezone") ?? "").trim() || null;
+  const { error } = await supabase.from("profiles").update({ timezone }).eq("id", profile.id);
+  if (error) redirectWith("/app/settings", { error: "save" });
+  revalidatePath("/app");
+  revalidatePath("/app/settings");
+  redirectWith("/app/settings", { notice: "saved" });
 }
 
 export async function addMemoryEvidence(formData: FormData) {
@@ -358,7 +369,7 @@ export async function uploadMemoryDocument(formData: FormData) {
       await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
     }
 
-    const extractedText = extractTextFromBuffer(upload.buffer, upload.mimeType);
+    const extractedText = await extractDocumentText(upload.buffer, upload.mimeType);
     if (extractedText) notice = "extracted";
     else notice = "binary_stored";
 

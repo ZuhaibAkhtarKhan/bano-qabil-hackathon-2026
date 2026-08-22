@@ -30,7 +30,7 @@ export async function loadMemoryWorkspace() {
     supabase
       .from("profiles")
       .select(
-        "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization",
+        "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization, timezone",
       )
       .eq("id", profile.id)
       .single(),
@@ -97,6 +97,7 @@ export async function loadMemoryWorkspace() {
       portfolio_url: null,
       availability: null,
       work_authorization: null,
+      timezone: null,
     },
     evidence: evidenceRows,
     facts: (facts ?? []) as ProfileFactRow[],

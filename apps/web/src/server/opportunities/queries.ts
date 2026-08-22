@@ -51,6 +51,7 @@ export async function loadOpportunityDetail(opportunityId: string) {
       eligibilityCriteria?: string[];
       importantDates?: Array<{ label: string; date: string | null }>;
       analysisError?: string;
+      fetchError?: string;
     },
   };
 }

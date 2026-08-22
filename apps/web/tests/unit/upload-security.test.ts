@@ -73,6 +73,7 @@ describe("private storage paths", () => {
           onboarding_completed_at: null,
           onboarding_step: "consent",
           preferences: {},
+          timezone: null,
         },
       },
       documentId: "doc",

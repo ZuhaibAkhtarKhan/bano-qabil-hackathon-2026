@@ -27,7 +27,7 @@ export default async function DocumentDetailPage({
   const data = await loadDocumentDetail(id);
   if (!data) notFound();
 
-  const { document, snapshotUses } = data;
+  const { document, snapshotUses, extractedPreview } = data;
   const versions = [...(document.document_versions ?? [])].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
@@ -45,6 +45,19 @@ export default async function DocumentDetailPage({
         </Link>
       </p>
       <FlashBanner notice={notice} error={error} />
+
+      <Card className="mt-8 max-w-2xl p-6">
+        <h2 className="text-lg font-medium">Extracted text</h2>
+        {extractedPreview ? (
+          <p className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-6 text-ink-muted">
+            {extractedPreview}
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-ink-muted">
+            No extractable text on the latest version (encrypted PDF, scan-only image, or unsupported encoding). The file is still stored.
+          </p>
+        )}
+      </Card>
 
       <Card className="mt-8 max-w-2xl p-6">
         <h2 className="text-lg font-medium">Upload new version</h2>

@@ -14,16 +14,26 @@ export async function GET(request: Request) {
       { data: facts },
       { data: evidence },
       { data: documents },
+      { data: versions },
+      { data: opportunities },
       { data: applications },
       { data: answers },
       { data: snapshots },
+      { data: notifications },
+      { data: reminders },
+      { data: eligibility },
     ] = await Promise.all([
       supabase.from("profile_facts").select("id, category, fact_key, value, verification_status, updated_at").eq("user_id", user.id),
       supabase.from("evidence_items").select("id, title, kind, organization, verification_status, excluded_from_ai").eq("user_id", user.id),
       supabase.from("documents").select("id, type, label, current_version_id").eq("user_id", user.id),
-      supabase.from("applications").select("id, status, submitted_at, deadline_at, opportunity_id").eq("user_id", user.id),
+      supabase.from("document_versions").select("id, document_id, version_label, mime_type, byte_size, status, original_filename, created_at").eq("user_id", user.id),
+      supabase.from("opportunities").select("id, title, organization, category, source, source_url, location, deadline_at, analysis_status").eq("user_id", user.id),
+      supabase.from("applications").select("id, status, submitted_at, deadline_at, deadline_timezone, persona, opportunity_id").eq("user_id", user.id),
       supabase.from("application_answers").select("id, application_id, question_id, approved_text, state").eq("user_id", user.id),
       supabase.from("submission_snapshots").select("id, application_id, submitted_at, answer_manifest, document_manifest").eq("user_id", user.id),
+      supabase.from("notifications").select("id, title, category, read_at, created_at, application_id").eq("user_id", user.id),
+      supabase.from("reminders").select("id, application_id, fire_at, channel, status, idempotency_key").eq("user_id", user.id),
+      supabase.from("eligibility_results").select("id, application_id, state, explanation, requirement_text").eq("user_id", user.id),
     ]);
 
     const payload = {
@@ -33,13 +43,19 @@ export async function GET(request: Request) {
         email: profile.email,
         displayName: profile.display_name,
         headline: profile.headline,
+        timezone: profile.timezone ?? null,
       },
       facts: facts ?? [],
       evidence: evidence ?? [],
       documents: documents ?? [],
+      documentVersions: versions ?? [],
+      opportunities: opportunities ?? [],
       applications: applications ?? [],
       answers: answers ?? [],
       snapshots: snapshots ?? [],
+      notifications: notifications ?? [],
+      reminders: reminders ?? [],
+      eligibility: eligibility ?? [],
     };
 
     return new NextResponse(JSON.stringify(payload, null, 2), {

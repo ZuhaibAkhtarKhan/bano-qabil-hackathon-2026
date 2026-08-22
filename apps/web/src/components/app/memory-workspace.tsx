@@ -173,6 +173,9 @@ export function MemoryWorkspace({
         <Field label="Work authorization" htmlFor="workAuthorization">
           <Input id="workAuthorization" name="workAuthorization" defaultValue={data.profile.work_authorization ?? ""} />
         </Field>
+        <Field label="Timezone" htmlFor="timezone" hint="IANA name used for deadline reminders, for example Asia/Karachi">
+          <Input id="timezone" name="timezone" defaultValue={data.profile.timezone ?? ""} placeholder="Asia/Karachi" />
+        </Field>
         <Field label="LinkedIn" htmlFor="linkedinUrl">
           <Input id="linkedinUrl" name="linkedinUrl" defaultValue={data.profile.linkedin_url ?? ""} />
         </Field>

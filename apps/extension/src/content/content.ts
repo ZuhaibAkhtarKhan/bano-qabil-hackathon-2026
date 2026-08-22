@@ -1114,11 +1114,13 @@ if (!root.__1APPLY_LISTENERS) {
     }
 
     if (message?.type === "GET_PAGE_META") {
+      const pageText = document.body?.innerText?.slice(0, 20_000) ?? "";
       sendResponse({
         type: "PAGE_META_RESULT",
         url: location.href,
         title: document.title,
-        excerpt: document.body?.innerText?.slice(0, 4000) ?? "",
+        excerpt: pageText.slice(0, 4000),
+        pageText,
       });
       return false;
     }

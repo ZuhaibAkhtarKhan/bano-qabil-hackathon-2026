@@ -17,6 +17,11 @@ function revalidateApplication(id: string) {
 
 // ─── Generate / regenerate ────────────────────────────────────────────────────
 
+function blankToNull(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+}
+
 const generateInput = z.object({
   applicationId: z.string().uuid(),
   questionId: z.string().uuid(),
@@ -34,8 +39,8 @@ export async function generateAnswerAction(formData: FormData) {
     questionId: formData.get("questionId"),
     intent: formData.get("intent") ?? "draft",
     tone: formData.get("tone") ?? "formal",
-    previousAnswerId: formData.get("previousAnswerId") ?? null,
-    previousAnswerText: formData.get("previousAnswerText") ?? null,
+    previousAnswerId: blankToNull(formData.get("previousAnswerId")),
+    previousAnswerText: blankToNull(formData.get("previousAnswerText")),
     previousGenerationCount: formData.get("previousGenerationCount")
       ? Number(formData.get("previousGenerationCount"))
       : 0,

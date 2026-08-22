@@ -40,7 +40,12 @@ export function htmlToText(html: string, max = 20_000): string {
 }
 
 export async function assertResolvedHostIsPublic(hostname: string): Promise<void> {
-  const { address } = await lookup(hostname);
+  const { address } = await Promise.race([
+    lookup(hostname),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("DNS_TIMEOUT")), 5_000);
+    }),
+  ]);
   if (isPrivateIpAddress(address)) {
     throw new UnsafeUrlError("Private, local, and metadata addresses are blocked.");
   }

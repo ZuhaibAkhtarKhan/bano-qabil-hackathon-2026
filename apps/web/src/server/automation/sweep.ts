@@ -32,7 +32,7 @@ async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<Ap
       { data: review },
       { data: calendar },
     ] = await Promise.all([
-      supabase.from("application_questions").select("id").eq("application_id", application.id),
+      supabase.from("opportunity_questions").select("id").eq("opportunity_id", application.opportunity_id),
       supabase.from("application_answers").select("id, state, approved_text").eq("application_id", application.id),
       supabase.from("application_documents").select("id").eq("application_id", application.id),
       supabase.from("opportunity_documents").select("label, required").eq("opportunity_id", application.opportunity_id),
