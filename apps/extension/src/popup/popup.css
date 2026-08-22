@@ -5,15 +5,54 @@
   --line: #e7e7e0;
   --canvas: #f9faf6;
   --mint: #d8efe4;
+  --font-brand: "Geist", "Segoe UI", system-ui, sans-serif;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/Geist-Bold.woff2") format("woff2");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   width: 320px;
   padding: 16px;
-  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  font: 13px/1.45 var(--font-brand);
   color: var(--ink);
   background: var(--canvas);
+}
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.wordmark-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #0e0e0e;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.wordmark-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.wordmark-label {
+  font-family: var(--font-brand);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 .eyebrow {
   margin: 0;
@@ -34,6 +73,7 @@ button {
   color: #fff;
   border-radius: 999px;
   padding: 8px 14px;
+  font-family: var(--font-brand);
   font-weight: 600;
   cursor: pointer;
 }

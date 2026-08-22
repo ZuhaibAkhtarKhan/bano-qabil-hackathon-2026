@@ -32,5 +32,6 @@ for (const file of ["manifest.json", "src/popup/popup.html", "src/popup/popup.cs
 }
 
 cpSync(path.join(root, "icons"), path.join(dist, "icons"), { recursive: true });
+cpSync(path.join(root, "fonts"), path.join(dist, "fonts"), { recursive: true });
 
 console.info("Extension written to dist/. Load unpacked from apps/extension/dist");
