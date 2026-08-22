@@ -1,0 +1,36 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": [
+    "src/App.tsx",
+    "src/main.tsx",
+    "src/app/page.tsx",
+    "src/app/globals.css",
+    "src/pages/authenticated-workspace.tsx",
+    "src/components/error-boundary.tsx",
+    "src/components/brand/wordmark.tsx",
+    "src/components/marketing/**/*",
+    "src/components/ui/button.tsx",
+    "src/components/ui/status-pill.tsx",
+    "src/components/app/nav.ts",
+    "src/lib/cn.ts",
+    "src/lib/utils.ts"
+  ],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "preserve",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "bundler",
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "references": [
+    {
+      "path": "../../lib/api-client-react"
+    }
+  ]
+}

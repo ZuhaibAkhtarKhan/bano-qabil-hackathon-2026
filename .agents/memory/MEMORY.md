@@ -1,0 +1,1 @@
+- [Supabase remains authoritative](supabase-source-of-truth.md) — authentication and user-owned application data must stay on the imported Supabase project; do not substitute Clerk or Replit tables.
