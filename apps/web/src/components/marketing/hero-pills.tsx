@@ -111,6 +111,9 @@ const foregroundPills: ForegroundPill[] = [
   },
 ];
 
+const INTRO_DURATION_MS = 1450;
+const INTRO_STAGGER_MS = 70;
+
 function slotStyle(
   item: {
     top: string;
@@ -140,6 +143,10 @@ function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 
+function easeOutCubic(t: number) {
+  return 1 - (1 - t) ** 3;
+}
+
 /** Gentle S-curve — slow start and end for scroll-linked motion. */
 function easeScroll(t: number) {
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -149,7 +156,18 @@ function lerp(current: number, target: number, amount: number) {
   return current + (target - current) * amount;
 }
 
-type SlotMetrics = { offsetX: number; offsetY: number; baseX: string };
+function clamp01(n: number) {
+  return Math.min(1, Math.max(0, n));
+}
+
+type SlotMetrics = {
+  offsetX: number;
+  offsetY: number;
+  restX: number;
+  restY: number;
+  baseX: string;
+  index: number;
+};
 
 export function HeroPills({
   sectionRef,
@@ -165,18 +183,31 @@ export function HeroPills({
   const targetProgressRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const reducedMotionRef = useRef(false);
+  const introStartRef = useRef<number | null>(null);
+  const introDoneRef = useRef(false);
 
   const measureSlots = useCallback(() => {
     const section = sectionRef.current;
+    const queue = queueRef.current;
     const root = rootRef.current;
     if (!section || !root) return;
 
     const sectionRect = section.getBoundingClientRect();
     const targetX = sectionRect.width / 2;
     const targetY = sectionRect.height * 0.5;
+
+    // Origin: top-center of the dashboard peek (pills emerge from behind it)
+    let originX = targetX;
+    let originY = sectionRect.height * 0.92;
+    if (queue) {
+      const queueRect = queue.getBoundingClientRect();
+      originX = queueRect.left - sectionRect.left + queueRect.width / 2;
+      originY = queueRect.top - sectionRect.top + Math.min(72, queueRect.height * 0.12);
+    }
+
     const map = new Map<HTMLElement, SlotMetrics>();
 
-    root.querySelectorAll<HTMLElement>(".hero-pill-slot").forEach((slot) => {
+    root.querySelectorAll<HTMLElement>(".hero-pill-slot").forEach((slot, index) => {
       const motion = slot.querySelector<HTMLElement>(".hero-pill-motion");
       if (!motion) return;
 
@@ -191,12 +222,15 @@ export function HeroPills({
       map.set(slot, {
         offsetX: cx - targetX,
         offsetY: cy - targetY,
+        restX: cx - originX,
+        restY: cy - originY,
         baseX,
+        index,
       });
     });
 
     slotMetricsRef.current = map;
-  }, [sectionRef]);
+  }, [queueRef, sectionRef]);
 
   const applyMotion = useCallback(() => {
     const root = rootRef.current;
@@ -208,7 +242,6 @@ export function HeroPills({
     const queueRect = queue.getBoundingClientRect();
 
     const peekHeight = 56;
-    // Longer scroll span so pills drift slowly across most of the hero + queue reveal
     const scrollEnd = Math.max(
       sectionRect.height * 1.05 + queueRect.height * 0.45,
       (queue.offsetTop - peekHeight) * 1.65,
@@ -220,7 +253,6 @@ export function HeroPills({
     smoothProgressRef.current = lerp(smoothProgressRef.current, targetProgressRef.current, 0.085);
     const progress = smoothProgressRef.current;
 
-    // Movement leads; fade trails slightly behind for a softer tuck-under
     const moveProgress = easeInOutCubic(Math.min(1, progress / 0.92));
     const fadeProgress = easeInOutCubic(Math.max(0, (progress - 0.12) / 0.88));
 
@@ -232,35 +264,63 @@ export function HeroPills({
         el.style.transform = "";
         el.style.opacity = "1";
       });
+      root.classList.add("hero-pills--ready");
       return;
     }
 
-    // Target tuck point: center-x, just under the queue card header
+    const now = performance.now();
+    if (
+      introStartRef.current !== null &&
+      !introDoneRef.current &&
+      now - introStartRef.current > INTRO_DURATION_MS + INTRO_STAGGER_MS * slotMetricsRef.current.size
+    ) {
+      introDoneRef.current = true;
+    }
+
     const tuckY = queueRect.top - sectionRect.top + peekHeight * 0.5;
 
     slotMetricsRef.current.forEach((metrics, slot) => {
       const motion = slot.querySelector<HTMLElement>(".hero-pill-motion");
       if (!motion) return;
 
-      const { offsetX, offsetY, baseX } = metrics;
+      const { offsetX, offsetY, restX, restY, baseX, index } = metrics;
 
-      // Converge to center, sink down under the queue card
+      const introT = introDoneRef.current
+        ? 1
+        : introStartRef.current === null
+          ? 0
+          : easeOutCubic(
+              clamp01((now - introStartRef.current - index * INTRO_STAGGER_MS) / INTRO_DURATION_MS),
+            );
+
+      // From dashboard origin → rest
+      const emergeX = -restX * (1 - introT);
+      const emergeY = -restY * (1 - introT);
+      const emergeScale = 0.72 + introT * 0.28;
+      const emergeOpacity = 0.15 + introT * 0.85;
+
+      // Scroll tuck
       const convergeX = -offsetX * moveProgress;
       const convergeY = -offsetY * moveProgress + moveProgress * (tuckY - sectionRect.height * 0.5);
-      const scale = 1 - fadeProgress * 0.18;
-      const opacity = Math.max(0, 1 - fadeProgress * 0.92);
+      const scrollScale = 1 - fadeProgress * 0.18;
+      const scrollOpacity = Math.max(0, 1 - fadeProgress * 0.92);
 
       const parallax = parseFloat(slot.style.getPropertyValue("--pill-parallax") || "0.05");
-      const mouseX = mx * parallax * 90 * mouseStrength;
-      const mouseY = my * parallax * 60 * mouseStrength;
+      const mouseX = mx * parallax * 90 * mouseStrength * introT;
+      const mouseY = my * parallax * 60 * mouseStrength * introT;
 
       const baseTranslate = baseX !== "0px" ? `translateX(${baseX}) ` : "";
+      const x = emergeX + convergeX + mouseX;
+      const y = emergeY + convergeY + mouseY;
+      const scale = emergeScale * scrollScale;
+      const opacity = emergeOpacity * scrollOpacity;
 
-      motion.style.transform = `${baseTranslate}translate3d(${convergeX + mouseX}px, ${convergeY + mouseY}px, 0) scale(${scale})`;
+      motion.style.transform = `${baseTranslate}translate3d(${x}px, ${y}px, 0) scale(${scale})`;
       motion.style.opacity = String(opacity);
-      slot.style.animationPlayState = moveProgress > 0.06 ? "paused" : "running";
+      slot.style.animationPlayState = introT < 0.95 || moveProgress > 0.06 ? "paused" : "running";
     });
 
+    root.classList.add("hero-pills--ready");
     root.style.opacity = String(Math.max(0, 1 - fadeProgress * 0.95));
   }, [queueRef, sectionRef]);
 
@@ -269,7 +329,14 @@ export function HeroPills({
 
     const loop = () => {
       applyMotion();
-      if (Math.abs(smoothProgressRef.current - targetProgressRef.current) > 0.001) {
+      const introActive =
+        !reducedMotionRef.current &&
+        introStartRef.current !== null &&
+        !introDoneRef.current;
+      if (
+        introActive ||
+        Math.abs(smoothProgressRef.current - targetProgressRef.current) > 0.001
+      ) {
         rafRef.current = window.requestAnimationFrame(loop);
       } else {
         rafRef.current = null;
@@ -300,7 +367,20 @@ export function HeroPills({
     };
 
     measureSlots();
-    schedule();
+
+    if (reducedMotionRef.current || window.scrollY > 24) {
+      introDoneRef.current = true;
+      introStartRef.current = performance.now() - INTRO_DURATION_MS * 2;
+      schedule();
+    } else {
+      introDoneRef.current = false;
+      introStartRef.current = null;
+      requestAnimationFrame(() => {
+        measureSlots();
+        introStartRef.current = performance.now();
+        schedule();
+      });
+    }
 
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("pointermove", onPointerMove, { passive: true });

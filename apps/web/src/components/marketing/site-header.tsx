@@ -1,3 +1,5 @@
+"use client";
+
 import { Wordmark } from "@/components/brand/wordmark";
 import { ButtonLink } from "@/components/ui/button";
 
@@ -8,11 +10,28 @@ const links = [
   { href: "#safety", label: "Safety" },
 ];
 
+function scrollToHash(hash: string) {
+  const id = hash.replace(/^#/, "");
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  // Instant jump so Pricing (and other anchors) don't scrub through the tall how-it-works sticky section
+  el.scrollIntoView({ behavior: "auto", block: "start" });
+  window.history.pushState(null, "", hash);
+}
+
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-line/70 bg-canvas/90 backdrop-blur-md">
       <div className="relative flex h-16 w-full items-center pl-3 pr-5 sm:pl-4 sm:pr-8 lg:pl-6 lg:pr-10">
-        <a href="#top" className="-ml-0.5 shrink-0 focus-visible:outline-offset-4 sm:-ml-1">
+        <a
+          href="#top"
+          className="-ml-0.5 shrink-0 focus-visible:outline-offset-4 sm:-ml-1"
+          onClick={(event) => {
+            event.preventDefault();
+            scrollToHash("#top");
+          }}
+        >
           <Wordmark />
         </a>
 
@@ -21,7 +40,15 @@ export function SiteHeader() {
           aria-label="Primary"
         >
           {links.map((link) => (
-            <a key={link.href} href={link.href} className="hover:text-ink">
+            <a
+              key={link.href}
+              href={link.href}
+              className="hover:text-ink"
+              onClick={(event) => {
+                event.preventDefault();
+                scrollToHash(link.href);
+              }}
+            >
               {link.label}
             </a>
           ))}
