@@ -724,3 +724,41 @@ export async function resolveReviewItem(formData: FormData) {
   revalidateApplication(applicationId);
   redirectWith(applicationPath(applicationId), { notice: "saved" }, "review");
 }
+
+export async function deleteApplication(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "");
+  if (!applicationId) {
+    redirectWith("/app/applications", { error: "required" });
+  }
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!application) {
+    redirectWith("/app/applications", { error: "not_found" });
+  }
+
+  await recordApplicationEvent(supabase, actor, applicationId, "application.deleted", {
+    applicationId,
+  });
+
+  const { error } = await supabase
+    .from("applications")
+    .delete()
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    redirectWith(applicationPath(applicationId), { error: "save" }, "review");
+  }
+
+  revalidatePath("/app");
+  revalidatePath("/app/applications");
+  redirectWith("/app/applications", { notice: "deleted" });
+}
+

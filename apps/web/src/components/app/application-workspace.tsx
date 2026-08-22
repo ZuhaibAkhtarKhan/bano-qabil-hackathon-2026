@@ -31,6 +31,7 @@ import {
 import { applicationTone, formatDeadline } from "@/components/app/application-summary";
 import {
   attachDocument,
+  deleteApplication,
   markSubmitted,
   resolveReviewItem,
   updateApplicationPersona,
@@ -570,6 +571,19 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 <dd className="mt-1">{timelineItems[timelineItems.length - 1]?.title ?? "No activity yet"}</dd>
               </div>
             </dl>
+          </Card>
+
+          <Card className="border-coral/20 p-6">
+            <h2 className="font-display text-2xl text-coral">Danger Zone</h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              Permanently delete this application and its prepared answers, mappings, and evaluations.
+            </p>
+            <form action={deleteApplication} className="mt-4">
+              <input type="hidden" name="applicationId" value={application.id} />
+              <Button type="submit" variant="secondary" className="border-coral/30 text-coral hover:bg-coral-soft">
+                Delete application
+              </Button>
+            </form>
           </Card>
         </div>
       </section>

@@ -43,6 +43,14 @@ Apply migrations in order:
 - `supabase/migrations/20260818050000_documents_evidence.sql`
 - `supabase/migrations/20260818060000_opportunity_intelligence.sql`
 - `supabase/migrations/20260818070000_phase8_intelligence.sql`
+- `supabase/migrations/20260818080000_answer_generation.sql`
+- `supabase/migrations/20260818100000_application_workflow.sql`
+- `supabase/migrations/20260818110000_submission_deadline_intelligence.sql`
+- `supabase/migrations/20260818120000_email_calendar_integration.sql`
+- `supabase/migrations/20260819140000_opportunity_discovery.sql`
+- `supabase/migrations/20260819150000_notifications_automation.sql`
+- `supabase/migrations/20260819160000_security_hardening.sql`
+- `supabase/migrations/20260819180000_account_deletion.sql`
 
 ```bash
 npm run lint

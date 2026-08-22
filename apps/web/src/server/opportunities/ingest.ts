@@ -157,7 +157,8 @@ export async function pasteIntoOpportunity(input: {
 
   const applicationId = await ensureApplication(input.supabase, input.userId, opportunity.id, null);
   const previousMetadata = ((opportunity.metadata as Record<string, unknown> | null) ?? {});
-  const { fetchError: _fetchError, ...keptMetadata } = previousMetadata;
+  const keptMetadata = { ...previousMetadata };
+  delete keptMetadata.fetchError;
   const metadata = {
     ...keptMetadata,
     pastedAt: new Date().toISOString(),
