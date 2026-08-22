@@ -48,12 +48,14 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: clip;
 }
 
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  overflow-x: clip;
 }
 
 ::selection {
@@ -380,6 +382,51 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Sample dashboard preview (marketing hero) */
+.dashboard-preview-shell {
+  transform: translateZ(0);
+}
+
+.dashboard-match-card {
+  min-height: 9.5rem;
+}
+
+.dashboard-match-ring-progress {
+  will-change: stroke-dashoffset;
+}
+
+.dashboard-applied-cell {
+  height: 1rem;
+  overflow: hidden;
+}
+
+.dashboard-live-activity {
+  display: flex;
+  width: 100%;
+}
+
+.dashboard-live-dot {
+  animation: dashboard-live-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dashboard-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+
+@media (max-width: 1023px) {
+  .dashboard-preview-layout {
+    min-height: 480px;
   }
 }
 

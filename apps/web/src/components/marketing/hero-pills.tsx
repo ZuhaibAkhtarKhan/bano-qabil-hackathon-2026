@@ -49,6 +49,7 @@ const blurPills: BlurPill[] = [
   { id: "blur-4", tone: tones.brick, top: "72%", right: "18%", width: "6.5rem", height: "1.15rem", floatDuration: 4.2, floatDelay: 1.4, parallax: 0.08 },
   { id: "blur-5", tone: tones.mint, top: "38%", right: "12%", width: "8rem", height: "1.3rem", floatDuration: 6.2, floatDelay: 0.9, parallax: 0.1 },
   { id: "blur-6", tone: tones.mist, top: "58%", left: "5%", width: "5rem", height: "1rem", floatDuration: 5, floatDelay: 1.8, parallax: 0.12 },
+  { id: "blur-7", tone: tones.celadon, top: "72%", left: "4%", width: "6.5rem", height: "1.15rem", floatDuration: 5.6, floatDelay: 0.5, parallax: 0.1 },
 ];
 
 const foregroundPills: ForegroundPill[] = [
@@ -77,7 +78,7 @@ const foregroundPills: ForegroundPill[] = [
   },
   {
     id: "fit",
-    label: "Fit Index 87",
+    label: "Fit Index",
     tone: tones.celadon,
     top: "18%",
     right: "8%",
