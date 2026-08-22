@@ -1,0 +1,42 @@
+{
+  "name": "@1apply/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --turbopack --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@1apply/contracts": "*",
+    "@1apply/domain": "*",
+    "@1apply/form-engine": "*",
+    "@supabase/ssr": "0.12.4",
+    "@supabase/supabase-js": "2.112.3",
+    "lucide-react": "0.542.0",
+    "mammoth": "^1.12.1",
+    "next": "15.5.23",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "unpdf": "^1.8.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.1",
+    "@playwright/test": "1.55.0",
+    "@tailwindcss/postcss": "4.1.12",
+    "@types/node": "24.3.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "eslint": "9.35.0",
+    "eslint-config-next": "15.5.23",
+    "tailwindcss": "4.1.12",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
