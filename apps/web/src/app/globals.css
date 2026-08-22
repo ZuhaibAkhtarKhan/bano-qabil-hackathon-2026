@@ -86,6 +86,40 @@ body {
   animation: marquee 32s linear infinite;
 }
 
+.logo-marquee-track {
+  animation-duration: 48s;
+}
+
+.logo-marquee-item {
+  height: 4.25rem;
+}
+
+.logo-marquee-img {
+  display: block;
+  width: auto;
+  max-width: none;
+  object-fit: contain;
+  object-position: center;
+  opacity: 0.9;
+  transition: opacity 200ms var(--ease-nominal);
+}
+
+.logo-marquee-item[data-size="sm"] .logo-marquee-img {
+  height: 1.45rem;
+}
+
+.logo-marquee-item[data-size="md"] .logo-marquee-img {
+  height: 2.75rem;
+}
+
+.logo-marquee-item[data-size="lg"] .logo-marquee-img {
+  height: 4rem;
+}
+
+.logo-marquee:hover .logo-marquee-img {
+  opacity: 1;
+}
+
 .float-badge {
   animation: float-y 4.2s ease-in-out infinite;
 }
@@ -382,6 +416,122 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Engine section — scroll bars bridge into the dark platform */
+.engine-bars-band {
+  background: var(--color-canvas);
+  padding: 3.5rem 0 0;
+  overflow-x: clip;
+}
+
+.engine-bars-svg {
+  display: block;
+  width: 100%;
+  height: clamp(11rem, 28vw, 16rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .engine-bars-svg {
+    transition: none;
+  }
+}
+
+/* Pricing section */
+.pricing-header,
+.pricing-card,
+.pricing-footnotes {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 700ms var(--ease-nominal),
+    transform 700ms var(--ease-nominal),
+    box-shadow 280ms var(--ease-nominal),
+    border-color 280ms var(--ease-nominal);
+}
+
+.pricing-card {
+  transition-delay: var(--pricing-delay, 0ms);
+}
+
+.pricing-footnotes {
+  transition-delay: 480ms;
+}
+
+.pricing-section.is-visible .pricing-header,
+.pricing-section.is-visible .pricing-card,
+.pricing-section.is-visible .pricing-footnotes {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pricing-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 22px 48px -28px rgba(14, 14, 14, 0.28);
+}
+
+.pricing-section.is-visible .pricing-card:hover {
+  transform: translateY(-6px);
+}
+
+.pricing-card-featured:hover {
+  box-shadow: 0 28px 64px -24px rgba(14, 14, 14, 0.65);
+}
+
+.pricing-badge-dot {
+  animation: pricing-pulse 1.8s ease-in-out infinite;
+}
+
+.pricing-section.is-visible .pricing-apps {
+  animation: pricing-count-in 720ms var(--ease-nominal) both;
+  animation-delay: calc(var(--pricing-delay, 0ms) + 180ms);
+}
+
+.pricing-cta {
+  transition: transform 220ms var(--ease-nominal);
+}
+
+.pricing-card:hover .pricing-cta {
+  transform: translateY(-1px);
+}
+
+@keyframes pricing-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes pricing-count-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pricing-header,
+  .pricing-card,
+  .pricing-footnotes,
+  .pricing-section.is-visible .pricing-apps {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .pricing-badge-dot {
+    animation: none !important;
   }
 }
 
