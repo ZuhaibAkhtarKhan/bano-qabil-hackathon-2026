@@ -1,3 +1,6 @@
+import { PlatformCardIcon } from "@/components/marketing/platform-card-icon";
+import { TextRevealHeading } from "@/components/marketing/text-reveal-heading";
+
 function PlatformBullet() {
   return (
     <svg
@@ -45,16 +48,7 @@ const pillars = [
 function PlatformCard({ pillar }: { pillar: (typeof pillars)[number] }) {
   return (
     <article className="platform-card">
-      <figure className="platform-card-image">
-        {/* eslint-disable-next-line @next/next/no-img-element -- external Sanity CDN icons */}
-        <img
-          src={pillar.image}
-          alt=""
-          width={pillar.imageWidth}
-          height={pillar.imageHeight}
-          className="platform-card-img"
-        />
-      </figure>
+      <PlatformCardIcon src={pillar.image} width={pillar.imageWidth} height={pillar.imageHeight} />
       <div className="platform-card-text">
         <h3 className="platform-card-title">{pillar.title}</h3>
         <div className="platform-card-body">
@@ -82,9 +76,9 @@ export function Pillars() {
         <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-ink-muted">
           Platform
         </p>
-        <h2 className="mt-3 max-w-3xl font-display text-4xl leading-tight sm:text-5xl">
+        <TextRevealHeading className="mt-3 max-w-3xl">
           Create once. Analyze, match, generate, review, apply, remember.
-        </h2>
+        </TextRevealHeading>
       </div>
 
       <div className="platform-content mt-12">
