@@ -6,7 +6,7 @@ import {
   rankEvidenceForQuestion,
   rankResumes,
   type MemoryEvidence,
-} from "@/server/domain/matching";
+} from "@1apply/domain";
 
 const evidence: MemoryEvidence[] = [
   {

@@ -18,7 +18,7 @@ import {
   setCurrentDocumentVersion,
 } from "@/server/documents/service";
 import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 import { reindexUserRetrievalCorpus } from "@/services/embeddings";
 import { recordAuditEvent } from "@/server/audit";
 

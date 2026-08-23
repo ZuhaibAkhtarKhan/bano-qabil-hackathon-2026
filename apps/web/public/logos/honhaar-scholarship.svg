@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#065f46"/>
+  <path d="M32 14l4.5 9.1 10.1 1.5-7.3 7.1 1.7 10L32 37.8l-9 3.9 1.7-10-7.3-7.1 10.1-1.5L32 14z" fill="#fbbf24"/>
+  <text x="32" y="54" text-anchor="middle" fill="#ecfdf5" font-family="system-ui,sans-serif" font-size="8" font-weight="700">HONHAAR</text>
+</svg>

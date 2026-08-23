@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Actor } from "@/auth/actor";
 import { computeApplicationCompleteness } from "@/lib/application-workflow";
 import { emitDomainEvent } from "@/server/notifications/service";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 
 async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<ApplicationAutomationSnapshot[]> {
   const [{ data: applications }, { data: integrations }] = await Promise.all([

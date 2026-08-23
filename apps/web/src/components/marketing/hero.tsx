@@ -1,14 +1,22 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 import { ApplicationQueue } from "@/components/marketing/application-queue";
+import { ApplicationQueuePreview } from "@/components/marketing/application-queue-preview";
 import { HeroPills } from "@/components/marketing/hero-pills";
 import { ButtonLink } from "@/components/ui/button";
 
 export function Hero() {
   const sectionRef = useRef<HTMLElement>(null);
   const queueRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+  const [previewEpoch, setPreviewEpoch] = useState(0);
+
+  useEffect(() => {
+    setPreviewEpoch((epoch) => epoch + 1);
+  }, [pathname]);
 
   return (
     <>
@@ -45,6 +53,7 @@ export function Hero() {
       </section>
 
       <div ref={queueRef}>
+        <ApplicationQueuePreview animationEpoch={previewEpoch} />
         <ApplicationQueue />
       </div>
     </>

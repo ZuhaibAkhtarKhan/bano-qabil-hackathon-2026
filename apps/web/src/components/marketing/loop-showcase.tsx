@@ -12,7 +12,7 @@ const steps = [
 
 export function LoopShowcase() {
   return (
-    <section id="how-it-works" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8">
+    <section id="core-loop" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8">
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
         <div className="grid lg:grid-cols-2">
           <div className="border-b border-line p-8 lg:border-b-0 lg:border-r lg:p-12">
