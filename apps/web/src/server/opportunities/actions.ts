@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { opportunityCategorySchema } from "@1apply/contracts";
 import { normalizeOpportunityUrl } from "@1apply/domain";
 
-import { UnsafeUrlError } from "@/lib/security/public-url";
+import { UnsafeUrlError, parsePublicHttpUrl } from "@/lib/security/public-url";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
@@ -14,10 +14,12 @@ import { runOwnedJob } from "@/server/jobs/runner";
 import { parseDiscoveryQuery, runOpportunityAnalysisJob } from "@/server/opportunities/analyze";
 import { runOpportunityDiscovery } from "@/server/opportunities/discover";
 import {
+  createFetchFailedOpportunity,
   createManualOpportunityRecord,
   findDuplicateOpportunity,
   ingestOpportunityPage,
   ingestPastedContent,
+  pasteIntoOpportunity,
 } from "@/server/opportunities/ingest";
 
 function splitLines(value: FormDataEntryValue | null): string[] {
@@ -73,12 +75,30 @@ export async function ingestOpportunityUrl(formData: FormData) {
   const rawUrl = String(formData.get("url") ?? "").trim();
   if (!rawUrl) redirectWith("/app/opportunities", { error: "required" });
 
+  let canonicalUrl: string;
+  try {
+    canonicalUrl = parsePublicHttpUrl(rawUrl).toString();
+  } catch (error) {
+    if (error instanceof UnsafeUrlError) redirectWith("/app/opportunities", { error: "unsafe_url" });
+    redirectWith("/app/opportunities", { error: "unsafe_url" });
+  }
+
   let page: { url: string; text: string; title: string };
   try {
     page = await fetchPublicPageText(rawUrl);
   } catch (error) {
     if (error instanceof UnsafeUrlError) redirectWith("/app/opportunities", { error: "unsafe_url" });
-    redirectWith("/app/opportunities", { error: "page_fetch" });
+    const stub = await createFetchFailedOpportunity({
+      supabase,
+      actor,
+      userId: user.id,
+      sourceUrl: rawUrl,
+      canonicalUrl,
+      fetchError: error instanceof Error ? error.message : "page_fetch",
+    });
+    revalidatePath("/app/opportunities");
+    revalidatePath("/app/applications");
+    redirectWith(opportunityPath(stub.opportunityId), { notice: stub.duplicate ? "duplicate_opportunity" : "fetch_failed" });
   }
 
   const result = await ingestOpportunityPage({
@@ -117,6 +137,29 @@ export async function ingestPastedOpportunity(formData: FormData) {
 
   revalidatePath("/app/opportunities");
   redirectWith(opportunityPath(result.opportunityId), { notice: "analyzing" });
+}
+
+export async function pasteIntoSavedOpportunity(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const opportunityId = String(formData.get("opportunityId") ?? "");
+  const pastedText = String(formData.get("pastedText") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  if (!opportunityId || pastedText.length < 40) {
+    redirectWith(opportunityPath(opportunityId || ""), { error: "required" });
+  }
+
+  const result = await pasteIntoOpportunity({
+    supabase,
+    actor,
+    userId: user.id,
+    opportunityId,
+    pastedText,
+    title: title || null,
+  });
+
+  revalidatePath("/app/opportunities");
+  revalidatePath("/app/applications");
+  redirectWith(opportunityPath(result.opportunityId), { notice: "pasted" });
 }
 
 export async function reanalyzeOpportunity(formData: FormData) {

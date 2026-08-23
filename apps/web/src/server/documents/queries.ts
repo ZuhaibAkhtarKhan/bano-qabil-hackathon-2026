@@ -7,13 +7,22 @@ export async function loadDocumentDetail(documentId: string) {
   const { data: document } = await supabase
     .from("documents")
     .select(
-      "id, type, label, current_version_id, created_at, updated_at, document_versions ( id, version_label, mime_type, byte_size, status, original_filename, source, storage_path, created_at )",
+      "id, type, label, current_version_id, created_at, updated_at, document_versions!document_id ( id, version_label, mime_type, byte_size, status, original_filename, source, storage_path, created_at )",
     )
     .eq("id", documentId)
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (!document) return null;
+
+  const { data: chunks } = document.current_version_id
+    ? await supabase
+        .from("document_chunks")
+        .select("chunk_index, content")
+        .eq("document_version_id", document.current_version_id)
+        .order("chunk_index", { ascending: true })
+        .limit(6)
+    : { data: [] as Array<{ chunk_index: number; content: string }> };
 
   const { data: attachedApplications } = await supabase
     .from("application_documents")
@@ -46,5 +55,9 @@ export async function loadDocumentDetail(documentId: string) {
     document: document as DocumentListRow,
     attachedApplications: attachedApplications ?? [],
     snapshotUses,
+    extractedPreview: (chunks ?? [])
+      .map((chunk) => String(chunk.content ?? ""))
+      .join("\n\n")
+      .slice(0, 4000),
   };
 }

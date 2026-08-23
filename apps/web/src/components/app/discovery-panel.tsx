@@ -1,7 +1,7 @@
 import { opportunityCategorySchema } from "@1apply/contracts";
 import { computeDeadlineInfo, type RankedDiscovery } from "@1apply/domain";
 
-import { Button, ButtonLink } from "@/components/ui/button";
+import { Button, ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScoreIndicator } from "@/components/ui/data";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
@@ -70,7 +70,7 @@ export function DiscoveryPanel({
             Remote OK
           </label>
         </div>
-        <Button type="submit">Search and rank</Button>
+        <SubmitButton pendingText="Searching & ranking in real time…">Search and rank</SubmitButton>
       </form>
       {summary ? <p className="mt-4 text-sm text-ink-muted">{summary}</p> : null}
       {results.length > 0 ? (

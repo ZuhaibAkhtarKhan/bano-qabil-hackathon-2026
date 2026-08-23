@@ -2,6 +2,7 @@ import {
   computeDeadlineInfo,
   evaluateSubmissionGuard,
   assessOperatingLoop,
+  PERSONA_PRESETS,
   type SubmissionInput,
 } from "@1apply/domain";
 import { applicationStatusSchema } from "@1apply/contracts";
@@ -19,7 +20,7 @@ import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress, Timeline } from "@/components/ui/data";
-import { Field, Select } from "@/components/ui/field";
+import { Field, Input, Select } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
   allowedTransitions,
@@ -28,7 +29,15 @@ import {
   normalizeApplicationStatus,
 } from "@/lib/application-workflow";
 import { applicationTone, formatDeadline } from "@/components/app/application-summary";
-import { attachDocument, markSubmitted, resolveReviewItem, updateApplicationStatus } from "@/server/applications/actions";
+import {
+  attachDocument,
+  deleteApplication,
+  markSubmitted,
+  resolveReviewItem,
+  updateApplicationPersona,
+  updateApplicationSchedule,
+  updateApplicationStatus,
+} from "@/server/applications/actions";
 import type { loadApplicationWorkspace } from "@/server/workspace/queries";
 
 const spine = [
@@ -47,6 +56,14 @@ type CurrentAnswer = NonNullable<Workspace["questions"][number]["answer"]>;
 
 function fmtDateTime(value: string) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function toDatetimeLocal(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 function coerceAnswer(answer: CurrentAnswer, applicationId: string) {
@@ -159,8 +176,15 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
       <PageHeader
         eyebrow="Application workspace"
         title={opportunity?.title ?? "Untitled opportunity"}
-        body={`${opportunity?.organization ?? "Unknown host"} · ${formatDeadline(application.deadline_at)} · This workspace manages evidence, drafts, and history. It never submits for you.`}
-        actions={<StatusPill tone={applicationTone(application.status)}>{applicationStatusLabel(application.status)}</StatusPill>}
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-mint-soft px-2.5 py-1 font-mono text-[11px] font-medium text-emerald-800">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live synced
+            </span>
+            <StatusPill tone={applicationTone(application.status)}>{applicationStatusLabel(application.status)}</StatusPill>
+          </div>
+        }
       />
       <FlashBanner notice={notice} error={error} />
 
@@ -234,10 +258,48 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
               <dd className="mt-1">{application.next_action ?? "Analyze this opportunity"}</dd>
             </div>
           </dl>
-        {opportunity?.raw_excerpt ? (
+          <form action={updateApplicationSchedule} className="mt-6 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <input type="hidden" name="applicationId" value={application.id} />
+            <Field label="Deadline" htmlFor={`deadline-${application.id}`}>
+              <Input
+                id={`deadline-${application.id}`}
+                name="deadline"
+                type="datetime-local"
+                defaultValue={toDatetimeLocal(application.deadline_at)}
+              />
+            </Field>
+            <Field label="Timezone" htmlFor={`timezone-${application.id}`} hint="IANA name, for example Asia/Karachi">
+              <Input
+                id={`timezone-${application.id}`}
+                name="timezone"
+                defaultValue={application.deadline_timezone ?? ""}
+                placeholder="Asia/Karachi"
+              />
+            </Field>
+            <Button type="submit" variant="secondary">
+              Save schedule
+            </Button>
+          </form>
+          <form action={updateApplicationPersona} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <input type="hidden" name="applicationId" value={application.id} />
+            <Field label="Answer voice" htmlFor={`persona-${application.id}`}>
+              <Select id={`persona-${application.id}`} name="persona" defaultValue={application.persona ?? ""}>
+                <option value="">Default evidence ranking</option>
+                {PERSONA_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label} — {preset.description}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button type="submit" variant="secondary">
+              Save voice
+            </Button>
+          </form>
+          {opportunity?.raw_excerpt ? (
             <p className="mt-6 max-h-40 overflow-auto rounded-xl bg-canvas p-4 text-sm leading-6 text-ink-muted">
-            {opportunity.raw_excerpt.slice(0, 1200)}
-          </p>
+              {opportunity.raw_excerpt.slice(0, 1200)}
+            </p>
           ) : null}
         </Card>
 
@@ -376,6 +438,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
             outcome: e.outcome,
             skills: e.skills,
           }))}
+          previousAnswers={data.previousAnswers}
         />
       </section>
 
@@ -392,8 +455,8 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           </div>
           {data.fieldMappings.length === 0 ? (
             <p className="mt-4 text-sm text-ink-muted">
-              No field mappings yet. Open the Chrome extension on the host form, scan fields, then approve a fill plan.
-              Mappings appear here after a fill-plan is created. 1-Apply never clicks submit.
+              No field mappings yet. Open the Chrome extension on the host form and use Fill from memory. Suggestions
+              write into fields automatically; chips appear when alternates exist. 1-Apply never clicks submit.
             </p>
           ) : (
             <ul className="mt-6 grid gap-3">
@@ -515,6 +578,19 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 <dd className="mt-1">{timelineItems[timelineItems.length - 1]?.title ?? "No activity yet"}</dd>
               </div>
             </dl>
+          </Card>
+
+          <Card className="border-coral/20 p-6">
+            <h2 className="font-display text-2xl text-coral">Danger Zone</h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              Permanently delete this application and its prepared answers, mappings, and evaluations.
+            </p>
+            <form action={deleteApplication} className="mt-4">
+              <input type="hidden" name="applicationId" value={application.id} />
+              <Button type="submit" variant="secondary" className="border-coral/30 text-coral hover:bg-coral-soft">
+                Delete application
+              </Button>
+            </form>
           </Card>
         </div>
       </section>

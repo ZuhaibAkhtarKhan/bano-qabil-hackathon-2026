@@ -1,25 +1,13 @@
-import { defaultAppBaseUrl, STORAGE_KEYS } from "../shared/messages";
+import {
+  ensureAppHostPermission,
+  loadSession,
+  openAppSignedIn,
+  saveSession,
+  type SessionState,
+} from "./session";
 
-export type SessionState = {
-  appBaseUrl: string;
-  deviceToken: string;
-};
-
-export async function loadSession(): Promise<SessionState> {
-  const stored = await chrome.storage.local.get([STORAGE_KEYS.appBaseUrl, STORAGE_KEYS.deviceToken]);
-  return {
-    appBaseUrl: String(stored[STORAGE_KEYS.appBaseUrl] || defaultAppBaseUrl()).replace(/\/$/, ""),
-    deviceToken: String(stored[STORAGE_KEYS.deviceToken] || ""),
-  };
-}
-
-export async function saveSession(partial: Partial<SessionState>): Promise<void> {
-  const current = await loadSession();
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.appBaseUrl]: (partial.appBaseUrl ?? current.appBaseUrl).replace(/\/$/, ""),
-    [STORAGE_KEYS.deviceToken]: partial.deviceToken ?? current.deviceToken,
-  });
-}
+export { loadSession, saveSession, ensureAppHostPermission, openAppSignedIn } from "./session";
+export type { SessionState };
 
 type Envelope<T> = { data: T | null; error: { code: string; message: string } | null; requestId: string };
 
@@ -33,14 +21,19 @@ export class ExtensionApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = await loadSession();
-  if (!session.deviceToken) {
-    throw new ExtensionApiError("UNAUTHENTICATED", "Connect the extension in Options with a pairing token from 1-Apply Settings.");
-  }
+async function cookieHeaderFor(url: string): Promise<string | null> {
+  if (!chrome.cookies?.getAll) return null;
+  const cookies = await chrome.cookies.getAll({ url });
+  if (!cookies.length) return null;
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+}
+
+async function directFetch<T>(session: SessionState, path: string, init: RequestInit): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${session.deviceToken}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const cookie = await cookieHeaderFor(session.appBaseUrl);
+  if (cookie) headers.set("Cookie", cookie);
+
   const response = await fetch(`${session.appBaseUrl}${path}`, {
     ...init,
     headers,
@@ -51,6 +44,70 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ExtensionApiError(json.error?.code ?? "REQUEST_FAILED", json.error?.message ?? "Request failed.");
   }
   return json.data;
+}
+
+async function ensureBridge(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["bridge.js"] });
+}
+
+async function bridgeFetch<T>(session: SessionState, path: string, init: RequestInit): Promise<T> {
+  const origin = new URL(session.appBaseUrl).origin;
+  const tabs = await chrome.tabs.query({ url: `${origin}/*` });
+  let tabId = tabs.find((tab) => tab.id)?.id;
+  if (!tabId) {
+    tabId = await openAppSignedIn(false);
+  }
+  await ensureBridge(tabId);
+  const result = (await chrome.tabs.sendMessage(tabId, {
+    type: "BRIDGE_FETCH",
+    path,
+    method: init.method ?? "GET",
+    body: typeof init.body === "string" ? init.body : init.body ? String(init.body) : null,
+  })) as { ok: boolean; status: number; json: Envelope<T>; error?: string };
+
+  if (result?.error) {
+    throw new ExtensionApiError("BRIDGE_FAILED", result.error);
+  }
+  if (!result?.ok || result.json?.error || result.json?.data == null) {
+    throw new ExtensionApiError(
+      result.json?.error?.code ?? "UNAUTHENTICATED",
+      result.json?.error?.message ?? "Sign in to 1-Apply in this browser, then try again.",
+    );
+  }
+  return result.json.data;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const session = await loadSession();
+  const allowed = await ensureAppHostPermission();
+  if (!allowed) {
+    throw new ExtensionApiError(
+      "HOST_PERMISSION",
+      "Allow access to your 1-Apply site in the extension permission prompt.",
+    );
+  }
+
+  try {
+    return await directFetch<T>(session, path, init);
+  } catch (error) {
+    const shouldBridge =
+      !(error instanceof ExtensionApiError) ||
+      error.code === "UNAUTHENTICATED" ||
+      error.code === "FORBIDDEN" ||
+      error.code === "REQUEST_FAILED";
+    if (!shouldBridge) throw error;
+    try {
+      return await bridgeFetch<T>(session, path, init);
+    } catch (bridgeError) {
+      if (error instanceof ExtensionApiError && (error.code === "UNAUTHENTICATED" || error.code === "FORBIDDEN")) {
+        throw new ExtensionApiError(
+          error.code,
+          "Sign in to 1-Apply in this browser (same profile), open Options → Connect, then retry.",
+        );
+      }
+      throw bridgeError instanceof Error ? bridgeError : error;
+    }
+  }
 }
 
 export function ingestOpportunity(input: {
@@ -96,11 +153,21 @@ export function createFillPlan(input: {
       source: string;
       confidence: number;
       proposedValue: string;
+      options: Array<{ value: string; label: string; source: string }>;
       approvalState: string;
       sensitive: boolean;
       excludedByDefault: boolean;
       reason: string;
       fieldType: string;
+      aiAnswerable: boolean;
+      showChip: boolean;
+      attachment?: {
+        documentId: string;
+        versionId: string;
+        filename: string;
+        mimeType: string;
+        byteSize: number;
+      } | null;
     }>;
   }>(`/api/applications/${input.applicationId}/fill-plan`, {
     method: "POST",
@@ -108,10 +175,63 @@ export function createFillPlan(input: {
   });
 }
 
+export function generateAiDraft(input: {
+  applicationId: string;
+  question: string;
+  fieldKey?: string;
+  guidance?: string;
+  limitValue?: number | null;
+  limitUnit?: "words" | "characters" | null;
+}) {
+  return request<{ draft: string; grounded: boolean; limitApplied?: boolean }>(
+    `/api/applications/${input.applicationId}/ai-draft`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        question: input.question,
+        fieldKey: input.fieldKey,
+        guidance: input.guidance,
+        limitValue: input.limitValue ?? null,
+        limitUnit: input.limitUnit ?? null,
+      }),
+    },
+  );
+}
+
 export function fetchSession() {
   return request<{ email: string; connected: true }>("/api/extension/session");
 }
 
 export function listApplications() {
-  return request<Array<{ id: string; title: string; organization: string | null }>>("/api/extension/applications");
+  return request<
+    Array<{
+      id: string;
+      title: string;
+      organization: string | null;
+      sourceUrl: string | null;
+      canonicalUrl: string | null;
+    }>
+  >("/api/extension/applications");
+}
+
+export function fetchDocumentFile(versionId: string) {
+  return request<{
+    versionId: string;
+    documentId: string;
+    filename: string;
+    mimeType: string;
+    byteSize: number;
+    base64: string;
+  }>(`/api/extension/documents/${versionId}`);
+}
+
+export async function connectWithWebsiteSession() {
+  await saveSession();
+  const allowed = await ensureAppHostPermission();
+  if (!allowed) {
+    throw new ExtensionApiError("HOST_PERMISSION", "Permission to access 1-Apply was denied.");
+  }
+  const tabId = await openAppSignedIn(true);
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["bridge.js"] });
+  return fetchSession();
 }

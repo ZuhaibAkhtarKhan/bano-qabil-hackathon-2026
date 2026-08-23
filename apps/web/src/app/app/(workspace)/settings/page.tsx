@@ -1,15 +1,23 @@
 import { signOut } from "@/app/app/actions";
 import { requestAccountDeletion } from "@/server/account/actions";
+import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
+import { ExtensionConnectCard } from "@/components/settings/extension-connect-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/field";
+import { Field, Input } from "@/components/ui/field";
 import { isAiConfigured } from "@/infra/ai/openai";
 import { getCurrentUserAndProfile } from "@/lib/profile";
 import { StatusPill } from "@/components/ui/status-pill";
+import { updateTimezone } from "@/server/memory/actions";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string; error?: string }>;
+}) {
   const { profile } = await getCurrentUserAndProfile();
+  const { notice, error } = await searchParams;
   const aiReady = isAiConfigured();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -20,6 +28,7 @@ export default async function SettingsPage() {
         title="Account"
         body="Export your data, connect the browser extension, or delete Application Memory. API keys never ship in this browser session."
       />
+      <FlashBanner notice={notice} error={error} />
       <div className="mt-8 grid max-w-2xl gap-6">
         <Card className="p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -44,12 +53,32 @@ export default async function SettingsPage() {
         </Card>
 
         <Card className="p-6">
+          <h2 className="text-base font-medium">Timezone</h2>
+          <p className="mt-2 text-sm text-ink-muted">
+            Used for deadline labels and in-app reminders when an application does not set its own timezone.
+          </p>
+          <form action={updateTimezone} className="mt-4 grid gap-3">
+            <Field label="IANA timezone" htmlFor="account-timezone">
+              <Input
+                id="account-timezone"
+                name="timezone"
+                defaultValue={profile?.timezone ?? ""}
+                placeholder="Asia/Karachi"
+              />
+            </Field>
+            <Button type="submit" variant="secondary">
+              Save timezone
+            </Button>
+          </form>
+        </Card>
+
+        <Card className="p-6">
           <h2 className="text-base font-medium">Browser extension</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            In the extension Options page, set the app URL to <code>{appUrl}</code> and paste your Supabase user access
-            token (never the service-role key). Save to 1-Apply, scan, and fill then talk to{" "}
-            <code>/api/extension/session</code>, <code>/api/extension/applications</code>, and fill-plan.
+            The extension uses your signed-in session in this browser to save pages, list applications, and build fill
+            plans from Application Memory. It never clicks submit.
           </p>
+          <ExtensionConnectCard appUrl={appUrl} />
         </Card>
 
         <Card className="p-6">

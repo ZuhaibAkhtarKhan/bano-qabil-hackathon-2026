@@ -49,6 +49,20 @@ export type MemoryValue = {
 
 export type ApprovalState = "pending" | "approved" | "rejected" | "blocked";
 
+export type FieldMappingOption = {
+  value: string;
+  label: string;
+  source: string;
+};
+
+export type FieldAttachment = {
+  documentId: string;
+  versionId: string;
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+};
+
 export type FieldMapping = {
   fieldKey: string;
   label: string;
@@ -56,11 +70,19 @@ export type FieldMapping = {
   source: string;
   confidence: number;
   proposedValue: string;
+  /** Primary first; length > 1 means the page chip can offer alternates. */
+  options: FieldMappingOption[];
   approvalState: ApprovalState;
   sensitive: boolean;
   excludedByDefault: boolean;
   reason: string;
   fieldType: FieldType;
+  /** Open-ended question that can be drafted from memory / AI. */
+  aiAnswerable: boolean;
+  /** Show the Grammarly-style chip even when only one draft exists. */
+  showChip: boolean;
+  /** Present when this mapping attaches a vault document to a file input. */
+  attachment?: FieldAttachment | null;
 };
 
 export type FillAction = "setValue" | "submit" | "clickSubmit" | "bypassCaptcha" | "createAccount";

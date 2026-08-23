@@ -6,7 +6,9 @@ import {
   finalizeGroundedDraft,
   groundingScore,
   lengthWarnings,
+  parsePersona,
   rankEvidenceForAnswer,
+  suggestPreviousAnswers,
   validateClaims,
   type GenerationIntent,
   type ToneStyle,
@@ -42,7 +44,7 @@ async function loadAnswerContext(
       .maybeSingle(),
     supabase
       .from("applications")
-      .select("id, opportunity_id")
+      .select("id, opportunity_id, persona")
       .eq("id", applicationId)
       .eq("user_id", actor.userId)
       .maybeSingle(),
@@ -68,7 +70,7 @@ async function loadAnswerContext(
     .filter(Boolean)
     .join(" ");
 
-  return { evidence, question, opportunityContext };
+  return { evidence, question, opportunityContext, persona: parsePersona(application.persona as string | null) };
 }
 
 // ─── Persist answer ───────────────────────────────────────────────────────────
@@ -195,7 +197,7 @@ export async function generateAnswer(
 ) {
   const { applicationId, questionId, intent, tone, previousAnswerId, previousAnswerText, previousGenerationCount } = input;
 
-  const { evidence, question, opportunityContext } = await loadAnswerContext(
+  const { evidence, question, opportunityContext, persona } = await loadAnswerContext(
     supabase,
     actor,
     applicationId,
@@ -203,7 +205,33 @@ export async function generateAnswer(
   );
 
   const kind = classifyQuestion(question.prompt as string);
-  const ranked = rankEvidenceForAnswer(question.prompt as string, kind, evidence);
+  const ranked = rankEvidenceForAnswer(question.prompt as string, kind, evidence, 6, persona);
+
+  const { data: previousRows } = await supabase
+    .from("application_answers")
+    .select("id, application_id, question_id, approved_text")
+    .eq("user_id", actor.userId)
+    .eq("state", "approved")
+    .neq("application_id", applicationId)
+    .not("approved_text", "is", null)
+    .limit(40);
+  const previousQuestionIds = [...new Set((previousRows ?? []).map((row) => String(row.question_id)))];
+  const { data: previousPrompts } =
+    previousQuestionIds.length > 0
+      ? await supabase.from("opportunity_questions").select("id, prompt").in("id", previousQuestionIds)
+      : { data: [] as Array<{ id: string; prompt: string }> };
+  const promptById = new Map((previousPrompts ?? []).map((row) => [String(row.id), String(row.prompt)]));
+  const similarPreviousAnswers = suggestPreviousAnswers(
+    question.prompt as string,
+    (previousRows ?? []).map((row) => ({
+      id: String(row.id),
+      applicationId: String(row.application_id),
+      questionId: String(row.question_id),
+      prompt: promptById.get(String(row.question_id)) ?? "",
+      text: String(row.approved_text ?? ""),
+    })),
+    { excludeQuestionId: questionId, limit: 3 },
+  );
 
   // If no evidence at all → return INSUFFICIENT_EVIDENCE immediately
   if (ranked.length === 0) {
@@ -242,6 +270,8 @@ export async function generateAnswer(
     limitValue: question.limit_value as number | null,
     limitUnit: question.limit_unit as string | null,
     previousAnswer: previousAnswerText,
+    persona,
+    similarPreviousAnswers: similarPreviousAnswers.map((item) => ({ prompt: item.prompt, text: item.text })),
   });
 
   let rawResult: unknown;

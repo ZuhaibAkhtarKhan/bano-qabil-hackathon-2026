@@ -7,25 +7,29 @@
   </head>
   <body>
     <header>
-      <p class="eyebrow">1-Apply</p>
+      <div class="wordmark" aria-label="1 Apply">
+        <span class="wordmark-mark" aria-hidden="true">
+          <img src="icons/brand-mark.jpg" width="28" height="28" alt="" />
+        </span>
+        <span class="wordmark-label">Apply</span>
+      </div>
       <h1>Prepare, don’t submit</h1>
     </header>
-    <p id="status" class="muted">Connect the extension in Options if Save to 1-Apply is disabled.</p>
+    <p id="status" class="muted">Sign in to 1-Apply in this browser, then Connect in Options.</p>
+    <p id="session" class="session hidden"></p>
     <div class="row">
       <button id="save" type="button">Save to 1-Apply</button>
-      <button id="scan" type="button" class="secondary">Scan form</button>
+      <button id="fill" type="button" class="secondary">Fill from memory</button>
+    </div>
+    <div class="row">
+      <button id="stop" type="button" class="danger hidden">Stop filling</button>
     </div>
     <label class="field">
       Application
       <select id="application"></select>
     </label>
+    <p id="match" class="muted match"></p>
     <p id="hazard" class="hazard hidden"></p>
-    <section id="preview" class="hidden">
-      <h2>Preview</h2>
-      <p class="muted">Field · Value · Source · Confidence. Approve what 1-Apply may fill. Submit stays yours.</p>
-      <div id="rows"></div>
-      <button id="fill" type="button">Fill approved fields</button>
-    </section>
     <p id="log" class="log"></p>
     <p class="footer"><button id="options" type="button" class="ghost">Options</button></p>
     <script src="popup.js" type="module"></script>

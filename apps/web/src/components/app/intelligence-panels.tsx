@@ -1,7 +1,7 @@
 import { eligibilityLabel } from "@1apply/domain";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress, ScoreIndicator } from "@/components/ui/data";
 import { EmptyState } from "@/components/ui/feedback";
@@ -50,7 +50,9 @@ export function IntelligenceRefresh({ applicationId }: { applicationId: string }
   return (
     <form action={analyzeApplication}>
       <input type="hidden" name="applicationId" value={applicationId} />
-      <Button type="submit">Refresh eligibility, Fit Index, and resume match</Button>
+      <SubmitButton pendingText="Analyzing in real-time…">
+        Refresh eligibility, Fit Index, and resume match
+      </SubmitButton>
     </form>
   );
 }
@@ -182,6 +184,13 @@ export function EligibilityPanel({ data }: { data: Workspace }) {
                   </div>
                   <p className="mt-3 text-sm font-medium">{text}</p>
                   <p className="mt-2 text-sm text-ink-muted">{item.explanation}</p>
+                  {item.state === "unclear" || item.state === "not_met" || item.needs_confirmation ? (
+                    <p className="mt-3 text-sm">
+                      <Link href="/app/memory" className="text-teal underline">
+                        Add matching facts to Application Memory
+                      </Link>
+                    </p>
+                  ) : null}
                 </li>
               );
             })

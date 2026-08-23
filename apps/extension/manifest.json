@@ -1,11 +1,23 @@
 {
   "manifest_version": 3,
   "name": "1-Apply",
-  "version": "0.2.0",
-  "description": "Save opportunities to 1-Apply and fill approved fields. Never submits, signs, pays, or bypasses CAPTCHA.",
+  "version": "0.3.11",
+  "description": "Save opportunities to 1-Apply and fill approved fields. Uses your signed-in website session. Never submits, signs, pays, or bypasses CAPTCHA.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_title": "1-Apply",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "background": {
     "service_worker": "background.js",
@@ -15,6 +27,7 @@
     "page": "options.html",
     "open_in_tab": true
   },
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "storage", "scripting", "cookies", "tabs"],
+  "host_permissions": ["http://localhost:3000/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"]
 }

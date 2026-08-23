@@ -5,8 +5,10 @@ import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Field, Textarea } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
-import { reanalyzeOpportunity } from "@/server/opportunities/actions";
+import { reanalyzeOpportunity, pasteIntoSavedOpportunity } from "@/server/opportunities/actions";
+import { decodeHtmlEntities } from "@/server/ingest/fetch-page";
 import { loadOpportunityDetail } from "@/server/opportunities/queries";
 
 function analysisTone(status: string): "mint" | "sand" | "coral" | "muted" {
@@ -81,6 +83,11 @@ export default async function OpportunityDetailPage({
           {metadata.analysisError ? (
             <p className="mt-3 text-sm text-coral">{metadata.analysisError}</p>
           ) : null}
+          {metadata.fetchError ? (
+            <p className="mt-3 text-sm text-coral">
+              Fetch failed ({metadata.fetchError}). Paste the posting below so analysis can continue without inventing a listing.
+            </p>
+          ) : null}
 
           <div className="mt-4 flex flex-wrap gap-2">
             {application ? (
@@ -96,6 +103,31 @@ export default async function OpportunityDetailPage({
             ) : null}
           </div>
         </Card>
+
+        {opportunity.analysis_status === "needs_input" || opportunity.analysis_status === "failed" || !opportunity.raw_excerpt ? (
+          <Card className="p-6">
+            <h2 className="text-lg font-medium">Paste posting text</h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              If the host page is login-gated or blocked, paste the public posting here. 1-Apply will analyze this text instead of inventing a listing.
+            </p>
+            <form action={pasteIntoSavedOpportunity} className="mt-4 grid gap-4">
+              <input type="hidden" name="opportunityId" value={opportunity.id} />
+              <Field label="Posting text" htmlFor="paste-into-opportunity">
+                <Textarea
+                  id="paste-into-opportunity"
+                  name="pastedText"
+                  rows={8}
+                  required
+                  minLength={40}
+                  placeholder="Paste the full posting here…"
+                />
+              </Field>
+              <Button type="submit" variant="secondary">
+                Analyze pasted text
+              </Button>
+            </form>
+          </Card>
+        ) : null}
 
         <Card className="p-6">
           <h2 className="text-lg font-medium">Requirements ({requirements.length})</h2>
@@ -175,7 +207,9 @@ export default async function OpportunityDetailPage({
         {opportunity.raw_excerpt ? (
           <Card className="p-6">
             <h2 className="text-lg font-medium">Original reference excerpt</h2>
-            <p className="mt-3 whitespace-pre-wrap text-sm text-ink-muted">{opportunity.raw_excerpt.slice(0, 4000)}</p>
+            <p className="mt-3 whitespace-pre-wrap text-sm text-ink-muted">
+              {decodeHtmlEntities(opportunity.raw_excerpt).slice(0, 4000)}
+            </p>
           </Card>
         ) : null}
       </div>

@@ -9,12 +9,15 @@ import {
   eligibilityLabel,
   evaluateEligibility,
   generateReminder,
+  matchApplicationByUrl,
   notificationDraftFromEvent,
   normalizeOpportunityUrl,
   rankEvidenceForAnswer,
   rankEvidenceForQuestion,
   rankResumes,
+  scoreUrlMatch,
   selectEvidenceForRequirement,
+  urlsLikelySame,
   type DomainEvent,
   type MemoryEvidence,
 } from "../src/index";
@@ -50,6 +53,27 @@ describe("URL normalization", () => {
     expect(normalizeOpportunityUrl("HTTPS://WWW.Example.COM/jobs/ml/?utm_source=x&ref=1#top")).toBe(
       "https://example.com/jobs/ml",
     );
+  });
+
+  it("matches the same opportunity across query variants and Google Form paths", () => {
+    expect(
+      urlsLikelySame(
+        "https://docs.google.com/forms/d/e/1FAIpQLSx/viewform?usp=sf_link",
+        "https://docs.google.com/forms/d/e/1FAIpQLSx/viewform",
+      ),
+    ).toBe(true);
+    expect(scoreUrlMatch("https://careers.acme.com/jobs/42/apply", "https://careers.acme.com/jobs/42")).toBeGreaterThanOrEqual(0.85);
+    expect(urlsLikelySame("https://careers.acme.com/jobs/42", "https://careers.acme.com/jobs/99")).toBe(false);
+
+    const matched = matchApplicationByUrl("https://docs.google.com/forms/d/e/1FAIpQLSx/viewform", [
+      { id: "a", sourceUrl: "https://example.com/other", canonicalUrl: "https://example.com/other" },
+      {
+        id: "b",
+        sourceUrl: "https://docs.google.com/forms/d/e/1FAIpQLSx/viewform?usp=sharing",
+        canonicalUrl: "https://docs.google.com/forms/d/e/1FAIpQLSx/viewform",
+      },
+    ]);
+    expect(matched?.id).toBe("b");
   });
 });
 

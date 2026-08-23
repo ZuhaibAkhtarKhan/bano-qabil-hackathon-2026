@@ -1,7 +1,8 @@
 # ApplyOne Product Documentation
 
+- [Architecture and stack](./ARCHITECTURE.md) — implemented monorepo, runtime stack, data model, APIs, AI, extension, security, and tests.
 - [Product Requirements Document](./PRD.md) — product vision, users, journeys, requirements, acceptance criteria, scope, and launch gate.
-- [Technical Requirements and Design](./TRD.md) — architecture, domain model, APIs, AI controls, security, testing, and delivery plan.
+- [Technical Requirements and Design](./TRD.md) — original proposed architecture. Prefer ARCHITECTURE.md for what the code actually does.
 - [Feature Specification](./FEATURES.md) — prioritized backlog, dependencies, demo slices, analytics, and issue order.
 
 ## Source Basis

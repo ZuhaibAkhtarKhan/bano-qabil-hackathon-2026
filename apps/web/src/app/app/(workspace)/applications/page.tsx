@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { opportunityCategorySchema } from "@1apply/contracts";
 
 import { applicationStatusLabel, normalizeApplicationStatus } from "@/lib/application-workflow";
+import { APPLICATION_BOARD_COLUMNS, boardColumnForStatus } from "@/lib/dashboard";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +27,7 @@ export default async function ApplicationsPage({
     organization?: string;
     fit?: string;
     sort?: string;
+    view?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -35,6 +38,7 @@ export default async function ApplicationsPage({
   const organization = (params.organization ?? "").trim().toLowerCase();
   const fit = (params.fit ?? "").trim().toLowerCase();
   const sort = (params.sort ?? "recent").trim().toLowerCase();
+  const view = (params.view ?? "list").trim().toLowerCase() === "board" ? "board" : "list";
 
   const filtered = applications
     .filter((row) => {
@@ -99,7 +103,14 @@ export default async function ApplicationsPage({
                 </Select>
               </Field>
               <Field label="Type" htmlFor="type">
-                <Input id="type" name="type" defaultValue={params.type ?? ""} placeholder="internship, job" />
+                <Select id="type" name="type" defaultValue={params.type ?? ""}>
+                  <option value="">All types</option>
+                  {opportunityCategorySchema.options.map((value) => (
+                    <option key={value} value={value}>
+                      {value.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="Organization" htmlFor="organization">
                 <Input id="organization" name="organization" defaultValue={params.organization ?? ""} placeholder="Host name" />
@@ -119,6 +130,12 @@ export default async function ApplicationsPage({
                   <option value="fit">Highest fit</option>
                 </Select>
               </Field>
+              <Field label="View" htmlFor="view">
+                <Select id="view" name="view" defaultValue={view}>
+                  <option value="list">List</option>
+                  <option value="board">Board</option>
+                </Select>
+              </Field>
               <div className="lg:col-span-6 flex flex-wrap gap-2">
                 <button className="inline-flex h-10 items-center justify-center rounded-full border border-ink bg-ink px-5 text-sm font-medium text-white" type="submit">
                   Apply filters
@@ -134,11 +151,39 @@ export default async function ApplicationsPage({
             <StatusPill tone="muted">{filtered.length} results</StatusPill>
             {status ? <StatusPill tone="sand">status: {status.replace(/_/g, " ")}</StatusPill> : null}
             {fit ? <StatusPill tone="teal">fit: {fit}</StatusPill> : null}
+            {view === "board" ? <StatusPill tone="mint">board</StatusPill> : null}
           </div>
 
           {filtered.length === 0 ? (
             <div className="mt-8">
               <EmptyState eyebrow="No match" title="No applications match these filters" body="Try clearing one or more filters to widen the list." />
+            </div>
+          ) : view === "board" ? (
+            <div className="mt-8 grid gap-4 xl:grid-cols-3">
+              {APPLICATION_BOARD_COLUMNS.map((column) => {
+                const items = filtered.filter((row) => boardColumnForStatus(row.status) === column.id);
+                return (
+                  <section key={column.id} className="rounded-2xl border border-line bg-white p-4">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <h2 className="text-sm font-semibold">{column.title}</h2>
+                      <p className="font-mono text-xs text-ink-muted">{items.length}</p>
+                    </div>
+                    {items.length === 0 ? (
+                      <p className="mt-4 text-sm text-ink-muted">None in this column.</p>
+                    ) : (
+                      <ul className="mt-4 grid gap-3">
+                        {items.map((row) => (
+                          <li key={row.id}>
+                            <Link href={`/app/applications/${row.id}`} className="block">
+                              <ApplicationCard row={row} />
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                );
+              })}
             </div>
           ) : (
             <ul className="mt-8 grid max-w-4xl gap-4">

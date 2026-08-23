@@ -8,8 +8,11 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { WORKSPACE_NAV, isNavActive } from "@/components/app/nav";
 import { cn } from "@/lib/cn";
 
+import { useRealtime } from "@/components/app/realtime-provider";
+
 export function AppSidebar({ email, displayName }: { email: string; displayName: string | null }) {
   const pathname = usePathname();
+  const { unreadCount } = useRealtime();
 
   return (
     <aside className="flex h-full flex-col border-r border-line bg-white px-4 py-6">
@@ -26,18 +29,26 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
             <ul className="mt-2 grid gap-1">
               {section.items.map(({ href, label, icon: Icon }) => {
                 const active = isNavActive(pathname, href);
+                const isNotifications = href === "/app/notifications";
                 return (
                   <li key={href}>
                     <Link
                       href={href}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm",
+                        "flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 text-sm",
                         active ? "bg-canvas text-ink" : "text-ink-muted hover:bg-canvas hover:text-ink",
                       )}
                     >
-                      <Icon className="h-4 w-4" aria-hidden="true" />
-                      {label}
+                      <div className="flex items-center gap-3">
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                        {label}
+                      </div>
+                      {isNotifications && unreadCount > 0 && (
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sand px-1.5 font-mono text-[10px] font-bold text-ink-base transition-all animate-in zoom-in-50">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );

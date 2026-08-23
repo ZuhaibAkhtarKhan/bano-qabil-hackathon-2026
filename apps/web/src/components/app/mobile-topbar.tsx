@@ -12,9 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/overlays";
 import { cn } from "@/lib/cn";
 
+import { useRealtime } from "@/components/app/realtime-provider";
+
 export function MobileTopbar({ email }: { email: string }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const { unreadCount } = useRealtime();
 
   return (
     <div className="border-b border-line bg-white/90 backdrop-blur-md lg:hidden">
@@ -22,9 +25,23 @@ export function MobileTopbar({ email }: { email: string }) {
         <Link href="/app">
           <Wordmark size="sm" />
         </Link>
-        <Button type="button" variant="secondary" size="sm" aria-expanded={open} aria-controls="workspace-menu" aria-label="Open workspace menu" onClick={() => setOpen(true)}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          aria-expanded={open}
+          aria-controls="workspace-menu"
+          aria-label="Open workspace menu"
+          onClick={() => setOpen(true)}
+          className="relative"
+        >
           <Menu className="h-4 w-4" aria-hidden="true" />
           Menu
+          {unreadCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-sand px-1 font-mono text-[9px] font-bold text-ink-base">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
         </Button>
       </div>
       <Drawer id="workspace-menu" title="Workspace" open={open} onClose={() => setOpen(false)}>
@@ -36,18 +53,24 @@ export function MobileTopbar({ email }: { email: string }) {
               <ul className="mt-2 grid gap-1">
                 {section.items.map((item) => {
                   const active = isNavActive(pathname, item.href);
+                  const isNotifications = item.href === "/app/notifications";
                   return (
                     <li key={item.href}>
                       <Link
                         href={item.href}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "flex min-h-11 items-center rounded-xl px-3 text-sm",
+                          "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm",
                           active ? "bg-canvas text-ink" : "text-ink-muted",
                         )}
                         onClick={() => setOpen(false)}
                       >
-                        {item.label}
+                        <span>{item.label}</span>
+                        {isNotifications && unreadCount > 0 && (
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sand px-1.5 font-mono text-[10px] font-bold text-ink-base">
+                            {unreadCount}
+                          </span>
+                        )}
                       </Link>
                     </li>
                   );

@@ -5,6 +5,9 @@ import { eligibilityFactorScore, evaluateEligibility } from "./eligibility";
 import { computeFitIndex } from "./fit-index";
 import type { EligibilityContext, MemoryEvidence, MemoryRequirement } from "./intelligence-types";
 import { clampScore, overlapScore, tokenize } from "./text";
+import { normalizeOpportunityUrl } from "./url-match";
+
+export { normalizeOpportunityUrl } from "./url-match";
 
 export type ExperienceLevel = "internship" | "entry" | "mid" | "any";
 export type EducationLevel = "undergraduate" | "graduate" | "any";
@@ -149,25 +152,6 @@ export function mergeDiscoveryCriteria(base: DiscoveryCriteria, overlay: Partial
     otherConstraints: overlay.otherConstraints?.length ? overlay.otherConstraints : base.otherConstraints,
     keywords: overlay.keywords?.length ? overlay.keywords : base.keywords,
   };
-}
-
-export function normalizeOpportunityUrl(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  try {
-    const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return trimmed.toLowerCase();
-    url.hash = "";
-    url.hostname = url.hostname.replace(/^www\./i, "").toLowerCase();
-    url.pathname = url.pathname.replace(/\/+$/, "") || "";
-    for (const key of [...url.searchParams.keys()]) {
-      if (/^(utm_|ref$|fbclid|gclid)/i.test(key)) url.searchParams.delete(key);
-    }
-    const search = url.searchParams.toString();
-    return `${url.protocol}//${url.host}${url.pathname}${search ? `?${search}` : ""}`;
-  } catch {
-    return trimmed.replace(/\/+$/, "").toLowerCase();
-  }
 }
 
 export function discoveryIdentity(item: Pick<DiscoveryCandidate, "canonicalUrl" | "title" | "organization">): string {

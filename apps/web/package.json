@@ -21,10 +21,12 @@
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.112.3",
     "lucide-react": "0.542.0",
+    "mammoth": "^1.12.1",
     "next": "15.5.23",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "three": "^0.185.1",
+    "unpdf": "^1.8.1",
     "zod": "4.4.3"
   },
   "devDependencies": {

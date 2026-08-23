@@ -4,7 +4,7 @@ Create once. Apply everywhere.
 
 Evidence-grounded application operating system: Application Memory, opportunity analysis, eligibility, Fit Index, grounded answers, controlled autofill, and submission snapshots.
 
-The Chrome extension never clicks submit. Fill requires a user session token in Options and a fill-plan from the signed-in app.
+The Chrome extension never clicks submit. It connects to your signed-in 1-Apply session in the same browser (no pasted tokens) and builds fill plans from Application Memory.
 
 ## Layout
 
@@ -21,12 +21,15 @@ supabase/migrations      PostgreSQL, RLS, pgvector, private storage
 
 UI does not call the model or own SQL. Server actions call services. Services use session-scoped infra. Domain logic lives in `@1apply/domain`.
 
+Full architecture, stack versions, tables, APIs, and data flows: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Run locally
 
 ```bash
 npm install
 cp .env.example apps/web/.env.local
 # Fill NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+# Optional: GROQ_API_KEY for posting rewrite (preferred) or OPENAI_API_KEY
 npm run dev
 ```
 
@@ -40,6 +43,15 @@ Apply migrations in order:
 - `supabase/migrations/20260818050000_documents_evidence.sql`
 - `supabase/migrations/20260818060000_opportunity_intelligence.sql`
 - `supabase/migrations/20260818070000_phase8_intelligence.sql`
+- `supabase/migrations/20260818080000_answer_generation.sql`
+- `supabase/migrations/20260818100000_application_workflow.sql`
+- `supabase/migrations/20260818110000_submission_deadline_intelligence.sql`
+- `supabase/migrations/20260818120000_email_calendar_integration.sql`
+- `supabase/migrations/20260819140000_opportunity_discovery.sql`
+- `supabase/migrations/20260819150000_notifications_automation.sql`
+- `supabase/migrations/20260819160000_security_hardening.sql`
+- `supabase/migrations/20260819180000_account_deletion.sql`
+- `supabase/migrations/20260819190000_realtime_events.sql`
 
 ```bash
 npm run lint

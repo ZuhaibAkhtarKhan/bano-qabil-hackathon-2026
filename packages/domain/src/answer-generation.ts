@@ -1,4 +1,5 @@
 import { eligibleEvidence, evidenceBlob, type MemoryEvidence } from "./intelligence-types";
+import { personaBoostKinds, type PersonaId } from "./persona";
 import { overlapScore, tokenize } from "./text";
 
 // ─── Question types ──────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ export function rankEvidenceForAnswer(
   kind: QuestionKind,
   evidence: MemoryEvidence[],
   limit = 6,
+  persona: PersonaId | null = null,
 ): MemoryEvidence[] {
   const eligible = eligibleEvidence(evidence);
   if (eligible.length === 0) return [];
@@ -69,11 +71,13 @@ export function rankEvidenceForAnswer(
     research: ["research", "education", "project"],
   };
   const boostKinds = KIND_BOOSTS[kind] ?? [];
+  const personaKinds = personaBoostKinds(persona);
 
   return eligible
     .map((item) => {
       let score = overlapScore(question, evidenceBlob(item));
       if (boostKinds.includes(item.kind)) score += 0.15;
+      if (personaKinds.includes(item.kind)) score += 0.12;
       return { item, score };
     })
     .sort((a, b) => b.score - a.score)
@@ -213,8 +217,22 @@ export function buildAnswerPrompt(input: {
   limitValue?: number | null;
   limitUnit?: string | null;
   previousAnswer?: string | null;
+  persona?: PersonaId | null;
+  similarPreviousAnswers?: Array<{ prompt: string; text: string }>;
 }): { instruction: string; untrustedData: string } {
-  const { question, kind, opportunityContext, evidenceItems, intent, tone, limitValue, limitUnit, previousAnswer } = input;
+  const {
+    question,
+    kind,
+    opportunityContext,
+    evidenceItems,
+    intent,
+    tone,
+    limitValue,
+    limitUnit,
+    previousAnswer,
+    persona,
+    similarPreviousAnswers,
+  } = input;
 
   const evidenceSections = evidenceItems.map((e, i) => {
     const lines = [
@@ -253,6 +271,7 @@ export function buildAnswerPrompt(input: {
     `3. Cite EVERY evidence item you use in evidenceIds using its id attribute.`,
     `4. ${toneInstruction(tone)}`,
     `5. ${intentNote[intent]}${limitNote}`,
+    persona ? `6. Voice preset: ${persona}. Prefer evidence that fits this emphasis, still without inventing facts.` : "",
     ``,
     `Return JSON with EXACTLY these fields:`,
     `{`,
@@ -263,6 +282,17 @@ export function buildAnswerPrompt(input: {
     `}`,
   ].join("\n");
 
+  const previousSection =
+    similarPreviousAnswers && similarPreviousAnswers.length > 0
+      ? [
+          "",
+          "SIMILAR PREVIOUS APPROVED ANSWERS (rewrite; do not copy verbatim; still cite only EVIDENCE ids):",
+          ...similarPreviousAnswers.slice(0, 3).map(
+            (item, index) => `PREVIOUS_${index + 1} prompt="${item.prompt.slice(0, 240)}"\n${item.text.slice(0, 1200)}`,
+          ),
+        ]
+      : [];
+
   const untrustedData = [
     `QUESTION (kind: ${kind}): ${question}`,
     ``,
@@ -271,6 +301,7 @@ export function buildAnswerPrompt(input: {
     ``,
     `EVIDENCE (verified, use only these):`,
     evidenceSections.length > 0 ? evidenceSections.join("\n\n") : "NO EVIDENCE AVAILABLE",
+    ...previousSection,
   ].join("\n");
 
   return { instruction, untrustedData };

@@ -5,12 +5,12 @@ import {
   assertFillActionAllowed,
   detectAccountCreation,
   detectCaptcha,
+  deriveYearOfStudy,
   fillTargetAllowed,
   inspectPage,
   inventoryFromDocument,
   isProtectedControl,
   mapFields,
-  mappingsSafeToFill,
   planAutofill,
   proposedFillTargets,
 } from "../src/index";
@@ -118,7 +118,252 @@ describe("mapping confidence", () => {
     `);
     const [mapping] = mapFields(inventoryFromDocument(document), memory);
     expect(mapping?.memoryPath).toBe("Approved Application Answer");
-    expect(mapping?.proposedValue).toContain("retrieval");
+    expect(mapping?.aiAnswerable).toBe(true);
+    expect(mapping?.proposedValue).toBe("");
+    expect(mapping?.options.some((item) => item.value.includes("retrieval"))).toBe(true);
+  });
+
+  it("maps Microsoft-style degree+experience Yes/No radios from Application Memory", () => {
+    const document = documentFrom(`
+      <fieldset>
+        <legend>Do you have bachelor's degree in construction project management, Architecture, Engineering, or related field AND 10+ years related experience OR equivalent experience?</legend>
+        <label><input type="radio" name="q1" value="Yes" /> Yes</label>
+        <label><input type="radio" name="q1" value="No" /> No</label>
+      </fieldset>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Education → Institution",
+        source: "Verified fact",
+        value: "BS Architecture, National College of Arts",
+        aliases: ["university", "degree"],
+      },
+      {
+        path: "Evidence → Site engineer",
+        source: "Evidence",
+        value: "employment — Site engineer — 12 years construction project management experience",
+        aliases: ["experience"],
+      },
+    ];
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.fieldType).toBe("radio");
+    expect(mapping?.proposedValue).toMatch(/yes/i);
+    expect(mapping?.reason.toLowerCase()).toMatch(/memory|yes/);
+    expect(mapping?.showChip).toBe(true);
+  });
+
+  it("auto-maps required sole confirmation checkboxes only", () => {
+    const document = documentFrom(`
+      <div role="listitem">
+        <div>
+          <div role="heading" id="email-h">Email</div>
+          <span aria-label="Required">*</span>
+        </div>
+        <div role="checkbox" aria-label="Record zuhaib@example.com as the email to be included with my response" aria-checked="false">Record email</div>
+      </div>
+      <div role="listitem">
+        <div role="heading">Optional newsletter</div>
+        <div role="checkbox" aria-label="Subscribe to updates">Subscribe</div>
+      </div>
+      <div role="listitem">
+        <div role="heading">Skills *</div>
+        <div role="checkbox" aria-label="Python">Python</div>
+        <div role="checkbox" aria-label="TypeScript">TypeScript</div>
+      </div>
+      <label><input type="checkbox" name="privacy" required /> I accept the privacy policy</label>
+      <label><input type="checkbox" name="optional_marketing" /> Send me marketing emails</label>
+    `);
+    const fields = inventoryFromDocument(document);
+    const emailField = fields.find((field) => /email/i.test(field.label) || /record/i.test(field.options.join(" ")));
+    expect(emailField?.type).toBe("checkbox");
+    expect(emailField?.required).toBe(true);
+
+    const mappings = mapFields(fields, memory);
+    const email = mappings.find((item) => /record|email/i.test(item.label) || /record/i.test(item.proposedValue));
+    const privacy = mappings.find((item) => item.fieldKey === "privacy" || /privacy/i.test(item.label));
+    const optional = mappings.find((item) => /newsletter|subscribe|marketing/i.test(item.label));
+    const multi = mappings.find((item) => /skills/i.test(item.label));
+
+    expect(email?.proposedValue).toBeTruthy();
+    expect(email?.reason).toMatch(/required sole/i);
+    expect(planAutofill([email!]).fill).toHaveLength(1);
+
+    expect(privacy?.proposedValue).toBeTruthy();
+    expect(privacy?.reason).toMatch(/required sole/i);
+
+    expect(optional?.proposedValue || "").toBe("");
+    expect(multi?.reason ?? "").not.toMatch(/required sole/i);
+  });
+});
+
+describe("multi-choice memory matching", () => {
+  it("selects university year from Application Memory synonyms", () => {
+    const document = documentFrom(`
+      <fieldset>
+        <legend>Which year of university are you in?</legend>
+        <label><input type="radio" name="year" value="Freshman" /> Freshman</label>
+        <label><input type="radio" name="year" value="Sophomore" /> Sophomore</label>
+        <label><input type="radio" name="year" value="Junior" /> Junior</label>
+        <label><input type="radio" name="year" value="Senior" /> Senior</label>
+      </fieldset>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Education → Year of study",
+        source: "Application Memory",
+        value: "3rd year",
+        aliases: ["year of study", "which year"],
+      },
+    ];
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.proposedValue).toMatch(/Junior/i);
+    expect(mapping?.memoryPath).toMatch(/Year of study/i);
+    expect(mapping?.options.length).toBe(4);
+    expect(mapping?.showChip).toBe(true);
+  });
+
+  it("matches graduation year options against memory years", () => {
+    const document = documentFrom(`
+      <label>Expected graduation year
+        <select name="grad">
+          <option>2025</option>
+          <option>2026</option>
+          <option>2027</option>
+          <option>2028</option>
+        </select>
+      </label>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Education → Graduation year",
+        source: "Evidence",
+        value: "Expected graduation 2027",
+        aliases: ["graduation"],
+      },
+    ];
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.proposedValue).toBe("2027");
+  });
+
+  it("derives 1st/2nd/3rd year from enrollment range and fills college", () => {
+    const document = documentFrom(`
+      <label>College * <input name="college" /></label>
+      <fieldset>
+        <legend>Year *</legend>
+        <label><input type="radio" name="year" value="1st" /> 1st</label>
+        <label><input type="radio" name="year" value="2nd" /> 2nd</label>
+        <label><input type="radio" name="year" value="3rd" /> 3rd</label>
+        <label><input type="radio" name="year" value="4th" /> 4th</label>
+        <label><input type="radio" name="year" value="Graduated/Post Graduated" /> Graduated/Post Graduated</label>
+      </fieldset>
+    `);
+    const derived = deriveYearOfStudy([2024, 2028], new Date("2026-08-22T12:00:00Z"));
+    expect(derived).toBe("3rd year");
+
+    const catalog: MemoryValue[] = [
+      {
+        path: "Education → Institution",
+        source: "Evidence",
+        value: "GIKI",
+        aliases: ["university", "college"],
+      },
+      {
+        path: "Education → Year of study",
+        source: "Evidence",
+        value: derived!,
+        aliases: ["year", "year of study"],
+      },
+      {
+        path: "Evidence → BS",
+        source: "Evidence",
+        value: "education — BS Computer Engineering — GIKI — 2024 — 2028",
+        aliases: ["education", "years"],
+      },
+    ];
+    const mappings = mapFields(inventoryFromDocument(document), catalog);
+    const college = mappings.find((item) => /college/i.test(item.label));
+    const year = mappings.find((item) => item.fieldType === "radio" || /^year/i.test(item.label));
+    expect(college?.proposedValue).toBe("GIKI");
+    expect(college?.aiAnswerable).toBe(false);
+    expect(year?.proposedValue).toBe("3rd");
+    expect(year?.aiAnswerable).toBe(false);
+  });
+
+  it("formats WhatsApp as 10 digits without country code", () => {
+    const document = documentFrom(`
+      <label>Whatsapp Number [Kindly write the 10 digit number without spacing and without country code, for ex- 48575XXXXX]
+        <input name="wa" />
+      </label>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Profile → Phone",
+        source: "Profile",
+        value: "+92 300 1234567",
+        aliases: ["phone", "whatsapp"],
+      },
+    ];
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.aiAnswerable).toBe(false);
+    expect(mapping?.proposedValue).toBe("3001234567");
+  });
+
+  it("fills LinkedIn for writing-sample link fields and keeps AI popups for open questions", () => {
+    const document = documentFrom(`
+      <label>Link to a writing or editing sample (Drive link, published piece, or any prior work) *
+        <input name="sample" />
+      </label>
+      <label>Practical exercise. Read the passage below and respond as you would if reviewing it. Rewrite the flagged portion so it would pass. *
+        <textarea name="exercise"></textarea>
+      </label>
+      <label>College * <input name="college" /></label>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Profile → LinkedIn",
+        source: "Profile",
+        value: "https://linkedin.com/in/saadia",
+        aliases: ["linkedin", "link"],
+      },
+      {
+        path: "Education → Institution",
+        source: "Evidence",
+        value: "GIKI",
+        aliases: ["college", "university"],
+      },
+    ];
+    const mappings = mapFields(inventoryFromDocument(document), catalog);
+    const link = mappings.find((item) => /writing or editing sample|sample/i.test(item.label));
+    const exercise = mappings.find((item) => /practical exercise|rewrite/i.test(item.label));
+    const college = mappings.find((item) => /college/i.test(item.label));
+    expect(link?.proposedValue).toContain("linkedin.com");
+    expect(link?.aiAnswerable).toBe(false);
+    expect(exercise?.aiAnswerable).toBe(true);
+    expect(exercise?.showChip).toBe(true);
+    expect(college?.proposedValue).toBe("GIKI");
+  });
+});
+
+describe("field length limits", () => {
+  it("detects word and character limits from labels and maxlength", async () => {
+    const { detectFieldLengthLimit, enforceFieldLengthLimit } = await import("../src/field-limits");
+    const document = documentFrom(`
+      <label>Essay (max 120 words)<textarea maxlength="800"></textarea></label>
+    `);
+    const area = document.querySelector("textarea")!;
+    const fromMax = detectFieldLengthLimit(area, "Essay (max 120 words)", "");
+    // maxlength wins when present on the control
+    expect(fromMax?.unit).toBe("characters");
+    expect(fromMax?.value).toBe(800);
+
+    const wordOnly = detectFieldLengthLimit(
+      documentFrom(`<div role="listitem"><div role="heading">Why us? Limit 150 words</div><textarea></textarea></div>`).querySelector("textarea")!,
+      "Why us? Limit 150 words",
+      "",
+    );
+    expect(wordOnly).toEqual({ value: 150, unit: "words", source: "label" });
+
+    expect(enforceFieldLengthLimit("one two three four five", { value: 3, unit: "words", source: "label" })).toBe("one two three");
   });
 });
 
@@ -161,7 +406,7 @@ describe("sensitive fields, CAPTCHA, and unsupported forms", () => {
 });
 
 describe("autofill never submits", () => {
-  it("fills only approved safe fields and skips the rest", () => {
+  it("fills safe mapped fields automatically without approval checkboxes", () => {
     const document = documentFrom(`
       <label for="university">University</label>
       <input id="university" name="university" />
@@ -169,13 +414,11 @@ describe("autofill never submits", () => {
       <textarea name="g-recaptcha-response"></textarea>
     `);
     const fields = inventoryFromDocument(document);
-    const mappings = mapFields(fields, memory).map((item) =>
-      item.fieldKey === "university" ? { ...item, approvalState: "approved" as const, excludedByDefault: false } : item,
-    );
+    const mappings = mapFields(fields, memory);
     const plan = planAutofill(mappings);
     expect(plan.fill).toHaveLength(1);
     expect(plan.fill[0]?.proposedValue).toBe("GIKI");
-    expect(mappingsSafeToFill(mappings).every((item) => item.approvalState === "approved")).toBe(true);
+    expect(plan.fill[0]?.options?.[0]?.value).toBe("GIKI");
     expect(proposedFillTargets(fields).every((field) => field.name !== "commit")).toBe(true);
   });
 

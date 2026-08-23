@@ -16,9 +16,21 @@ describe("configuration", () => {
       GOOGLE_OAUTH_CLIENT_SECRET: "replace-with-secret",
     });
     expect(config.openaiConfigured).toBe(false);
+    expect(config.groqConfigured).toBe(false);
+    expect(config.aiConfigured).toBe(false);
     expect(config.supabaseServiceRoleKeyConfigured).toBe(false);
     expect(config.googleOAuthConfigured).toBe(false);
     expect(config.storageBucket).toBe("application-documents");
+  });
+
+  it("treats Groq as a configured AI provider without requiring OpenAI", () => {
+    const config = loadAppConfig({
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+      GROQ_API_KEY: "gsk_test_placeholder_not_real",
+    });
+    expect(config.groqConfigured).toBe(true);
+    expect(config.aiConfigured).toBe(true);
+    expect(config.openaiConfigured).toBe(false);
   });
 });
 
@@ -47,6 +59,7 @@ describe("private storage paths", () => {
           onboarding_completed_at: null,
           onboarding_step: "consent",
           preferences: {},
+          timezone: null,
         },
       },
       documentId: "d1",

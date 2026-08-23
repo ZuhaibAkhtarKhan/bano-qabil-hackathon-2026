@@ -1,7 +1,9 @@
 import { computeProfileCompleteness } from "@1apply/contracts";
 
+import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { mapEvidence } from "@/server/memory/map-evidence";
+import { syncDeadlineReminders } from "@/server/applications/reminders";
 import {
   asOne,
   type ApplicationListRow,
@@ -13,7 +15,13 @@ import {
 } from "@/server/types";
 
 export async function loadDashboard() {
-  const { profile, supabase } = await requireWorkspace();
+  const { profile, supabase, actor } = await requireWorkspace();
+
+  try {
+    await syncDeadlineReminders(supabase, actor);
+  } catch {
+    // Dashboard still loads if reminder sync is unavailable.
+  }
 
   const [
     { count: verifiedEvidenceCount },
@@ -79,7 +87,7 @@ export async function loadProfileWorkspace() {
   const { data: full } = await supabase
     .from("profiles")
     .select(
-      "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization",
+      "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization, timezone",
     )
     .eq("id", profile.id)
     .single();
@@ -102,6 +110,7 @@ export async function loadProfileWorkspace() {
       portfolio_url: null,
       availability: null,
       work_authorization: null,
+      timezone: null,
     },
     evidence: (evidence ?? []) as EvidenceRow[],
   };
@@ -109,13 +118,16 @@ export async function loadProfileWorkspace() {
 
 export async function loadDocumentsWorkspace() {
   const { profile, supabase } = await requireWorkspace();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("documents")
     .select(
-      "id, type, label, current_version_id, created_at, document_versions ( id, version_label, mime_type, byte_size, status, original_filename, created_at )",
+      "id, type, label, current_version_id, created_at, document_versions!document_id ( id, version_label, mime_type, byte_size, status, original_filename, created_at )",
     )
     .eq("user_id", profile.id)
     .order("created_at", { ascending: false });
+  if (error) {
+    logError("documents.list_failed", { code: error.code, message: error.message });
+  }
   return { documents: (data ?? []) as DocumentListRow[] };
 }
 
@@ -162,7 +174,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
   const { data: application } = await supabase
     .from("applications")
     .select(
-      "id, status, deadline_at, next_action, submitted_at, persona, opportunity_id, created_at, updated_at",
+      "id, status, deadline_at, deadline_timezone, next_action, submitted_at, persona, opportunity_id, created_at, updated_at",
     )
     .eq("id", applicationId)
     .eq("user_id", user.id)
@@ -273,7 +285,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
     supabase
       .from("documents")
       .select(
-        "id, type, label, current_version_id, document_versions ( id, version_label, status, created_at, original_filename )",
+        "id, type, label, current_version_id, document_versions!document_id ( id, version_label, status, created_at, original_filename )",
       )
       .eq("user_id", user.id),
     supabase
@@ -303,6 +315,28 @@ export async function loadApplicationWorkspace(applicationId: string) {
     }
   }
 
+  const { data: previousAnswerRows } = await supabase
+    .from("application_answers")
+    .select("id, application_id, question_id, approved_text")
+    .eq("user_id", user.id)
+    .eq("state", "approved")
+    .neq("application_id", applicationId)
+    .not("approved_text", "is", null)
+    .limit(40);
+  const previousQuestionIds = [...new Set((previousAnswerRows ?? []).map((row) => String(row.question_id)))];
+  const { data: previousPrompts } =
+    previousQuestionIds.length > 0
+      ? await supabase.from("opportunity_questions").select("id, prompt").in("id", previousQuestionIds)
+      : { data: [] as Array<{ id: string; prompt: string }> };
+  const previousPromptById = new Map((previousPrompts ?? []).map((row) => [String(row.id), String(row.prompt)]));
+  const previousAnswers = (previousAnswerRows ?? []).map((row) => ({
+    id: String(row.id),
+    applicationId: String(row.application_id),
+    questionId: String(row.question_id),
+    prompt: previousPromptById.get(String(row.question_id)) ?? "",
+    text: String(row.approved_text ?? ""),
+  }));
+
   return {
     application,
     opportunity,
@@ -329,6 +363,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
     evidence: ((evidence ?? []) as EvidenceRow[]).map(mapEvidence),
     evidenceRows: (evidence ?? []) as EvidenceRow[],
     documents: documents ?? [],
+    previousAnswers,
     emailEvents: (applicationEmailEvents ?? []) as Array<{
       id: string;
       event_kind: string;
