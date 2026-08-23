@@ -48,8 +48,8 @@ export function SiteFooter() {
           <Link href="/sign-in" className="hover:text-ink">
             Sign in
           </Link>
-          <a href="#safety" className="hover:text-ink">
-            Safety
+          <a href="#how-it-works" className="hover:text-ink">
+            How it works
           </a>
         </div>
       </div>

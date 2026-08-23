@@ -10,55 +10,57 @@ const CORNERS = [
   {
     id: "memory",
     corner: "tl" as const,
-    label: "Application Memory",
+    label: "Build your memory",
     number: "01",
     color: "#98a5ef",
-    body: "Resumes and supporting documents become structured, user-verified facts. Later applications reuse that memory instead of reconstructing it.",
+    body: "Start with one verified profile from resumes, transcripts, and supporting documents — structured evidence you reuse on every application without rebuilding your story.",
     points: [
-      "Identity, education, skills, projects",
-      "Evidence with source and verification",
-      "Document versions stay immutable",
+      "Structured identity, education, skills, and projects",
+      "Evidence items with source, verification, and exclusions",
+      "Immutable document versions for audit-ready submissions",
+      "Profile facts you confirm — never chat-invented claims",
     ],
   },
   {
-    id: "intake",
+    id: "intelligence",
     corner: "tr" as const,
-    label: "Opportunity Intake",
+    label: "Score the opportunity",
     number: "02",
     color: "#5adeb7",
-    body: "Bring a public URL, save a page from the extension, or enter an opportunity by hand. Page content stays untrusted data.",
+    body: "Bring roles in by URL, extension save, manual entry, or live discovery — then measure fit against your verified memory before you invest time drafting.",
     points: [
-      "URL, extension, and manual entry",
-      "Requirements and questions extracted",
-      "Fit Index with missing-fact list",
+      "Ingest from public URLs, extension saves, and manual forms",
+      "Requirements and application questions extracted automatically",
+      "Fit Index, eligibility checks, and resume matching previews",
+      "Web and job-board discovery ranked to your profile",
     ],
   },
   {
-    id: "agents",
+    id: "drafting",
     corner: "bl" as const,
-    label: "Grounded Agents",
+    label: "Draft with evidence",
     number: "03",
     color: "#e69393",
-    body: "Drafting retrieves approved evidence only. Every sentence can show why it was written. No evidence means no claim.",
+    body: "Generate cover letters, short answers, and application responses from approved evidence only — with citations, review queues, and zero invented credentials.",
     points: [
-      "RAG over your evidence",
-      "Cited drafts",
-      "Unknowns become review items",
-      "Nothing invented to sound stronger",
+      "RAG retrieval over verified memory, not the open web",
+      "Every draft shows why each sentence was written",
+      "Missing facts become questions, not polished guesses",
+      "Approve, edit, or reject before anything ships",
     ],
   },
   {
-    id: "control",
+    id: "apply",
     corner: "br" as const,
-    label: "Control & Safety",
+    label: "Apply and track",
     number: "04",
     color: "#eadc8f",
-    body: "You approve answers and documents before they ship. On host sites the extension fills fields but never clicks Submit. Applications you manage on 1-Apply — added by URL, extension, or manual entry — submit automatically once approved.",
+    body: "Autofill host-site forms from the extension, submit approved applications on 1-Apply, and stay on top of deadlines with live notifications and inbox sync.",
     points: [
-      "Approval workflows at every step",
-      "Extension: fill only on host sites",
-      "Platform: auto-submit when ready",
-      "Full audit trail for every action",
+      "Chrome extension autofill on external application portals",
+      "Platform applications submit automatically once approved",
+      "Application pipeline, status history, and deadline tracking",
+      "Gmail and calendar integrations for interview detection",
     ],
   },
 ] as const;
@@ -251,7 +253,7 @@ export function EngineExplorer() {
   };
 
   return (
-    <div className="engine-section" id="how-it-works">
+    <div className="engine-section">
       <div ref={barsRef} className="engine-bars-band" aria-hidden="true">
         <svg className="engine-bars-svg" viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio="none">
           <path d={barsEvenOddPath(barProgress)} fill="#0e0e0e" fillRule="evenodd" clipRule="evenodd" />
@@ -260,9 +262,9 @@ export function EngineExplorer() {
 
       <section
         ref={sectionRef}
-        id="safety"
+        id="how-it-works"
         className="how-it-works"
-        aria-label="How 1-Apply works"
+        aria-label="How it works"
       >
         <div className="hiw-sticky">
           <div
@@ -362,9 +364,13 @@ export function EngineExplorer() {
                   transform: `rotate(${-rotate}deg)`,
                 }}
               >
-                <h2 className="font-display">The 1-Apply platform</h2>
+                <h2 className="font-display">Four steps. One apply cycle.</h2>
+                <p className="mt-3 max-w-md text-sm leading-6 text-zinc-300">
+                  Build memory, score fit, draft grounded answers, then autofill and track — without
+                  juggling documents or duplicate forms.
+                </p>
                 <ButtonLink href="/sign-up" variant="inverse" className="hiw-outro-btn">
-                  Create your memory
+                  Get started free
                   <span aria-hidden="true">→</span>
                 </ButtonLink>
               </div>

@@ -61,7 +61,7 @@ type FaceContent = {
   chartNote?: string;
 };
 
-/** One scroll phase = one platform pillar; three cubes = sub-features from that pillar */
+/** One scroll phase = one feature pillar; three cubes = sub-features within that pillar */
 const PHASE_FACES: FaceContent[][] = [
   // 01 — Application Memory
   [
@@ -74,91 +74,91 @@ const PHASE_FACES: FaceContent[][] = [
     },
     {
       accent: "#98a5ef",
-      heading: "Evidence with source",
-      subtitle: "Resumes & docs → verified facts",
+      heading: "Verified evidence",
+      subtitle: "Resumes & docs → confirmed facts",
       kind: "pills",
       items: ["Resume.pdf", "Transcript", "Portfolio", "Certificates"],
     },
     {
       accent: "#98a5ef",
-      heading: "Immutable versions",
-      subtitle: "Document history stays intact",
+      heading: "Version history",
+      subtitle: "Every upload stays traceable",
       kind: "grid",
       items: ["v1 uploaded", "v2 reviewed", "Source linked"],
     },
   ],
-  // 02 — Opportunity Intake
+  // 02 — Opportunity Intelligence
   [
     {
       accent: "#5adeb7",
-      heading: "Add any opportunity",
-      subtitle: "Page content stays untrusted",
+      heading: "Multi-channel intake",
+      subtitle: "URL, extension, manual, discovery",
       kind: "pills",
-      items: ["Public URL", "Extension save", "Manual entry"],
+      items: ["Public URL", "Extension save", "Manual entry", "Live discovery"],
     },
     {
       accent: "#5adeb7",
-      heading: "Extract requirements",
-      subtitle: "Questions & checklist from the page",
+      heading: "Requirements engine",
+      subtitle: "Questions & checklist from postings",
       kind: "flow",
       items: ["Parse posting", "Pull questions", "Build checklist"],
     },
     {
       accent: "#5adeb7",
-      heading: "Fit Index",
-      subtitle: "Match score + missing-fact list",
+      heading: "Fit & eligibility",
+      subtitle: "Match score, resume rank, missing facts",
       kind: "chart",
-      items: ["Skills match", "Gaps found", "Facts needed"],
-      chartValue: "78%",
-      chartNote: "3 facts missing",
+      items: ["Skills match", "Resume fit", "Gaps found"],
+      chartValue: "82%",
+      chartNote: "2 facts missing",
     },
   ],
-  // 03 — Grounded Agents
+  // 03 — Grounded Drafting
   [
     {
       accent: "#e69393",
-      heading: "RAG over your evidence",
-      subtitle: "Retrieves approved memory only",
+      heading: "Evidence retrieval",
+      subtitle: "Approved memory only — no invention",
       kind: "flow",
       items: ["Query memory", "Pull citations", "Draft answer"],
     },
     {
       accent: "#e69393",
-      heading: "Cited drafts",
-      subtitle: "Every sentence shows its source",
+      heading: "Cited responses",
+      subtitle: "Cover letters & short answers",
       kind: "table",
       items: ["Cover letter", "Why this role?", "Project example"],
     },
     {
       accent: "#e69393",
-      heading: "No evidence → no claim",
-      subtitle: "Unknowns become review items",
+      heading: "Review before send",
+      subtitle: "Unknowns flagged for your approval",
       kind: "pills",
       items: ["Flag unknown", "Ask you", "Never invent"],
     },
   ],
-  // 04 — Control & Safety
+  // 04 — Apply, Track & Sync
   [
     {
       accent: "#eadc8f",
-      heading: "Approval workflows",
-      subtitle: "You approve every answer & doc",
+      heading: "Extension autofill",
+      subtitle: "Fill host-site forms from memory",
       kind: "table",
-      items: ["Draft ready", "Your review", "Approved"],
+      items: ["Scan fields", "Map evidence", "Fill preview"],
     },
     {
       accent: "#eadc8f",
-      heading: "Extension vs platform",
-      subtitle: "Fill on host sites · submit on 1-Apply",
+      heading: "Platform submit",
+      subtitle: "Auto-submit when you approve",
       kind: "pills",
       items: ["Extension fills", "Host: you submit", "Platform auto-submit"],
     },
     {
       accent: "#eadc8f",
-      heading: "Full audit trail",
-      subtitle: "Every action logged & traceable",
+      heading: "Track & integrate",
+      subtitle: "Pipeline, notifications, inbox sync",
       kind: "flow",
-      items: ["Edit answer", "Zuhaib Akhtar", "Timestamp"],
+      items: ["Status updates", "Deadline alerts", "Calendar sync"],
     },
   ],
 ];

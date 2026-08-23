@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
-import { ApplicationQueue } from "@/components/marketing/application-queue";
 import { ApplicationQueuePreview } from "@/components/marketing/application-queue-preview";
 import { HeroPills } from "@/components/marketing/hero-pills";
 import { ButtonLink } from "@/components/ui/button";
@@ -52,10 +51,7 @@ export function Hero() {
         </div>
       </section>
 
-      <div ref={queueRef}>
-        <ApplicationQueuePreview animationEpoch={previewEpoch} />
-        <ApplicationQueue />
-      </div>
+      <ApplicationQueuePreview ref={queueRef} animationEpoch={previewEpoch} />
     </>
   );
 }

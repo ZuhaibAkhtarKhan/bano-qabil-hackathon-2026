@@ -4,10 +4,9 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { ButtonLink } from "@/components/ui/button";
 
 const links = [
-  { href: "#platform", label: "Platform" },
   { href: "#how-it-works", label: "How it works" },
+  { href: "#platform", label: "Platform" },
   { href: "#pricing", label: "Pricing" },
-  { href: "#safety", label: "Safety" },
 ];
 
 function scrollToHash(hash: string) {
