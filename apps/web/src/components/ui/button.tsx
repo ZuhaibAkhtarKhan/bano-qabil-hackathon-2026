@@ -1,5 +1,9 @@
+"use client";
+
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import Link from "next/link";
+import { useFormStatus } from "react-dom";
+import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 
@@ -43,6 +47,41 @@ export function Button({
   size?: ButtonSize;
 }) {
   return <button className={buttonClassName(variant, size, className)} {...props} />;
+}
+
+export function SubmitButton({
+  children,
+  pendingText,
+  variant = "primary",
+  size = "md",
+  className,
+  disabled,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  children: ReactNode;
+  pendingText?: string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending || disabled}
+      className={buttonClassName(variant, size, className)}
+      {...props}
+    >
+      {pending ? (
+        <>
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          <span>{pendingText ?? "Processing…"}</span>
+        </>
+      ) : (
+        children
+      )}
+    </button>
+  );
 }
 
 export function ButtonLink({

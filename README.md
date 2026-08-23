@@ -51,6 +51,7 @@ Apply migrations in order:
 - `supabase/migrations/20260819150000_notifications_automation.sql`
 - `supabase/migrations/20260819160000_security_hardening.sql`
 - `supabase/migrations/20260819180000_account_deletion.sql`
+- `supabase/migrations/20260819190000_realtime_events.sql`
 
 ```bash
 npm run lint
