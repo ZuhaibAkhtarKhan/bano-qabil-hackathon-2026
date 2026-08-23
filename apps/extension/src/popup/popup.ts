@@ -66,6 +66,9 @@ async function ensureSiteAccessFromGesture(tabUrl: string): Promise<string> {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Open a public http(s) page first.");
   }
+  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1") {
+    throw new Error("Local pages cannot be ingested or filled.");
+  }
   const origins = [`${parsed.origin}/*`];
   const already = await chrome.permissions.contains({ origins });
   if (already) return parsed.origin;
