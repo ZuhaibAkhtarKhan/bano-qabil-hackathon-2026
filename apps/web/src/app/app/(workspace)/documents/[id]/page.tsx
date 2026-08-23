@@ -57,6 +57,9 @@ export default async function DocumentDetailPage({
             No extractable text on the latest version (encrypted PDF, scan-only image, or unsupported encoding). The file is still stored.
           </p>
         )}
+        <p className="mt-3 text-xs text-ink-muted">
+          Uploaded PDF and Word files are read automatically. Extracted facts are written to Application Memory as unverified evidence.
+        </p>
       </Card>
 
       <Card className="mt-8 max-w-2xl p-6">

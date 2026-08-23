@@ -30,7 +30,7 @@ export function buttonClassName(
   className?: string,
 ) {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all duration-200 group disabled:pointer-events-none disabled:opacity-50",
+    "ui-button inline-flex items-center justify-center gap-2 rounded-full font-medium transition-[background-color,color,border-color,box-shadow] duration-200 ease-out group disabled:pointer-events-none disabled:opacity-50",
     variants[variant],
     sizes[size],
     className,

@@ -4,7 +4,7 @@ import { opportunityCategorySchema } from "@1apply/contracts";
 import { applicationStatusLabel, normalizeApplicationStatus } from "@/lib/application-workflow";
 import { APPLICATION_BOARD_COLUMNS, boardColumnForStatus } from "@/lib/dashboard";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { ButtonLink } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/field";
@@ -137,9 +137,7 @@ export default async function ApplicationsPage({
                 </Select>
               </Field>
               <div className="lg:col-span-6 flex flex-wrap gap-2">
-                <button className="inline-flex h-10 items-center justify-center rounded-full border border-ink bg-ink px-5 text-sm font-medium text-white" type="submit">
-                  Apply filters
-                </button>
+                <Button type="submit">Apply filters</Button>
                 <ButtonLink href="/app/applications" variant="secondary">
                   Reset
                 </ButtonLink>

@@ -13,6 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { mapEvidence } from "@/server/memory/map-evidence";
+import { searchWebDiscoveryCandidates } from "@/server/opportunities/web-search";
 import type { EvidenceRow } from "@/server/types";
 
 function toCriteria(query: string, filters: DiscoveryFilters): DiscoveryCriteria {
@@ -178,11 +179,16 @@ export async function runOpportunityDiscovery(input: {
   if (error || !request) throw new Error("DISCOVERY_REQUEST_FAILED");
 
   try {
-    const [workspace, context] = await Promise.all([
+    const [workspace, web, context] = await Promise.all([
       loadWorkspaceCandidates(supabase, actor.userId),
+      searchWebDiscoveryCandidates(criteria).catch(() => [] as DiscoveryCandidate[]),
       loadRankContext(supabase, actor.userId),
     ]);
-    const ranked = runDiscoveryPipeline([...sourcedDiscoveryCatalog(), ...workspace], criteria, context);
+    const ranked = runDiscoveryPipeline(
+      [...sourcedDiscoveryCatalog(), ...web, ...workspace],
+      criteria,
+      context,
+    );
 
     if (ranked.length > 0) {
       await supabase.from("discovery_results").insert(
@@ -213,8 +219,8 @@ export async function runOpportunityDiscovery(input: {
     }
 
     const summary = ranked.length
-      ? `Ranked ${ranked.length} sourced listing${ranked.length === 1 ? "" : "s"}. Fit Index is a preview from verified memory only.`
-      : "No sourced listings matched those filters. Broaden location or type, or paste a posting URL.";
+      ? `Ranked ${ranked.length} live and sourced listing${ranked.length === 1 ? "" : "s"} from the public web, program pages, and your saved opportunities. Fit Index is a preview from verified memory only.`
+      : "No live or sourced listings matched those filters. Broaden location or type, or paste a posting URL.";
 
     await supabase
       .from("discovery_requests")

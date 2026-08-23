@@ -1,42 +1,19 @@
-import Link from "next/link";
-
 import { FlashBanner } from "@/components/app/flash-banner";
+import { NotificationsInbox } from "@/components/app/notifications-inbox";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button, ButtonLink } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
-import { Field, Input, Select } from "@/components/ui/field";
-import { StatusPill } from "@/components/ui/status-pill";
-import {
-  markAllNotificationsReadAction,
-  markNotificationReadAction,
-  runAutomationChecksAction,
-} from "@/server/notifications/actions";
+import { markAllNotificationsReadAction, runAutomationChecksAction } from "@/server/notifications/actions";
 import { loadNotificationsWorkspace } from "@/server/workspace/queries";
 
 export default async function NotificationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string; error?: string; q?: string; status?: string; category?: string }>;
+  searchParams: Promise<{ notice?: string; error?: string }>;
 }) {
-  const { notice, error, q, status, category } = await searchParams;
+  const { notice, error } = await searchParams;
   const { notifications } = await loadNotificationsWorkspace();
   const unread = notifications.filter((item) => !item.read_at).length;
-
-  const query = (q ?? "").trim().toLowerCase();
-  const statusFilter = (status ?? "").trim().toLowerCase();
-  const categoryFilter = (category ?? "").trim().toLowerCase();
-
-  const filtered = notifications.filter((item) => {
-    const haystack = [item.title, item.body, item.category].filter(Boolean).join(" ").toLowerCase();
-    if (query && !haystack.includes(query)) return false;
-    if (statusFilter === "unread" && item.read_at) return false;
-    if (statusFilter === "read" && !item.read_at) return false;
-    if (categoryFilter && item.category !== categoryFilter) return false;
-    return true;
-  });
-
-  const categories = Array.from(new Set(notifications.map((item) => item.category).filter(Boolean))) as string[];
 
   return (
     <WorkspaceMain>
@@ -71,90 +48,7 @@ export default async function NotificationsPage({
           />
         </div>
       ) : (
-        <div className="mt-8 max-w-2xl">
-          <Card className="mb-6 p-4">
-            <form className="grid gap-3 sm:grid-cols-3">
-              <Field label="Search" htmlFor="q">
-                <Input id="q" name="q" defaultValue={q ?? ""} placeholder="Search notices…" />
-              </Field>
-              <Field label="Status" htmlFor="status">
-                <Select id="status" name="status" defaultValue={status ?? ""}>
-                  <option value="">All</option>
-                  <option value="unread">Unread only</option>
-                  <option value="read">Read only</option>
-                </Select>
-              </Field>
-              <Field label="Category" htmlFor="category">
-                <Select id="category" name="category" defaultValue={category ?? ""}>
-                  <option value="">All categories</option>
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat.replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <div className="sm:col-span-3 flex flex-wrap gap-2">
-                <Button type="submit" size="sm">
-                  Filter
-                </Button>
-                <ButtonLink href="/app/notifications" variant="secondary" size="sm">
-                  Reset
-                </ButtonLink>
-              </div>
-            </form>
-          </Card>
-
-          <p className="mb-6 text-sm text-ink-muted">
-            {unread} unread · {filtered.length} showing of {notifications.length} total
-          </p>
-
-          {filtered.length === 0 ? (
-            <EmptyState
-              eyebrow="No matches"
-              title="No notifications match the filter"
-              body="Try resetting search or status filters."
-            />
-          ) : (
-            <ul className="grid gap-3">
-              {filtered.map((item) => {
-                const href = item.action_url || (item.application_id ? `/app/applications/${item.application_id}` : null);
-                return (
-                  <li key={item.id} className="rounded-2xl border border-line bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{item.title}</p>
-                        <p className="mt-1 text-sm text-ink-muted">{item.body}</p>
-                        <p className="mt-2 text-xs text-ink-muted">
-                          {item.category ? item.category.replace(/_/g, " ") : "notice"}
-                          {typeof item.priority === "number" ? ` · priority ${item.priority}` : ""}
-                          {" · "}
-                          {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}
-                        </p>
-                      </div>
-                      <StatusPill tone={item.read_at ? "muted" : "sand"}>{item.read_at ? "Read" : "Unread"}</StatusPill>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                      {href ? (
-                        <Link className="underline" href={href}>
-                          Open
-                        </Link>
-                      ) : null}
-                      {!item.read_at ? (
-                        <form action={markNotificationReadAction}>
-                          <input type="hidden" name="notificationId" value={item.id} />
-                          <button type="submit" className="underline">
-                            Mark read
-                          </button>
-                        </form>
-                      ) : null}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <NotificationsInbox notifications={notifications} />
       )}
     </WorkspaceMain>
   );

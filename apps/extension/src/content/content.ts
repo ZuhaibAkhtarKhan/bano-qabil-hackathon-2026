@@ -1150,7 +1150,7 @@ if (!root.__1APPLY_LISTENERS) {
       return false;
     }
 
-    if (message?.type === "FILL" || message?.type === "APPLY_SUGGESTIONS") {
+    if (message?.type === "FILL" || message?.type === "APPLY_SUGGESTIONS" || message?.type === "APPLY_SUGGESTIONS") {
       assertFillActionAllowed("setValue");
       const expectedOrigin = String(message.origin ?? "");
       if (expectedOrigin && location.origin !== expectedOrigin) {

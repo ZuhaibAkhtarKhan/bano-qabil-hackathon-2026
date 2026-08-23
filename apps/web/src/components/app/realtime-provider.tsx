@@ -79,6 +79,15 @@ export function RealtimeWorkspaceProvider({
       return;
     }
 
+    void supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("read_at", null)
+      .then(({ count }) => {
+        if (typeof count === "number") setUnreadCount(count);
+      });
+
     const channel = supabase.channel(`realtime:workspace:${userId}`);
 
     channel
@@ -162,13 +171,7 @@ export function RealtimeWorkspaceProvider({
         setIsRealtimeConnected(status === "SUBSCRIBED");
       });
 
-    // Fallback polling heartbeat every 20 seconds to keep counts accurate
-    const pollTimer = setInterval(() => {
-      router.refresh();
-    }, 20000);
-
     return () => {
-      clearInterval(pollTimer);
       void supabase.removeChannel(channel);
     };
   }, [userId, addToast, router]);

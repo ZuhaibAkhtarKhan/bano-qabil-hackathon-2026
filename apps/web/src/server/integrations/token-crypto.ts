@@ -7,7 +7,12 @@ function looksLikePlaceholder(value: string): boolean {
 }
 
 function encryptionKey(): Buffer | null {
-  const secret = process.env.TOKEN_ENCRYPTION_KEY || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "";
+  const secret =
+    process.env.TOKEN_ENCRYPTION_KEY ||
+    process.env.TOKEN_ENCRYPTION_KEY ||
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    (process.env.NODE_ENV !== "production" ? "local-dev-token-encryption-key" : "");
   if (looksLikePlaceholder(secret)) return null;
   return createHash("sha256").update(`1apply-integration-tokens:${secret}`).digest();
 }

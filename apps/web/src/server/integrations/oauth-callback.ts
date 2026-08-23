@@ -65,6 +65,18 @@ export async function handleOAuthCallback(input: {
       body: `Connected as ${tokens.email || "unknown"}. No passwords stored.`,
     });
 
+    try {
+      const { runPostConnectSync } = await import("@/server/integrations/post-connect");
+      await runPostConnectSync({
+        supabase,
+        userId: input.userId,
+        kind: input.kind,
+        integrationId: integration.id,
+      });
+    } catch {
+      // Login succeeded even if the first sync fails; the user can retry from Integrations.
+    }
+
     return { success: true };
   } catch (err) {
     const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
