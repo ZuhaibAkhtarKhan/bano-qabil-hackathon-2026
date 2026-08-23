@@ -243,6 +243,22 @@ export function AnswerPanel({
         {answer && <SemanticBadge status={status} />}
       </div>
 
+      {/* Live drafting status */}
+      {isPending && (
+        <div className="flex flex-col gap-2 rounded-xl border border-violet-200 bg-violet-50/80 p-4 animate-in fade-in">
+          <div className="flex items-center gap-2 text-xs font-semibold text-violet-900">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-600" />
+            </span>
+            <span>Drafting grounded response in real time…</span>
+          </div>
+          <p className="text-xs text-violet-700 leading-normal">
+            Retrieving verified facts from Application Memory, aligning claims with your selected persona, and verifying factual claims against evidence.
+          </p>
+        </div>
+      )}
+
       {/* Answer text / edit area */}
       {editMode ? (
         <div className="flex flex-col gap-2">
@@ -277,9 +293,9 @@ export function AnswerPanel({
             </details>
           )}
         </div>
-      ) : (
+      ) : !isPending ? (
         <p className="text-sm text-ink-muted italic">No answer generated yet.</p>
-      )}
+      ) : null}
 
       {/* Grounding + claim flags + missing facts */}
       {answer && (

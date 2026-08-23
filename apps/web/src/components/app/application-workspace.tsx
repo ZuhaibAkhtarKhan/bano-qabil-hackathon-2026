@@ -176,8 +176,15 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
       <PageHeader
         eyebrow="Application workspace"
         title={opportunity?.title ?? "Untitled opportunity"}
-        body={`${opportunity?.organization ?? "Unknown host"} · ${formatDeadline(application.deadline_at)} · This workspace manages evidence, drafts, and history. It never submits for you.`}
-        actions={<StatusPill tone={applicationTone(application.status)}>{applicationStatusLabel(application.status)}</StatusPill>}
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-mint-soft px-2.5 py-1 font-mono text-[11px] font-medium text-emerald-800">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live synced
+            </span>
+            <StatusPill tone={applicationTone(application.status)}>{applicationStatusLabel(application.status)}</StatusPill>
+          </div>
+        }
       />
       <FlashBanner notice={notice} error={error} />
 
