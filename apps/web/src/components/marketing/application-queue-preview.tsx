@@ -4,6 +4,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -127,8 +128,12 @@ const STATUS_DOT = {
 } as const;
 
 /** Sample dashboard — peeks under hero; match rings fill on scroll. */
-export const ApplicationQueuePreview = forwardRef<HTMLDivElement>(function ApplicationQueuePreview(_, ref) {
+export const ApplicationQueuePreview = forwardRef<
+  HTMLDivElement,
+  { animationEpoch?: number }
+>(function ApplicationQueuePreview({ animationEpoch = 0 }, ref) {
   const innerRef = useRef<HTMLDivElement>(null);
+  const [mountNode, setMountNode] = useState<HTMLDivElement | null>(null);
   const [revealProgress, setRevealProgress] = useState(0);
   const targetProgressRef = useRef(0);
   const smoothProgressRef = useRef(0);
@@ -137,14 +142,15 @@ export const ApplicationQueuePreview = forwardRef<HTMLDivElement>(function Appli
   const setRefs = useCallback(
     (node: HTMLDivElement | null) => {
       innerRef.current = node;
+      setMountNode(node);
       if (typeof ref === "function") ref(node);
       else if (ref) ref.current = node;
     },
     [ref],
   );
 
-  useEffect(() => {
-    const node = innerRef.current;
+  useLayoutEffect(() => {
+    const node = mountNode;
     if (!node) return;
 
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -166,34 +172,41 @@ export const ApplicationQueuePreview = forwardRef<HTMLDivElement>(function Appli
       targetProgressRef.current = clamped * clamped * (3 - 2 * clamped);
     };
 
+    let running = true;
+
     const tick = () => {
+      if (!running) return;
+      measureTarget();
       smoothProgressRef.current = lerp(smoothProgressRef.current, targetProgressRef.current, 0.068);
       setRevealProgress(smoothProgressRef.current);
-
-      if (Math.abs(smoothProgressRef.current - targetProgressRef.current) > 0.001) {
-        rafRef.current = window.requestAnimationFrame(tick);
-      } else {
-        rafRef.current = null;
-      }
+      rafRef.current = window.requestAnimationFrame(tick);
     };
 
-    const schedule = () => {
+    const restart = () => {
+      smoothProgressRef.current = 0;
+      targetProgressRef.current = 0;
+      setRevealProgress(0);
       measureTarget();
-      if (rafRef.current === null) {
-        rafRef.current = window.requestAnimationFrame(tick);
-      }
     };
 
-    schedule();
-    window.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule, { passive: true });
+    restart();
+    rafRef.current = window.requestAnimationFrame(tick);
+
+    const onPageShow = () => restart();
+    const onPopState = () => restart();
+
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener("focus", restart);
 
     return () => {
-      window.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
+      running = false;
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("focus", restart);
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [mountNode, animationEpoch]);
 
   const inView = revealProgress > 0.08;
 
@@ -208,7 +221,7 @@ export const ApplicationQueuePreview = forwardRef<HTMLDivElement>(function Appli
       >
         <div className="dashboard-preview-layout flex min-h-[520px]">
           <DashboardSidebar />
-          <DashboardMain inView={inView} revealProgress={revealProgress} />
+          <DashboardMain inView={inView} revealProgress={revealProgress} animationEpoch={animationEpoch} />
         </div>
       </div>
       <p id="dashboard-heading" className="sr-only">
@@ -274,7 +287,15 @@ function DashboardSidebar() {
   );
 }
 
-function DashboardMain({ inView, revealProgress }: { inView: boolean; revealProgress: number }) {
+function DashboardMain({
+  inView,
+  revealProgress,
+  animationEpoch,
+}: {
+  inView: boolean;
+  revealProgress: number;
+  animationEpoch: number;
+}) {
   const [activityIndex, setActivityIndex] = useState(0);
 
   useEffect(() => {
@@ -312,7 +333,12 @@ function DashboardMain({ inView, revealProgress }: { inView: boolean; revealProg
           </h3>
           <div className="dashboard-match-grid mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {TOP_MATCHES.map((job, index) => (
-              <JobMatchCard key={job.id} job={job} revealProgress={revealProgress} stagger={index * 0.09} />
+              <JobMatchCard
+                key={`${job.id}-${animationEpoch}`}
+                job={job}
+                revealProgress={revealProgress}
+                stagger={index * 0.09}
+              />
             ))}
           </div>
         </section>
@@ -463,6 +489,9 @@ function MatchRing({ percent, label, target }: { percent: number; label: number;
           strokeDasharray={c}
           strokeDashoffset={offset}
           className="dashboard-match-ring-progress"
+          style={{
+            transition: "stroke-dashoffset 140ms linear",
+          }}
         />
       </svg>
       <span className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold tabular-nums text-ink">
