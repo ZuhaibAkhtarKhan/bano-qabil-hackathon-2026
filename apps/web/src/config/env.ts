@@ -73,8 +73,8 @@ export function loadAppConfig(source: Record<string, string | undefined> = proce
     googleOAuthConfigured:
       !looksLikeSecretPlaceholder(parsed.GOOGLE_OAUTH_CLIENT_ID) &&
       !looksLikeSecretPlaceholder(parsed.GOOGLE_OAUTH_CLIENT_SECRET),
-    gmailSyncEnabled: parsed.GMAIL_SYNC_ENABLED === "true",
-    calendarSyncEnabled: parsed.CALENDAR_SYNC_ENABLED === "true",
+    gmailSyncEnabled: parsed.GMAIL_SYNC_ENABLED !== "false",
+    calendarSyncEnabled: parsed.CALENDAR_SYNC_ENABLED !== "false",
   };
 }
 

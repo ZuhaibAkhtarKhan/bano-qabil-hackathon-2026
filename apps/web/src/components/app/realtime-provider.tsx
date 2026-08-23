@@ -79,6 +79,15 @@ export function RealtimeWorkspaceProvider({
       return;
     }
 
+    void supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("read_at", null)
+      .then(({ count }) => {
+        if (typeof count === "number") setUnreadCount(count);
+      });
+
     const channel = supabase.channel(`realtime:workspace:${userId}`);
 
     channel

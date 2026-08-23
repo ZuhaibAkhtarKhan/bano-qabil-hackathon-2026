@@ -10,6 +10,7 @@ import { unwrapTokenRow } from "@/server/integrations/token-crypto";
 import { syncGmailMessages } from "@/server/integrations/gmail-sync";
 import { confirmAndCreateCalendarEvent, deleteCalendarEvent } from "@/server/integrations/calendar-sync";
 import { emitDomainEvent } from "@/server/notifications/service";
+import { runPostConnectSync } from "@/server/integrations/post-connect";
 
 function integrationPath() {
   return "/app/integrations";
@@ -155,6 +156,42 @@ export async function triggerGmailSync(formData: FormData) {
     subjectId: integrationId,
     title: "Gmail sync complete",
     body: `Processed ${result.processed} emails · ${result.classified} relevant · ${result.associated} associated · ${result.interviewsDetected} interview(s) detected.${result.errors.length ? ` ${result.errors.length} error(s).` : ""}`,
+  });
+
+  revalidatePath(integrationPath());
+  redirect(integrationPath());
+}
+
+export async function triggerCalendarSync(formData: FormData) {
+  const { user, supabase } = await requireWorkspace();
+  const integrationId = String(formData.get("integrationId") ?? "");
+
+  const { data: integration } = await supabase
+    .from("integrations")
+    .select("id, status, kind")
+    .eq("id", integrationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!integration || integration.kind !== "google_calendar" || integration.status !== "connected") {
+    redirect(`${integrationPath()}?error=not_connected`);
+  }
+
+  const { data: token } = await supabase
+    .from("integration_tokens")
+    .select("access_token, refresh_token")
+    .eq("integration_id", integrationId)
+    .maybeSingle();
+
+  if (!token?.access_token) {
+    redirect(`${integrationPath()}?error=no_token`);
+  }
+
+  await runPostConnectSync({
+    supabase,
+    userId: user.id,
+    kind: "google_calendar",
+    integrationId,
   });
 
   revalidatePath(integrationPath());

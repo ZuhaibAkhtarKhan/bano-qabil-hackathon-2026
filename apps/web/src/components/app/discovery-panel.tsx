@@ -36,7 +36,7 @@ export function DiscoveryPanel({
     <Card id="discovery" className="mt-6 max-w-5xl scroll-mt-24 p-6">
       <h2 className="font-display text-2xl">Discover opportunities</h2>
       <p className="mt-1 text-sm text-ink-muted">
-        Natural-language search over sourced program pages and your saved opportunities. Listings keep their source URL.
+        Natural-language search over live public job boards, sourced program pages, and your saved opportunities. Listings keep their source URL.
         Fit Index is a preview from verified Application Memory — nothing is invented.
       </p>
       <form action={queueDiscoveryRequest} className="mt-4 grid gap-4">

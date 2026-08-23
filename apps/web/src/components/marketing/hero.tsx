@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 
-import { ApplicationQueuePreview } from "@/components/marketing/application-queue-preview";
+import { ApplicationQueue } from "@/components/marketing/application-queue";
 import { HeroPills } from "@/components/marketing/hero-pills";
 import { ButtonLink } from "@/components/ui/button";
 
@@ -44,7 +44,9 @@ export function Hero() {
         </div>
       </section>
 
-      <ApplicationQueuePreview ref={queueRef} />
+      <div ref={queueRef}>
+        <ApplicationQueue />
+      </div>
     </>
   );
 }

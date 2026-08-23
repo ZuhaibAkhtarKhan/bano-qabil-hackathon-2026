@@ -81,9 +81,6 @@ function tabOrigin(tab: chrome.tabs.Tab): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Open a public http(s) page first.");
   }
-  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1") {
-    throw new Error("Local pages cannot be ingested or filled.");
-  }
   return parsed.origin;
 }
 
@@ -430,7 +427,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
 
-    if (message?.type === "APPLY_SUGGESTIONS" || message?.type === "FILL_APPROVED") {
+    if (message?.type === "APPLY_SUGGESTIONS" || message?.type === "APPLY_SUGGESTIONS" || message?.type === "FILL" || message?.type === "FILL_APPROVED") {
       const tab = await activeTab();
       if (!tab.id) throw new Error("No active tab.");
       const origin = tabOrigin(tab);
