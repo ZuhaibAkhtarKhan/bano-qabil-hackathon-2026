@@ -2,20 +2,22 @@ import { CategoryMarquee } from "@/components/marketing/category-marquee";
 import { EngineExplorer } from "@/components/marketing/engine-explorer";
 import { FinalCta } from "@/components/marketing/final-cta";
 import { Hero } from "@/components/marketing/hero";
-import { LoopShowcase } from "@/components/marketing/loop-showcase";
+import { LandingCursor } from "@/components/marketing/landing-cursor";
 import { Pillars } from "@/components/marketing/pillars";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
+import { WorkflowPlanar } from "@/components/marketing/workflow-planar";
 
 export default function HomePage() {
   return (
     <div id="top" className="bg-canvas">
+      <LandingCursor />
       <SiteHeader />
       <main>
         <Hero />
         <CategoryMarquee />
         <Pillars />
-        <LoopShowcase />
+        <WorkflowPlanar />
         <EngineExplorer />
         <FinalCta />
       </main>

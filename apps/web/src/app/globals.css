@@ -122,6 +122,262 @@ body {
   }
 }
 
+.workflow-stage {
+  isolation: isolate;
+}
+
+.workflow-cursor-field {
+  z-index: 0;
+}
+
+.workflow-cursor-orb {
+  position: absolute;
+  width: 7rem;
+  height: 7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.14), transparent 70%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.workflow-cursor-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.workflow-cursor-trail,
+.workflow-cursor-trail-soft {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.workflow-cursor-trail-soft {
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 4;
+}
+
+.workflow-cursor-trail {
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 1.35;
+}
+
+@keyframes workflow-step-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06);
+  }
+}
+
+.workflow-step-pulse {
+  animation: workflow-step-pulse 1.2s ease-in-out infinite;
+}
+
+.workflow-scene {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 22rem;
+  perspective: 1400px;
+  perspective-origin: 50% 48%;
+  transition:
+    transform 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.45s ease;
+}
+
+.workflow-scene-pack {
+  transform: scale(0.96);
+}
+
+.workflow-scene-sealed {
+  transform: scale(0.9) translateY(-0.85rem);
+}
+
+.workflow-stack {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  width: min(100%, 20rem);
+  height: 3.35rem;
+  margin-left: calc(min(100%, 20rem) / -2);
+  margin-top: -1.65rem;
+  transform-style: preserve-3d;
+  /* Near-upright planar stack — readable labels, light depth */
+  transform: rotateX(16deg) rotateZ(-4deg);
+  transition:
+    opacity 0.5s ease,
+    transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workflow-stack-pack {
+  opacity: 0;
+  transform: rotateX(16deg) rotateZ(-4deg) scale(0.55) translateZ(-28px);
+}
+
+.workflow-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.9rem;
+  border-width: 1px;
+  border-style: solid;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+  transform: translate3d(0, calc(var(--layer-index) * -15px), calc(var(--layer-index) * 8px))
+    scale(0.92) rotateX(6deg);
+  opacity: 0;
+  transition:
+    opacity 0.28s ease,
+    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s ease;
+}
+
+.workflow-layer-visible {
+  opacity: 1;
+  transform: translate3d(0, calc(var(--layer-index) * -15px), calc(var(--layer-index) * 8px)) scale(1)
+    rotateX(0deg);
+  animation: workflow-card-settle 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workflow-layer-hidden {
+  opacity: 0;
+  transform: translate3d(0, calc(var(--layer-index) * -15px + 36px), calc(var(--layer-index) * 8px - 12px))
+    scale(0.9) rotateX(10deg);
+}
+
+.workflow-layer-latest {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.3),
+    0 16px 30px rgba(0, 0, 0, 0.48);
+  animation: workflow-card-pop 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes workflow-card-settle {
+  0% {
+    filter: brightness(1.25);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@keyframes workflow-card-pop {
+  0% {
+    transform: translate3d(0, calc(var(--layer-index) * -15px + 28px), calc(var(--layer-index) * 8px))
+      scale(0.9);
+  }
+  65% {
+    transform: translate3d(0, calc(var(--layer-index) * -15px - 4px), calc(var(--layer-index) * 8px + 4px))
+      scale(1.03);
+  }
+  100% {
+    transform: translate3d(0, calc(var(--layer-index) * -15px), calc(var(--layer-index) * 8px)) scale(1);
+  }
+}
+
+.workflow-envelope {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: min(100%, 18rem);
+  transform: translate(-50%, -40%) scale(0.78) rotateX(6deg);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.4s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workflow-envelope-enter,
+.workflow-envelope-sealed {
+  opacity: 1;
+  transform: translate(-50%, -46%) scale(1) rotateX(0deg);
+}
+
+.workflow-envelope-flap {
+  height: 3.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-bottom: 0;
+  background: #27272a;
+  clip-path: polygon(0 100%, 50% 12%, 100% 100%);
+}
+
+.workflow-envelope-body {
+  margin-top: -1px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 0 0 1rem 1rem;
+  background: #18181b;
+  padding: 1.5rem 1.25rem 1.35rem;
+}
+
+.workflow-envelope-seal {
+  margin: 0 auto;
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: #27272a;
+  padding: 0.4rem 0.95rem;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #fafafa;
+}
+
+.workflow-punchline {
+  z-index: 2;
+  transition:
+    opacity 0.4s ease,
+    transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workflow-punchline-hide {
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+.workflow-punchline-show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.orbital-canvas {
+  overflow: visible;
+  background: transparent;
+}
+
+.orbital-node {
+  font-family: var(--font-sans);
+  backdrop-filter: blur(8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbital-node {
+    transition: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .workflow-scene {
+    height: 18rem;
+  }
+
+  .workflow-stack {
+    width: 15.5rem;
+    margin-left: -7.75rem;
+  }
+
+  .workflow-envelope {
+    width: 14.75rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -131,5 +387,30 @@ body {
   * {
     animation: none !important;
     transition: none !important;
+  }
+
+  .workflow-layer,
+  .workflow-layer-visible,
+  .workflow-layer-hidden {
+    opacity: 1;
+    transform: translate3d(0, calc(var(--layer-index) * -15px), calc(var(--layer-index) * 8px)) scale(1);
+  }
+
+  .workflow-envelope,
+  .workflow-envelope-enter,
+  .workflow-envelope-sealed {
+    opacity: 1;
+    transform: translate(-50%, -46%) scale(1);
+  }
+
+  .workflow-punchline-show,
+  .workflow-punchline-hide {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .workflow-cursor-orb,
+  .workflow-cursor-lines {
+    display: none;
   }
 }
