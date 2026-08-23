@@ -49,7 +49,6 @@ describe("retrieval service exports", () => {
   it("exposes grounded retrieval pipeline entry points", async () => {
     const mod = await import("@/services/retrieval");
     expect(typeof mod.retrieveForGrounding).toBe("function");
-    expect(typeof mod.selectEvidenceForQuestion).toBe("function");
     expect(typeof mod.vectorSearch).toBe("function");
   });
 });

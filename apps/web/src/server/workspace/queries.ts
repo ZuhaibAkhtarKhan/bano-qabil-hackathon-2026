@@ -10,7 +10,6 @@ import {
   type EvidenceRow,
   type NotificationRow,
   type OpportunityListRow,
-  type ProfileDetails,
 } from "@/server/types";
 
 export async function loadDashboard() {
@@ -72,39 +71,6 @@ export async function loadDashboard() {
     notifications: (notifications ?? []) as NotificationRow[],
     opportunities: (opportunities ?? []) as OpportunityListRow[],
     resumeCount: resumeCount ?? 0,
-  };
-}
-
-export async function loadProfileWorkspace() {
-  const { profile, supabase } = await requireWorkspace();
-  const { data: full } = await supabase
-    .from("profiles")
-    .select(
-      "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization",
-    )
-    .eq("id", profile.id)
-    .single();
-  const { data: evidence } = await supabase
-    .from("evidence_items")
-    .select(
-      "id, title, kind, organization, situation, action, outcome, skills, source, verification_status, excluded_from_ai, created_at",
-    )
-    .eq("user_id", profile.id)
-    .order("created_at", { ascending: false });
-
-  return {
-    profile: (full as ProfileDetails | null) ?? {
-      ...profile,
-      phone: null,
-      location_city: null,
-      location_country: null,
-      linkedin_url: null,
-      github_url: null,
-      portfolio_url: null,
-      availability: null,
-      work_authorization: null,
-    },
-    evidence: (evidence ?? []) as EvidenceRow[],
   };
 }
 
@@ -357,8 +323,6 @@ export async function loadApplicationWorkspace(applicationId: string) {
     }>,
   };
 }
-
-export { asOne };
 
 export async function loadNotificationsWorkspace() {
   const { supabase } = await requireWorkspace();

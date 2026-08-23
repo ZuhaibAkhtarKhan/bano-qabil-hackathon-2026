@@ -1,4 +1,3 @@
-import { evaluateEligibility } from "./eligibility";
 import { overlapScore, roundScore } from "./text";
 import {
   eligibleEvidence,
@@ -200,14 +199,4 @@ export function computeFitIndex(input: FitIndexInput): FitIndexResult {
     shouldApply,
     shouldApplyLabel,
   };
-}
-
-export function fitIndexFromRequirements(
-  requirements: Parameters<typeof evaluateEligibility>[0],
-  evidence: MemoryEvidence[],
-  opportunityText: string,
-  profile?: CandidateProfile | null,
-) {
-  const eligibility = evaluateEligibility(requirements, evidence, profile);
-  return { eligibility, fit: computeFitIndex({ eligibility, evidence, opportunityText, profile }) };
 }

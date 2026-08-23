@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { documentExtractionSchema, tryGetAiProvider } from "@/server/ai/openai";
+import { documentExtractionSchema, tryGetAiProvider } from "@/infra/ai/openai";
 import { logError } from "@/lib/log";
 import { wrapUntrustedDocumentContent } from "@/lib/opportunities/untrusted";
 import { planDocumentExtraction } from "@/server/memory/plan-extraction";

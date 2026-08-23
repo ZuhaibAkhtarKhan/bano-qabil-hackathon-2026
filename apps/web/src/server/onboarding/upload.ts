@@ -9,7 +9,7 @@ import { requireWorkspace } from "@/server/auth/require-workspace";
 import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
 import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 import { processDocumentVersion } from "@/server/documents/service";
 
 const MAX_BYTES = 8 * 1024 * 1024;

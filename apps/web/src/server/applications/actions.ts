@@ -13,10 +13,10 @@ import { canTransitionTo, normalizeApplicationStatus } from "@/lib/application-w
 import { recordApplicationEvent } from "@/services/platform";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@/server/domain/grounding";
+import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@1apply/domain";
 import { redirectWith } from "@/server/http/flash";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import type { EvidenceRow } from "@/server/types";
 

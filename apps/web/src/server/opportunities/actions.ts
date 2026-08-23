@@ -10,7 +10,7 @@ import { UnsafeUrlError } from "@/lib/security/public-url";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 import { parseDiscoveryQuery, runOpportunityAnalysisJob } from "@/server/opportunities/analyze";
 import { runOpportunityDiscovery } from "@/server/opportunities/discover";
 import {

@@ -26,6 +26,3 @@ export function PageHeader({
 export function WorkspaceMain({ children }: { children: ReactNode }) {
   return <main id="main" className="px-4 py-8 sm:px-8 lg:px-10 lg:py-10">{children}</main>;
 }
-
-export { controlClassName as inputClassName } from "@/components/ui/field";
-export const labelClassName = "block text-xs font-medium text-ink-muted";
