@@ -162,13 +162,14 @@ export function RealtimeWorkspaceProvider({
         setIsRealtimeConnected(status === "SUBSCRIBED");
       });
 
-    // Fallback polling heartbeat every 20 seconds to keep counts accurate
-    const pollTimer = setInterval(() => {
+    // Refresh when user returns to the tab to ensure fresh state without periodic lag
+    const onFocus = () => {
       router.refresh();
-    }, 20000);
+    };
+    window.addEventListener("focus", onFocus);
 
     return () => {
-      clearInterval(pollTimer);
+      window.removeEventListener("focus", onFocus);
       void supabase.removeChannel(channel);
     };
   }, [userId, addToast, router]);

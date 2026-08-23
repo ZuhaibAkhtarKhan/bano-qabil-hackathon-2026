@@ -17,12 +17,6 @@ import {
 export async function loadDashboard() {
   const { profile, supabase, actor } = await requireWorkspace();
 
-  try {
-    await syncDeadlineReminders(supabase, actor);
-  } catch {
-    // Dashboard still loads if reminder sync is unavailable.
-  }
-
   const [
     { count: verifiedEvidenceCount },
     { count: documentCount },
@@ -61,6 +55,7 @@ export async function loadDashboard() {
       .order("created_at", { ascending: false })
       .limit(8),
     supabase.from("documents").select("id", { count: "exact", head: true }).eq("type", "resume").eq("user_id", profile.id),
+    syncDeadlineReminders(supabase, actor).catch(() => null),
   ]);
 
   const completeness = computeProfileCompleteness({
