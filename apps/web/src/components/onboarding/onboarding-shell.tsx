@@ -2,6 +2,8 @@ import { ONBOARDING_STEPS, type OnboardingStep } from "@1apply/contracts";
 
 import type { ReactNode } from "react";
 
+import { signOut } from "@/app/app/actions";
+import { Wordmark } from "@/components/brand/wordmark";
 import { Progress } from "@/components/ui/data";
 import { cn } from "@/lib/cn";
 
@@ -53,6 +55,14 @@ export function OnboardingShell({
 }) {
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-5 py-10 sm:px-8">
+      <div className="mb-8 flex items-center justify-between gap-4">
+        <Wordmark size="sm" />
+        <form action={signOut}>
+          <button type="submit" className="text-sm text-ink-muted hover:text-ink">
+            Sign out
+          </button>
+        </form>
+      </div>
       <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">{eyebrow}</p>
       <h1 className="mt-3 font-display text-4xl leading-tight">{title}</h1>
       {body ? <p className="mt-4 text-sm leading-6 text-ink-muted">{body}</p> : null}

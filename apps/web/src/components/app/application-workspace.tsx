@@ -159,7 +159,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
       <PageHeader
         eyebrow="Application workspace"
         title={opportunity?.title ?? "Untitled opportunity"}
-        body={`${opportunity?.organization ?? "Unknown host"} · ${formatDeadline(application.deadline_at)} · This workspace manages evidence, drafts, and history. It never submits for you.`}
+        body={`${opportunity?.organization ?? "Unknown host"} · ${formatDeadline(application.deadline_at)} · This workspace manages evidence, drafts, and history. Approved applications submit automatically.`}
         actions={<StatusPill tone={applicationTone(application.status)}>{applicationStatusLabel(application.status)}</StatusPill>}
       />
       <FlashBanner notice={notice} error={error} />

@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
  */
 export function Wordmark({ inverted = false, size = "md" }: { inverted?: boolean; size?: "sm" | "md" }) {
   const mark = size === "sm" ? "h-7 w-7 rounded-[6px]" : "h-8 w-8 rounded-[7px]";
-  const label = size === "sm" ? "text-base" : "text-lg";
+  const label = size === "sm" ? "text-base" : "text-xl";
 
   return (
     <span

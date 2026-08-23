@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import {
-  BoxGeometry,
+  BufferGeometry,
   CanvasTexture,
-  EdgesGeometry,
+  DoubleSide,
+  Float32BufferAttribute,
   Group,
   LineBasicMaterial,
   LineSegments,
@@ -17,60 +18,148 @@ import {
   WebGLRenderer,
 } from "three";
 
-const BOX_SIZE = 1.05;
-const BOX_DEPTH = 1.05;
 const PHASES = 4;
 const MAX_BOXES = 3;
-const TEX_SIZE = 512;
+const TEX_W = 640;
+const TEX_H = 404;
 const Z_START = -1.8;
 const Z_END = 3.5;
 const FADE_IN_START = 0.05;
 const FADE_IN_END = 0.28;
 const STEP = 1 / (PHASES + 1);
-const GROUP_SCALE = 1;
+const GROUP_SCALE = 1.28;
 
-const LAYOUT_A: [number, number, number][] = [
-  [-0.95, 0.75, 0.1],
-  [0.9, 0.42, -0.18],
-  [-0.62, -0.75, 0.22],
-];
+const WIRE = 0x767676;
+const FACE_BG = 0x151414;
+const SIDE_FILL = 0x1a1a1a;
 
-const LAYOUT_B: [number, number, number][] = [
-  [0.14, 0.9, 0.08],
-  [-0.95, -0.75, -0.18],
-  [0.9, -0.62, 0.2],
-];
-
-type FaceMotif = "rings" | "ovals" | "nodes" | "checks";
-
-type CubeFace = {
-  accent: string;
-  accentSoft: string;
-  title: string;
-  chip: string;
-  motif: FaceMotif;
+type BoxSpec = {
+  pos: [number, number, number];
+  size: [number, number, number];
+  rot: [number, number, number];
 };
 
-const PHASE_FACES: CubeFace[][] = [
+const LAYOUT_A: BoxSpec[] = [
+  { pos: [-0.55, 0.72, 0.05], size: [1.52, 0.94, 0.42], rot: [-0.12, 0.18, 0.04] },
+  { pos: [0.72, 0.38, -0.08], size: [1.38, 0.88, 0.38], rot: [-0.08, -0.22, -0.03] },
+  { pos: [-0.68, -0.62, 0.1], size: [1.44, 0.9, 0.4], rot: [0.1, 0.14, 0.02] },
+];
+
+const LAYOUT_B: BoxSpec[] = [
+  { pos: [0.08, 0.78, 0.02], size: [1.48, 0.96, 0.4], rot: [-0.14, 0.08, 0.05] },
+  { pos: [-0.78, -0.55, -0.06], size: [1.4, 0.86, 0.38], rot: [0.06, 0.2, -0.02] },
+  { pos: [0.82, -0.58, 0.08], size: [1.34, 0.84, 0.36], rot: [0.11, -0.16, 0.03] },
+];
+
+type FaceContent = {
+  accent: string;
+  heading: string;
+  subtitle?: string;
+  kind: "bars" | "pills" | "grid" | "table" | "chart" | "flow";
+  items: string[];
+  chartValue?: string;
+  chartNote?: string;
+};
+
+/** One scroll phase = one platform pillar; three cubes = sub-features from that pillar */
+const PHASE_FACES: FaceContent[][] = [
+  // 01 — Application Memory
   [
-    { accent: "#98a5ef", accentSoft: "rgba(152,165,239,0.22)", title: "Identity", chip: "Verified", motif: "rings" },
-    { accent: "#98a5ef", accentSoft: "rgba(152,165,239,0.18)", title: "Evidence", chip: "Source-linked", motif: "ovals" },
-    { accent: "#98a5ef", accentSoft: "rgba(152,165,239,0.2)", title: "Memory", chip: "Reusable", motif: "nodes" },
+    {
+      accent: "#98a5ef",
+      heading: "Structured profile",
+      subtitle: "Identity, education, skills, projects",
+      kind: "bars",
+      items: ["Identity", "Education", "Skills", "Projects"],
+    },
+    {
+      accent: "#98a5ef",
+      heading: "Evidence with source",
+      subtitle: "Resumes & docs → verified facts",
+      kind: "pills",
+      items: ["Resume.pdf", "Transcript", "Portfolio", "Certificates"],
+    },
+    {
+      accent: "#98a5ef",
+      heading: "Immutable versions",
+      subtitle: "Document history stays intact",
+      kind: "grid",
+      items: ["v1 uploaded", "v2 reviewed", "Source linked"],
+    },
   ],
+  // 02 — Opportunity Intake
   [
-    { accent: "#5adeb7", accentSoft: "rgba(90,222,183,0.22)", title: "Intake", chip: "URL / Ext", motif: "ovals" },
-    { accent: "#5adeb7", accentSoft: "rgba(90,222,183,0.18)", title: "Fit Index", chip: "Gaps listed", motif: "rings" },
-    { accent: "#5adeb7", accentSoft: "rgba(90,222,183,0.2)", title: "Requirements", chip: "Extracted", motif: "checks" },
+    {
+      accent: "#5adeb7",
+      heading: "Add any opportunity",
+      subtitle: "Page content stays untrusted",
+      kind: "pills",
+      items: ["Public URL", "Extension save", "Manual entry"],
+    },
+    {
+      accent: "#5adeb7",
+      heading: "Extract requirements",
+      subtitle: "Questions & checklist from the page",
+      kind: "flow",
+      items: ["Parse posting", "Pull questions", "Build checklist"],
+    },
+    {
+      accent: "#5adeb7",
+      heading: "Fit Index",
+      subtitle: "Match score + missing-fact list",
+      kind: "chart",
+      items: ["Skills match", "Gaps found", "Facts needed"],
+      chartValue: "78%",
+      chartNote: "3 facts missing",
+    },
   ],
+  // 03 — Grounded Agents
   [
-    { accent: "#e69393", accentSoft: "rgba(230,147,147,0.22)", title: "RAG Draft", chip: "Cited", motif: "nodes" },
-    { accent: "#e69393", accentSoft: "rgba(230,147,147,0.18)", title: "Unknowns", chip: "Review", motif: "rings" },
-    { accent: "#e69393", accentSoft: "rgba(230,147,147,0.2)", title: "Grounded", chip: "No invent", motif: "ovals" },
+    {
+      accent: "#e69393",
+      heading: "RAG over your evidence",
+      subtitle: "Retrieves approved memory only",
+      kind: "flow",
+      items: ["Query memory", "Pull citations", "Draft answer"],
+    },
+    {
+      accent: "#e69393",
+      heading: "Cited drafts",
+      subtitle: "Every sentence shows its source",
+      kind: "table",
+      items: ["Cover letter", "Why this role?", "Project example"],
+    },
+    {
+      accent: "#e69393",
+      heading: "No evidence → no claim",
+      subtitle: "Unknowns become review items",
+      kind: "pills",
+      items: ["Flag unknown", "Ask you", "Never invent"],
+    },
   ],
+  // 04 — Control & Safety
   [
-    { accent: "#eadc8f", accentSoft: "rgba(234,220,143,0.22)", title: "Approve", chip: "You decide", motif: "checks" },
-    { accent: "#eadc8f", accentSoft: "rgba(234,220,143,0.18)", title: "Audit", chip: "Full trail", motif: "rings" },
-    { accent: "#eadc8f", accentSoft: "rgba(234,220,143,0.2)", title: "Safe fill", chip: "Not submit", motif: "ovals" },
+    {
+      accent: "#eadc8f",
+      heading: "Approval workflows",
+      subtitle: "You approve every answer & doc",
+      kind: "table",
+      items: ["Draft ready", "Your review", "Approved"],
+    },
+    {
+      accent: "#eadc8f",
+      heading: "Extension vs platform",
+      subtitle: "Fill on host sites · submit on 1-Apply",
+      kind: "pills",
+      items: ["Extension fills", "Host: you submit", "Platform auto-submit"],
+    },
+    {
+      accent: "#eadc8f",
+      heading: "Full audit trail",
+      subtitle: "Every action logged & traceable",
+      kind: "flow",
+      items: ["Edit answer", "Zuhaib Akhtar", "Timestamp"],
+    },
   ],
 ];
 
@@ -83,31 +172,25 @@ function mapRange(value: number, inMin: number, inMax: number, outMin: number, o
   return outMin + (outMax - outMin) * t;
 }
 
-function pickLayout(phase: number): [number, number, number][] {
+function pickLayout(phase: number): BoxSpec[] {
   return phase % 2 === 0 ? LAYOUT_A : LAYOUT_B;
 }
 
-function outwardPositions(raw: [number, number, number][]): [number, number, number][] {
-  const half = BOX_SIZE / 2;
-  return raw.map(([x, y, z]) => {
+function outwardPositions(specs: BoxSpec[]): BoxSpec[] {
+  return specs.map((spec) => {
+    const [x, y, z] = spec.pos;
+    const [w, h] = spec.size;
     const len = Math.hypot(x, y);
-    if (len === 0) return [x, y, z];
+    if (len === 0) return spec;
     const nx = x / len;
     const ny = y / len;
-    const extent = Math.abs(nx) * half + Math.abs(ny) * half;
-    const dist = len + extent * 0.35;
-    return [nx * dist, ny * dist, z];
+    const extent = Math.abs(nx) * (w / 2) + Math.abs(ny) * (h / 2);
+    const dist = len + extent * 0.22;
+    return { ...spec, pos: [nx * dist, ny * dist, z] };
   });
 }
 
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-) {
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   const radius = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -118,204 +201,351 @@ function roundRect(
   ctx.closePath();
 }
 
-function drawFace(
-  ctx: CanvasRenderingContext2D,
-  face: CubeFace,
-  time: number,
-  variant: number,
-) {
-  const s = TEX_SIZE;
-  const cx = s / 2;
-  const cy = s / 2;
-  const pulse = 0.5 + 0.5 * Math.sin(time * 1.4 + variant * 1.1);
-
-  ctx.clearRect(0, 0, s, s);
-  ctx.fillStyle = "#121212";
-  ctx.fillRect(0, 0, s, s);
-
-  // Soft vignette
-  const glow = ctx.createRadialGradient(cx, cy, 20, cx, cy, s * 0.62);
-  glow.addColorStop(0, face.accentSoft);
-  glow.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, s, s);
-
-  ctx.strokeStyle = face.accent;
-  ctx.lineWidth = 2;
-
-  if (face.motif === "rings") {
-    for (let i = 0; i < 4; i += 1) {
-      const radius = 58 + i * 42 + pulse * 10;
-      ctx.globalAlpha = 0.22 + i * 0.12;
-      ctx.beginPath();
-      ctx.arc(cx, cy - 18, radius, Math.PI * 0.12, Math.PI * 1.88);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 0.9;
+function drawHatch(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, accent: string) {
+  ctx.save();
+  roundRect(ctx, x, y, w, h, 6);
+  ctx.clip();
+  ctx.strokeStyle = accent;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 1;
+  for (let i = -h; i < w + h; i += 7) {
     ctx.beginPath();
-    ctx.ellipse(cx + 70, cy + 78, 54 + pulse * 6, 28, -0.35, 0, Math.PI * 2);
+    ctx.moveTo(x + i, y);
+    ctx.lineTo(x + i + h, y + h);
     ctx.stroke();
   }
+  ctx.restore();
+}
 
-  if (face.motif === "ovals") {
-    const ovals = [
-      [cx - 70, cy - 40, 70, 36, -0.4],
-      [cx + 40, cy - 10, 86, 40, 0.25],
-      [cx - 20, cy + 55, 96, 34, -0.1],
-    ] as const;
-    ovals.forEach(([x, y, rx, ry, rot], i) => {
-      ctx.globalAlpha = 0.35 + i * 0.15;
-      ctx.beginPath();
-      ctx.ellipse(x, y, rx + pulse * 4, ry, rot, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = face.accent;
-      ctx.fill();
-    });
+function drawFace(ctx: CanvasRenderingContext2D, face: FaceContent, variant: number) {
+  const w = TEX_W;
+  const h = TEX_H;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#151414";
+  ctx.fillRect(0, 0, w, h);
+
+  // Inner panel border (Nominal-style thin frame)
+  ctx.strokeStyle = "rgba(118,118,118,0.55)";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(10, 10, w - 20, h - 20);
+
+  ctx.fillStyle = "#fdfff8";
+  ctx.font = "400 34px Georgia, 'Times New Roman', serif";
+  ctx.textAlign = "left";
+  ctx.fillText(face.heading, 24, 54);
+
+  if (face.subtitle) {
+    ctx.fillStyle = "rgba(187,187,187,0.95)";
+    ctx.font = "500 18px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(face.subtitle, 24, 82);
   }
 
-  if (face.motif === "nodes") {
-    const nodes = [
-      [cx - 90, cy - 50],
-      [cx + 20, cy - 80],
-      [cx + 95, cy - 10],
-      [cx - 30, cy + 40],
-      [cx + 55, cy + 70],
-      [cx - 100, cy + 75],
-    ] as const;
-    ctx.globalAlpha = 0.35;
-    ctx.beginPath();
-    nodes.forEach(([x, y], i) => {
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-    nodes.forEach(([x, y], i) => {
-      ctx.globalAlpha = 0.55 + (i % 3) * 0.15;
-      ctx.beginPath();
-      ctx.arc(x, y, 7 + (i === variant % nodes.length ? pulse * 4 : 0), 0, Math.PI * 2);
-      ctx.fillStyle = face.accent;
-      ctx.fill();
-      ctx.globalAlpha = 0.45;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 22, 12, 0.4, 0, Math.PI * 2);
-      ctx.stroke();
-    });
-  }
+  const accent = face.accent;
+  const contentTop = face.subtitle ? 108 : 92;
 
-  if (face.motif === "checks") {
-    for (let i = 0; i < 3; i += 1) {
-      const y = 150 + i * 78;
-      ctx.globalAlpha = 0.25 + i * 0.15;
-      roundRect(ctx, 86, y, s - 172, 52, 26);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(120, y + 26, 11, 0, Math.PI * 2);
-      ctx.stroke();
-      if (i < 2 || pulse > 0.45) {
-        ctx.beginPath();
-        ctx.moveTo(114, y + 26);
-        ctx.lineTo(119, y + 32);
-        ctx.lineTo(130, y + 18);
+  if (face.kind === "bars") {
+    face.items.forEach((label, i) => {
+      const y = contentTop + i * 64;
+      ctx.fillStyle = "rgba(253,255,248,0.75)";
+      ctx.font = "600 20px ui-sans-serif, system-ui, sans-serif";
+      ctx.fillText(label, 24, y);
+      const barW = w - 48;
+      const fillW = barW * (0.42 + ((variant + i) % 4) * 0.1);
+      if (i === variant % face.items.length) {
+        ctx.fillStyle = accent;
+        roundRect(ctx, 24, y + 12, fillW, 18, 7);
+        ctx.fill();
+      } else {
+        drawHatch(ctx, 24, y + 12, barW, 18, accent);
+        ctx.strokeStyle = "rgba(118,118,118,0.6)";
+        ctx.lineWidth = 1;
+        roundRect(ctx, 24, y + 12, barW, 18, 7);
         ctx.stroke();
       }
-    }
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath();
-    ctx.ellipse(cx + 90, cy - 90, 48, 26, 0.5, 0, Math.PI * 2);
-    ctx.stroke();
+    });
   }
 
-  ctx.globalAlpha = 1;
+  if (face.kind === "pills") {
+    face.items.forEach((label, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const px = 24 + col * 296;
+      const py = contentTop + row * 58;
+      const active = i === variant % face.items.length;
+      if (active) {
+        ctx.fillStyle = accent;
+        roundRect(ctx, px, py, 272, 46, 23);
+        ctx.fill();
+        ctx.fillStyle = "#151414";
+      } else {
+        ctx.fillStyle = "rgba(21,20,20,0.9)";
+        roundRect(ctx, px, py, 272, 46, 23);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(118,118,118,0.65)";
+        ctx.lineWidth = 1;
+        roundRect(ctx, px, py, 272, 46, 23);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(253,255,248,0.8)";
+      }
+      ctx.font = "600 18px ui-sans-serif, system-ui, sans-serif";
+      ctx.fillText(label, px + 16, py + 30);
+    });
+  }
 
-  // Corner accent square (matches label squares)
-  ctx.fillStyle = face.accent;
-  ctx.fillRect(36, 36, 28, 28);
+  if (face.kind === "grid") {
+    const gx = 24;
+    const gy = contentTop;
+    const cell = 78;
+    const labels = face.items.slice(0, 4);
+    for (let i = 0; i < 4; i += 1) {
+      const cx = gx + (i % 2) * (cell + 12);
+      const cy = gy + Math.floor(i / 2) * (cell + 12);
+      if (i === variant % 4) {
+        ctx.fillStyle = accent;
+        ctx.fillRect(cx, cy, cell, cell);
+      } else {
+        drawHatch(ctx, cx, cy, cell, cell, accent);
+        ctx.strokeStyle = "rgba(118,118,118,0.6)";
+        ctx.strokeRect(cx, cy, cell, cell);
+      }
+    }
+    ctx.fillStyle = "rgba(253,255,248,0.85)";
+    ctx.font = "600 17px ui-sans-serif, system-ui, sans-serif";
+    labels.forEach((label, i) => ctx.fillText(label, gx + 180, contentTop + 10 + i * 26));
+  }
 
-  // Title
-  ctx.fillStyle = "#fdfff8";
-  ctx.font = "300 44px Georgia, 'Times New Roman', serif";
-  ctx.textAlign = "left";
-  ctx.fillText(face.title, 80, 64);
+  if (face.kind === "chart") {
+    const cy = h / 2 + 28;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.arc(w / 2, cy, 82, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.arc(w / 2, cy, 82, -Math.PI / 2, Math.PI * 0.55);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = accent;
+    ctx.font = "700 42px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(face.chartValue ?? "78%", w / 2, cy + 14);
+    ctx.textAlign = "left";
+    if (face.chartNote) {
+      ctx.fillStyle = "rgba(253,255,248,0.65)";
+      ctx.font = "600 17px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(face.chartNote, w / 2, cy + 44);
+      ctx.textAlign = "left";
+    }
+    face.items.forEach((label, i) => {
+      ctx.fillStyle = i === variant % face.items.length ? accent : "rgba(187,187,187,0.9)";
+      ctx.font = "600 17px ui-sans-serif, system-ui, sans-serif";
+      ctx.fillText(`• ${label}`, 24, contentTop + i * 28);
+    });
+  }
 
-  // Chip / oval label
-  const chipW = Math.max(128, face.chip.length * 11 + 40);
-  const chipX = 48;
-  const chipY = s - 92;
-  ctx.fillStyle = face.accentSoft;
-  roundRect(ctx, chipX, chipY, chipW, 40, 20);
-  ctx.fill();
-  ctx.strokeStyle = face.accent;
-  ctx.lineWidth = 1.5;
-  ctx.globalAlpha = 0.85;
-  roundRect(ctx, chipX, chipY, chipW, 40, 20);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = face.accent;
-  ctx.font = "600 20px ui-sans-serif, system-ui, sans-serif";
-  ctx.fillText(face.chip, chipX + 20, chipY + 27);
+  if (face.kind === "flow") {
+    const nodes = face.items.slice(0, 3);
+    nodes.forEach((label, i) => {
+      const px = 24 + i * 196;
+      const py = contentTop + 36;
+      const active = i === variant % nodes.length;
+      if (active) {
+        ctx.fillStyle = accent;
+        roundRect(ctx, px, py, 176, 50, 25);
+        ctx.fill();
+        ctx.fillStyle = "#151414";
+      } else {
+        ctx.strokeStyle = "rgba(118,118,118,0.65)";
+        ctx.lineWidth = 1;
+        roundRect(ctx, px, py, 176, 50, 25);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(253,255,248,0.85)";
+      }
+      ctx.font = "600 17px ui-sans-serif, system-ui, sans-serif";
+      const text = label.length > 14 ? `${label.slice(0, 13)}…` : label;
+      ctx.fillText(text, px + 14, py + 32);
+      if (i < nodes.length - 1) {
+        ctx.strokeStyle = "rgba(118,118,118,0.55)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(px + 180, py + 25);
+        ctx.lineTo(px + 192, py + 25);
+        ctx.stroke();
+      }
+    });
+  }
 
-  // Fine frame inset
-  ctx.strokeStyle = "rgba(118,118,118,0.7)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(18, 18, s - 36, s - 36);
+  if (face.kind === "table") {
+    face.items.forEach((label, i) => {
+      const y = contentTop + i * 62;
+      ctx.strokeStyle = "rgba(39,44,43,0.9)";
+      ctx.beginPath();
+      ctx.moveTo(24, y + 46);
+      ctx.lineTo(w - 24, y + 46);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(253,255,248,0.75)";
+      ctx.font = "600 18px ui-sans-serif, system-ui, sans-serif";
+      ctx.fillText(label, 24, y + 26);
+      const pillX = w - 132;
+      const pillLabel = i === variant % face.items.length ? "Approved" : i === 0 ? "Pending" : "Review";
+      if (i === variant % face.items.length) {
+        ctx.fillStyle = accent;
+        roundRect(ctx, pillX, y + 4, 104, 34, 17);
+        ctx.fill();
+        ctx.fillStyle = "#151414";
+        ctx.font = "700 15px ui-sans-serif, system-ui, sans-serif";
+        ctx.fillText(pillLabel, pillX + 16, y + 27);
+      } else {
+        ctx.strokeStyle = "rgba(118,118,118,0.55)";
+        roundRect(ctx, pillX, y + 4, 104, 34, 17);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(187,187,187,0.9)";
+        ctx.font = "700 15px ui-sans-serif, system-ui, sans-serif";
+        ctx.fillText(pillLabel, pillX + 16, y + 27);
+      }
+    });
+  }
+}
+
+/** Build Nominal-style wireframe prism: front panel + thin depth edges + subtle top/right faces */
+function createWireframePrism(width: number, height: number, depth: number) {
+  const hw = width / 2;
+  const hh = height / 2;
+  const hd = depth / 2;
+
+  const group = new Group();
+
+  // 8 corners: front face at z=+hd, back at z=-hd
+  const corners = [
+    [-hw, -hh, hd],
+    [hw, -hh, hd],
+    [hw, hh, hd],
+    [-hw, hh, hd],
+    [-hw, -hh, -hd],
+    [hw, -hh, -hd],
+    [hw, hh, -hd],
+    [-hw, hh, -hd],
+  ] as const;
+
+  const edgePairs: [number, number][] = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7],
+  ];
+
+  const positions: number[] = [];
+  edgePairs.forEach(([a, b]) => {
+    const ca = corners[a]!;
+    const cb = corners[b]!;
+    positions.push(ca[0], ca[1], ca[2], cb[0], cb[1], cb[2]);
+  });
+
+  const wireGeo = new BufferGeometry();
+  wireGeo.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  const wire = new LineSegments(
+    wireGeo,
+    new LineBasicMaterial({ color: WIRE, transparent: true, opacity: 0.95 }),
+  );
+
+  // Subtle top face (visible in isometric view)
+  const topGeo = new BufferGeometry();
+  topGeo.setAttribute(
+    "position",
+    new Float32BufferAttribute(
+      [
+        corners[3]![0], corners[3]![1], corners[3]![2],
+        corners[2]![0], corners[2]![1], corners[2]![2],
+        corners[6]![0], corners[6]![1], corners[6]![2],
+        corners[3]![0], corners[3]![1], corners[3]![2],
+        corners[6]![0], corners[6]![1], corners[6]![2],
+        corners[7]![0], corners[7]![1], corners[7]![2],
+      ],
+      3,
+    ),
+  );
+  const topFace = new Mesh(
+    topGeo,
+    new MeshBasicMaterial({
+      color: SIDE_FILL,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+      side: DoubleSide,
+    }),
+  );
+
+  // Subtle right face
+  const rightGeo = new BufferGeometry();
+  rightGeo.setAttribute(
+    "position",
+    new Float32BufferAttribute(
+      [
+        corners[1]![0], corners[1]![1], corners[1]![2],
+        corners[2]![0], corners[2]![1], corners[2]![2],
+        corners[6]![0], corners[6]![1], corners[6]![2],
+        corners[1]![0], corners[1]![1], corners[1]![2],
+        corners[6]![0], corners[6]![1], corners[6]![2],
+        corners[5]![0], corners[5]![1], corners[5]![2],
+      ],
+      3,
+    ),
+  );
+  const rightFace = new Mesh(
+    rightGeo,
+    new MeshBasicMaterial({
+      color: SIDE_FILL,
+      transparent: true,
+      opacity: 0.08,
+      depthWrite: false,
+      side: DoubleSide,
+    }),
+  );
+
+  // Front panel backing (slightly inset)
+  const backPanel = new Mesh(
+    new PlaneGeometry(width, height),
+    new MeshBasicMaterial({ color: FACE_BG }),
+  );
+  backPanel.position.z = hd + 0.001;
+
+  group.add(topFace, rightFace, backPanel, wire);
+  return group;
 }
 
 type CubeParts = {
   root: Group;
+  prism: Group;
   texture: CanvasTexture;
   canvas: HTMLCanvasElement;
+  faceMesh: Mesh;
   faceIndex: number;
 };
 
 function createBox(faceIndex: number): CubeParts {
   const root = new Group();
-  const geometry = new BoxGeometry(BOX_SIZE, BOX_SIZE, BOX_DEPTH);
-  const edges = new EdgesGeometry(geometry);
-
-  const fill = new Mesh(
-    geometry,
-    new MeshBasicMaterial({
-      color: 0x121212,
-      transparent: true,
-      opacity: 1,
-      depthWrite: true,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    }),
-  );
-
-  const outline = new LineSegments(
-    edges,
-    new LineBasicMaterial({
-      color: 0x8a8a8a,
-      transparent: true,
-      opacity: 1,
-    }),
-  );
+  const [w, h, d] = [1.3, 0.82, 0.4];
+  const prism = createWireframePrism(w, h, d);
 
   const canvas = document.createElement("canvas");
-  canvas.width = TEX_SIZE;
-  canvas.height = TEX_SIZE;
+  canvas.width = TEX_W;
+  canvas.height = TEX_H;
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   texture.anisotropy = 4;
 
-  const face = new Mesh(
-    new PlaneGeometry(BOX_SIZE * 0.92, BOX_SIZE * 0.92),
-    new MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      depthWrite: false,
-    }),
+  const faceMesh = new Mesh(
+    new PlaneGeometry(w, h),
+    new MeshBasicMaterial({ map: texture, transparent: false, depthWrite: true }),
   );
-  face.position.z = BOX_DEPTH / 2 + 0.002;
+  faceMesh.position.z = d / 2 + 0.004;
 
-  root.add(fill, outline, face);
+  root.add(prism, faceMesh);
   root.visible = false;
-  return { root, texture, canvas, faceIndex };
+  return { root, prism, texture, canvas, faceMesh, faceIndex };
 }
 
 function setGroupOpacity(group: Group, opacity: number) {
@@ -325,20 +555,27 @@ function setGroupOpacity(group: Group, opacity: number) {
       const mat = mesh.material as MeshBasicMaterial | LineBasicMaterial;
       mat.transparent = true;
       mat.opacity = opacity;
-      mat.needsUpdate = true;
     }
   });
 }
 
-function paintPhase(boxes: CubeParts[], phase: number, time: number) {
+function paintPhase(boxes: CubeParts[], phase: number) {
   const faces = PHASE_FACES[phase] ?? PHASE_FACES[0]!;
   boxes.forEach((box, i) => {
     const face = faces[i] ?? faces[0]!;
     const ctx = box.canvas.getContext("2d");
     if (!ctx) return;
-    drawFace(ctx, face, time, i);
+    drawFace(ctx, face, i);
     box.texture.needsUpdate = true;
   });
+}
+
+function applyBoxSpec(box: CubeParts, spec: BoxSpec) {
+  const [w, h, d] = spec.size;
+  box.root.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
+  box.root.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
+  box.root.scale.set(w / 1.3, h / 0.82, d / 0.4);
+  box.faceMesh.scale.set(1, 1, 1);
 }
 
 type HowItWorksCubesProps = {
@@ -365,8 +602,9 @@ export function HowItWorksCubes({ progress, centerEl, active }: HowItWorksCubesP
     if (reduced) return;
 
     const scene = new Scene();
-    const camera = new PerspectiveCamera(38, 1, 0.1, 100);
-    camera.position.set(0, 0, 7.25);
+    const camera = new PerspectiveCamera(34, 1, 0.1, 100);
+    camera.position.set(0.35, 0.25, 6.5);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new WebGLRenderer({ antialias: true, alpha: true });
     renderer.setClearAlpha(0);
@@ -393,7 +631,6 @@ export function HowItWorksCubes({ progress, centerEl, active }: HowItWorksCubesP
     let viewOffsetY = Number.NaN;
     let raf = 0;
     let running = true;
-    const started = performance.now();
 
     const hideGroup = (group: Group) => {
       group.visible = false;
@@ -401,18 +638,17 @@ export function HowItWorksCubes({ progress, centerEl, active }: HowItWorksCubesP
     };
 
     const layoutPhase = (phase: number, boxes: CubeParts[]) => {
-      const positions = outwardPositions(pickLayout(phase));
+      const specs = outwardPositions(pickLayout(phase));
       boxes.forEach((box, i) => {
-        const pos = positions[i];
-        if (!pos) {
+        const spec = specs[i];
+        if (!spec) {
           box.root.visible = false;
           return;
         }
         box.root.visible = true;
-        box.root.scale.setScalar(1);
-        box.root.position.set(pos[0], pos[1], pos[2]);
+        applyBoxSpec(box, spec);
       });
-      paintPhase(boxes, phase, 0);
+      paintPhase(boxes, phase);
     };
 
     const growGroup = (group: Group, t: number) => {
@@ -469,8 +705,6 @@ export function HowItWorksCubes({ progress, centerEl, active }: HowItWorksCubesP
       const h = container.clientHeight;
       if (w < 1 || h < 1) return;
 
-      const time = (performance.now() - started) / 1000;
-
       if (!activeRef.current) {
         hideGroup(groupA);
         hideGroup(groupB);
@@ -497,14 +731,10 @@ export function HowItWorksCubes({ progress, centerEl, active }: HowItWorksCubesP
           if (phaseA !== k) {
             phaseA = k;
             layoutPhase(k, boxes);
-          } else {
-            paintPhase(boxes, k, time);
           }
         } else if (phaseB !== k) {
           phaseB = k;
           layoutPhase(k, boxes);
-        } else {
-          paintPhase(boxes, k, time);
         }
 
         if (L < mid) growGroup(group, (L - start) / STEP);

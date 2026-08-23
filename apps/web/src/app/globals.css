@@ -445,23 +445,47 @@ body {
   overflow: clip;
   color: #fdfff8;
   background: #0e0e0e;
+  --hiw-rect-width: min(52vw, 38rem);
 }
 
 .hiw-sticky {
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
+  display: grid;
+  place-items: center;
   height: 100dvh;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  isolation: isolate;
+}
+
+.hiw-stage-layer {
+  position: relative;
+  grid-area: 1 / 1;
+  place-self: center;
+}
+
+.hiw-rectangle-chrome {
+  z-index: 1;
+}
+
+.hiw-rectangle-content {
+  z-index: 3;
+  pointer-events: none;
+}
+
+.hiw-rectangle-content .hiw-outro-btn {
+  pointer-events: auto;
 }
 
 .hiw-canvas {
   pointer-events: none;
-  position: absolute;
-  inset: 0;
-  z-index: 1;
+  position: relative;
+  grid-area: 1 / 1;
+  place-self: stretch;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
 }
 
 .hiw-three-canvas-container {
@@ -477,16 +501,11 @@ body {
 }
 
 .hiw-rectangle {
-  --width: min(52vw, 38rem);
+  --width: var(--hiw-rect-width);
   --height: min(58dvh, 32rem);
   position: relative;
-  z-index: 2;
-  display: flex;
   width: var(--width);
   height: var(--height);
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
 }
 
 .hiw-content {
@@ -790,12 +809,32 @@ body {
 }
 
 .hiw-info-section {
-  display: flex;
-  height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr var(--hiw-rect-width) 1fr;
+  column-gap: clamp(1.25rem, 3.5vw, 2.5rem);
   align-items: center;
-  justify-content: flex-end;
-  /* Nudge cards slightly left from the far right edge */
-  padding-right: clamp(3.5rem, 9vw, 7rem);
+  width: 100%;
+  max-width: 100%;
+  height: 100dvh;
+  pointer-events: none;
+}
+
+.hiw-info-section--left {
+  padding-left: clamp(0.5rem, 1.25vw, 1rem);
+}
+
+.hiw-info-section--left .hiw-card {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.hiw-info-section--right {
+  padding-right: clamp(0.5rem, 1.25vw, 1rem);
+}
+
+.hiw-info-section--right .hiw-card {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .hiw-card {
@@ -884,6 +923,8 @@ body {
 
   .hiw-sticky {
     position: relative;
+    display: grid;
+    place-items: center;
     height: auto;
     min-height: 70dvh;
     padding: 4rem 1rem 2rem;
@@ -893,10 +934,15 @@ body {
     display: none;
   }
 
+  .hiw-stage-layer {
+    grid-area: 1 / 1;
+    place-self: center;
+    transform: none !important;
+  }
+
   .hiw-rectangle {
     --width: min(86vw, 28rem);
     --height: min(46dvh, 24rem);
-    transform: none !important;
   }
 
   .hiw-intro,
@@ -916,10 +962,20 @@ body {
     padding: 0 1rem 2rem;
   }
 
+  .how-it-works {
+    --hiw-rect-width: min(86vw, 28rem);
+  }
+
   .hiw-info-section {
+    display: block;
     height: auto;
-    justify-content: center;
-    padding-right: 0;
+    padding-inline: 0;
+  }
+
+  .hiw-info-section--left .hiw-card,
+  .hiw-info-section--right .hiw-card {
+    grid-column: auto;
+    justify-self: auto;
   }
 
   .hiw-card {
@@ -931,6 +987,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .hiw-stage-layer,
   .hiw-rectangle,
   .hiw-intro,
   .hiw-outro,

@@ -13,7 +13,7 @@ const columns = [
   },
   {
     title: "Control",
-    links: ["Evidence review", "Answer approval", "Document versions", "No auto-submit"],
+    links: ["Evidence review", "Answer approval", "Document versions", "Extension: fill only"],
   },
   {
     title: "Company",

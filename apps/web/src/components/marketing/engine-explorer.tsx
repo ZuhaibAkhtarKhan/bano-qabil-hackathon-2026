@@ -53,10 +53,11 @@ const CORNERS = [
     label: "Control & Safety",
     number: "04",
     color: "#eadc8f",
-    body: "You approve answers and documents. Autofill never submits. CAPTCHA, MFA, signatures, and payments stay human.",
+    body: "You approve answers and documents before they ship. On host sites the extension fills fields but never clicks Submit. Applications you manage on 1-Apply — added by URL, extension, or manual entry — submit automatically once approved.",
     points: [
       "Approval workflows at every step",
-      "Fill is not submit",
+      "Extension: fill only on host sites",
+      "Platform: auto-submit when ready",
       "Full audit trail for every action",
     ],
   },
@@ -244,6 +245,10 @@ export function EngineExplorer() {
   const frameLineOpacity = borderGrow * (1 - expandT);
   const ringLineOpacity = expandT * (1 - outroIn);
   const cubesActive = progress > 0.24 && progress < 0.82;
+  const stageStyle = {
+    opacity: lerp(0.55, 1, frameIn),
+    transform: `rotate(${rotate}deg) scale(${scale})`,
+  };
 
   return (
     <div className="engine-section" id="how-it-works">
@@ -262,50 +267,9 @@ export function EngineExplorer() {
         <div className="hiw-sticky">
           <div
             ref={rectangleRef}
-            className="hiw-rectangle"
-            style={{
-              opacity: lerp(0.55, 1, frameIn),
-              transform: `rotate(${rotate}deg) scale(${scale})`,
-            }}
+            className="hiw-stage-layer hiw-rectangle hiw-rectangle-chrome"
+            style={stageStyle}
           >
-            <div className="hiw-content" style={{ ["--bg-opacity" as string]: `${outroIn * 72}%` }}>
-              <h2
-                className="hiw-intro"
-                style={{
-                  opacity: (1 - introFade) * (1 - introOut),
-                  visibility: introOut > 0.98 || introFade > 0.98 ? "hidden" : "visible",
-                  transform: `rotate(${-rotate}deg) scale(${lerp(1, 0.85, introFade)})`,
-                }}
-              >
-                <span className="sr-only">How it works</span>
-                {INTRO_WORDS.map((word, i) => (
-                  <span key={word} className="hiw-word" aria-hidden="true">
-                    {word}
-                    <span
-                      className="hiw-word-underline"
-                      style={{ transform: `scaleY(${wordUnderlines[i] ?? 0})` }}
-                    />
-                    {i < INTRO_WORDS.length - 1 ? "\u00A0" : null}
-                  </span>
-                ))}
-              </h2>
-
-              <div
-                className="hiw-outro"
-                style={{
-                  opacity: outroIn,
-                  visibility: outroIn < 0.02 ? "hidden" : "visible",
-                  transform: `rotate(${-rotate}deg)`,
-                }}
-              >
-                <h2 className="font-display">The 1-Apply platform</h2>
-                <ButtonLink href="/sign-up" variant="inverse" className="hiw-outro-btn">
-                  Create your memory
-                  <span aria-hidden="true">→</span>
-                </ButtonLink>
-              </div>
-            </div>
-
             {(["top", "left", "bottom", "right"] as const).map((side) => (
               <div
                 key={side}
@@ -328,7 +292,6 @@ export function EngineExplorer() {
                   className={cn("hiw-label-container", item.corner)}
                   style={{
                     opacity: labelsIn * (1 - outroIn * 0.9),
-                    zIndex: activeCard === index ? 2 : 1,
                     ["--scale" as string]: String(cornerScale),
                     ["--offset" as string]: String(rings.offset),
                   }}
@@ -367,13 +330,59 @@ export function EngineExplorer() {
             centerEl={rectangleEl}
             active={cubesActive}
           />
+
+          <div className="hiw-stage-layer hiw-rectangle hiw-rectangle-content" style={stageStyle}>
+            <div className="hiw-content" style={{ ["--bg-opacity" as string]: `${outroIn * 72}%` }}>
+              <h2
+                className="hiw-intro"
+                style={{
+                  opacity: (1 - introFade) * (1 - introOut),
+                  visibility: introOut > 0.98 ? "hidden" : "visible",
+                  transform: `rotate(${-rotate}deg) scale(${lerp(1, 0.85, introFade)})`,
+                }}
+              >
+                <span className="sr-only">How it works</span>
+                {INTRO_WORDS.map((word, i) => (
+                  <span key={word} className="hiw-word" aria-hidden="true">
+                    {word}
+                    <span
+                      className="hiw-word-underline"
+                      style={{ transform: `scaleY(${wordUnderlines[i] ?? 0})` }}
+                    />
+                    {i < INTRO_WORDS.length - 1 ? "\u00A0" : null}
+                  </span>
+                ))}
+              </h2>
+
+              <div
+                className="hiw-outro"
+                style={{
+                  opacity: outroIn,
+                  visibility: outroIn < 0.02 ? "hidden" : "visible",
+                  transform: `rotate(${-rotate}deg)`,
+                }}
+              >
+                <h2 className="font-display">The 1-Apply platform</h2>
+                <ButtonLink href="/sign-up" variant="inverse" className="hiw-outro-btn">
+                  Create your memory
+                  <span aria-hidden="true">→</span>
+                </ButtonLink>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="hiw-info">
           {CORNERS.map((item, index) => {
             const local = clamp01(cardPhase * CORNERS.length - index);
             return (
-              <div key={item.id} className="hiw-info-section">
+              <div
+                key={item.id}
+                className={cn(
+                  "hiw-info-section",
+                  index % 2 === 0 ? "hiw-info-section--left" : "hiw-info-section--right",
+                )}
+              >
                 <article
                   className="hiw-card"
                   style={{
