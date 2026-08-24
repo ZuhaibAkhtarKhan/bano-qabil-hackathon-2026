@@ -4,8 +4,8 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { ButtonLink } from "@/components/ui/button";
 
 const links = [
-  { href: "#how-it-works", label: "How it works" },
   { href: "#platform", label: "Platform" },
+  { href: "#how-it-works", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
 ];
 
