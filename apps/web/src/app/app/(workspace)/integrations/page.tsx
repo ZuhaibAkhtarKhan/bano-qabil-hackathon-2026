@@ -5,11 +5,13 @@ import { EmptyState } from "@/components/ui/feedback";
 import { SemanticBadge } from "@/components/ui/status-pill";
 import { loadIntegrationsWorkspace } from "@/server/workspace/queries";
 import { loadAppConfig } from "@/config/env";
+import { oauthRedirectUri } from "@/server/integrations/google-oauth";
 import {
   connectGmail,
   connectCalendar,
   disconnectIntegration,
   triggerGmailSync,
+  triggerCalendarSync,
   confirmCalendarEvent,
   dismissCalendarEvent,
 } from "@/server/integrations/actions";
@@ -48,6 +50,8 @@ export default async function IntegrationsPage({
   const { error } = await searchParams;
   const { integrations, emailEvents, calendarEvents } = await loadIntegrationsWorkspace();
   const cfg = loadAppConfig();
+  const gmailRedirect = oauthRedirectUri("gmail");
+  const calendarRedirect = oauthRedirectUri("google_calendar");
 
   const gmailIntegration = integrations.find((i) => i.kind === "gmail");
   const calendarIntegration = integrations.find((i) => i.kind === "google_calendar");
@@ -64,11 +68,26 @@ export default async function IntegrationsPage({
       {error && (
         <div className="mt-4 rounded-lg border border-coral-200 bg-coral-50 p-3 text-sm text-coral-800">
           {error === "oauth_not_configured"
-            ? "Google OAuth is not configured on this deployment. Contact the administrator."
+            ? "Google login is not configured yet. Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET, then register the redirect URIs shown below."
             : error === "not_connected"
-              ? "Integration is not connected."
+              ? "That account is not connected."
               : `Error: ${error.replace(/_/g, " ")}`}
         </div>
+      )}
+
+      {!cfg.googleOAuthConfigured && (
+        <Card className="mt-6 max-w-2xl p-5">
+          <h2 className="text-base font-medium">Google login setup</h2>
+          <p className="mt-1 text-sm text-ink-muted">
+            Create an OAuth client in Google Cloud, enable Gmail API and Calendar API, then put the client id and secret in
+            <code className="mx-1 rounded bg-surface-2 px-1">.env.local</code>.
+            Use these authorized redirect URIs:
+          </p>
+          <ul className="mt-3 space-y-1 break-all font-mono text-xs text-ink-muted">
+            <li>{gmailRedirect}</li>
+            <li>{calendarRedirect}</li>
+          </ul>
+        </Card>
       )}
 
       {/* ── Connections ─────────────────────────────────────────────── */}
@@ -154,12 +173,20 @@ export default async function IntegrationsPage({
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {calendarIntegration?.status === "connected" ? (
-                  <form action={disconnectIntegration}>
-                    <input type="hidden" name="integrationId" value={calendarIntegration.id} />
-                    <Button type="submit" variant="ghost" size="sm">
-                      Disconnect
-                    </Button>
-                  </form>
+                  <>
+                    <form action={triggerCalendarSync}>
+                      <input type="hidden" name="integrationId" value={calendarIntegration.id} />
+                      <Button type="submit" variant="secondary" size="sm">
+                        Sync now
+                      </Button>
+                    </form>
+                    <form action={disconnectIntegration}>
+                      <input type="hidden" name="integrationId" value={calendarIntegration.id} />
+                      <Button type="submit" variant="ghost" size="sm">
+                        Disconnect
+                      </Button>
+                    </form>
+                  </>
                 ) : cfg.googleOAuthConfigured ? (
                   <form action={connectCalendar}>
                     <Button type="submit" variant="primary" size="sm">

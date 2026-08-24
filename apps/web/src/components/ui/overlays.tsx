@@ -64,7 +64,7 @@ export function Drawer({
   open,
   onClose,
   children,
-  id,
+  id = "drawer",
 }: {
   title: string;
   open: boolean;
@@ -73,7 +73,7 @@ export function Drawer({
   id?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
+  const titleId = `${id}-title`;
 
   useEffect(() => {
     const node = dialogRef.current;
@@ -81,6 +81,8 @@ export function Drawer({
     if (open && !node.open) node.showModal();
     if (!open && node.open) node.close();
   }, [open]);
+
+  if (!open) return null;
 
   return (
     <dialog

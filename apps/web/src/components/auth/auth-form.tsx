@@ -56,11 +56,13 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           return;
         }
         setMessage("Check your email to confirm the account, then sign in.");
+        setPending(false);
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
         router.push(nextPath);
         router.refresh();
+        return;
       }
     } catch (caught) {
       setError(
@@ -68,7 +70,6 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           caught instanceof Error ? { message: caught.message } : { message: String(caught) },
         ),
       );
-    } finally {
       setPending(false);
     }
   }
@@ -157,10 +158,10 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         </p>
       ) : null}
       <Button type="submit" className="w-full" disabled={pending}>
-        {mode === "sign-up" ? "Create account" : "Sign in"}
+        {pending ? (mode === "sign-up" ? "Creating account…" : "Signing in…") : mode === "sign-up" ? "Create account" : "Sign in"}
       </Button>
       <Button type="button" variant="secondary" className="w-full" disabled={pending} onClick={onMagicLink}>
-        Email a magic link
+        {pending ? "Sending…" : "Email a magic link"}
       </Button>
     </form>
   );

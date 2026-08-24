@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@/server/domain/grounding";
+import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@1apply/domain";
 
 const allowed = ["11111111-1111-4111-8111-111111111111"];
 

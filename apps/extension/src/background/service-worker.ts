@@ -430,7 +430,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
 
-    if (message?.type === "APPLY_SUGGESTIONS" || message?.type === "FILL_APPROVED") {
+    if (message?.type === "APPLY_SUGGESTIONS" || message?.type === "APPLY_SUGGESTIONS" || message?.type === "FILL" || message?.type === "FILL_APPROVED") {
       const tab = await activeTab();
       if (!tab.id) throw new Error("No active tab.");
       const origin = tabOrigin(tab);

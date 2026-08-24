@@ -11,15 +11,3 @@ export function isSupabaseConfigured(): boolean {
     return false;
   }
 }
-
-export function getAppUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-}
-
-export function requireServerEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`${name} is not configured`);
-  }
-  return value;
-}

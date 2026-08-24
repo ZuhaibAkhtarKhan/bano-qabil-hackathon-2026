@@ -176,6 +176,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
       <PageHeader
         eyebrow="Application workspace"
         title={opportunity?.title ?? "Untitled opportunity"}
+        body={`${opportunity?.organization ?? "Unknown host"} · ${formatDeadline(application.deadline_at)} · This workspace manages evidence, drafts, and history. Approved applications submit automatically.`}
         actions={
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-mint-soft px-2.5 py-1 font-mono text-[11px] font-medium text-emerald-800">
@@ -217,17 +218,17 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="font-display text-2xl">Opportunity</h2>
-              <p className="mt-2 text-sm text-ink-muted">
+        <p className="mt-2 text-sm text-ink-muted">
                 Source: {opportunity?.source ?? "unknown"}
-                {opportunity?.source_url ? (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <a className="underline" href={opportunity.source_url} rel="noreferrer" target="_blank">
-                      Original page
-                    </a>
-                  </>
-                ) : null}
+          {opportunity?.source_url ? (
+            <>
+              {" "}
+              ·{" "}
+              <a className="underline" href={opportunity.source_url} rel="noreferrer" target="_blank">
+                Original page
+              </a>
+            </>
+          ) : null}
               </p>
             </div>
             <IntelligenceRefresh applicationId={application.id} />
@@ -305,7 +306,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
 
         <Card className="p-6">
           <h2 className="font-display text-2xl">Submission readiness</h2>
-          <p className="mt-2 text-sm text-ink-muted">
+        <p className="mt-2 text-sm text-ink-muted">
             Deterministic completeness from required documents, approved answers, review items, Fit gaps, and autofill review.
           </p>
           <div className="mt-6">
@@ -318,9 +319,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
               <ul className="mt-3 grid gap-2 text-sm text-ink-muted">
                 {completeness.remaining.slice(0, 8).map((item) => (
                   <li key={item}>• {item}</li>
-                ))}
-              </ul>
-            </div>
+              ))}
+            </ul>
+          </div>
           ) : (
             <p className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
               All required items are complete. You can freeze a submission snapshot when you are ready.
@@ -337,7 +338,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
         <Card className="p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="font-display text-2xl">Documents</h2>
+        <h2 className="font-display text-2xl">Documents</h2>
               <p className="mt-2 text-sm text-ink-muted">Required documents, your selected documents, and exact versions stay explicit.</p>
             </div>
             <StatusPill tone="muted">
@@ -356,56 +357,56 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
               })}
             </div>
           ) : null}
-          {documents.length === 0 ? (
-            <p className="mt-4 text-sm text-ink-muted">
-              <Link className="underline" href="/app/documents">
-                Upload a document
-              </Link>{" "}
-              first.
-            </p>
-          ) : (
+        {documents.length === 0 ? (
+          <p className="mt-4 text-sm text-ink-muted">
+            <Link className="underline" href="/app/documents">
+              Upload a document
+            </Link>{" "}
+            first.
+          </p>
+        ) : (
             <ul className="mt-6 grid gap-3">
-              {documents.map((document) => {
-                const attachment = attached.find((item) => item.document_id === document.id);
-                const versions = document.document_versions ?? [];
-                const defaultVersionId = document.current_version_id ?? versions[0]?.id ?? "";
-                return (
+            {documents.map((document) => {
+              const attachment = attached.find((item) => item.document_id === document.id);
+              const versions = document.document_versions ?? [];
+              const defaultVersionId = document.current_version_id ?? versions[0]?.id ?? "";
+              return (
                   <li key={document.id} className="rounded-xl border border-line p-4 text-sm">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{document.label}</p>
-                        <p className="mt-1 text-ink-muted">
-                          {document.type.replace(/_/g, " ")}
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{document.label}</p>
+                      <p className="mt-1 text-ink-muted">
+                        {document.type.replace(/_/g, " ")}
                           {attachment ? ` · selected ${versions.find((v) => v.id === attachment.document_version_id)?.version_label ?? ""}` : ""}
-                        </p>
-                        <Link href={`/app/documents/${document.id}`} className="mt-1 inline-block text-teal underline">
-                          View version history
-                        </Link>
-                      </div>
+                      </p>
+                      <Link href={`/app/documents/${document.id}`} className="mt-1 inline-block text-teal underline">
+                        View version history
+                      </Link>
                     </div>
-                    <form action={attachDocument} className="mt-3 flex flex-wrap items-end gap-2">
-                      <input type="hidden" name="applicationId" value={application.id} />
-                      <input type="hidden" name="documentId" value={document.id} />
-                      <Field label="Version to attach" htmlFor={`version-${document.id}`}>
+                  </div>
+                  <form action={attachDocument} className="mt-3 flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="applicationId" value={application.id} />
+                    <input type="hidden" name="documentId" value={document.id} />
+                    <Field label="Version to attach" htmlFor={`version-${document.id}`}>
                         <Select id={`version-${document.id}`} name="versionId" defaultValue={attachment?.document_version_id ?? defaultVersionId}>
-                          {versions.map((version) => (
-                            <option key={version.id} value={version.id}>
-                              {version.version_label}
-                              {document.current_version_id === version.id ? " (latest)" : ""}
-                              {version.original_filename ? ` · ${version.original_filename}` : ""}
-                            </option>
-                          ))}
-                        </Select>
-                      </Field>
-                      <Button type="submit" variant="secondary">
+                        {versions.map((version) => (
+                          <option key={version.id} value={version.id}>
+                            {version.version_label}
+                            {document.current_version_id === version.id ? " (latest)" : ""}
+                            {version.original_filename ? ` · ${version.original_filename}` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Button type="submit" variant="secondary">
                         {attachment ? "Update selection" : "Select version"}
-                      </Button>
-                    </form>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                    </Button>
+                  </form>
+                </li>
+              );
+            })}
+          </ul>
+        )}
         </Card>
       </section>
 
@@ -472,7 +473,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                       {Math.round(Number(item.confidence) * 100)}% confidence
                     </StatusPill>
                   </div>
-                </li>
+              </li>
               ))}
             </ul>
           )}
@@ -487,29 +488,29 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           </p>
           <DeadlineDisplay deadlineAt={application.deadline_at} />
           <SubmissionChecklist data={data} />
-          <div className="mt-6 flex flex-wrap gap-3">
-            <form action={markSubmitted}>
-              <input type="hidden" name="applicationId" value={application.id} />
+        <div className="mt-6 flex flex-wrap gap-3">
+          <form action={markSubmitted}>
+            <input type="hidden" name="applicationId" value={application.id} />
               <Button type="submit" disabled={submitted || !completeness.readyForSubmission}>
                 {submitted ? "Snapshot already frozen" : "Freeze submission snapshot"}
-              </Button>
-            </form>
-            <form action={updateApplicationStatus} className="flex flex-wrap items-end gap-2">
-              <input type="hidden" name="applicationId" value={application.id} />
-              <Field label="Status" htmlFor={`status-${application.id}`}>
+            </Button>
+          </form>
+          <form action={updateApplicationStatus} className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="applicationId" value={application.id} />
+            <Field label="Status" htmlFor={`status-${application.id}`}>
                 <Select id={`status-${application.id}`} name="status" defaultValue={normalizedStatus}>
                   {statusOptions.map((status) => (
-                    <option key={status} value={status}>
+                  <option key={status} value={status}>
                       {applicationStatusLabel(status)}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Button type="submit" variant="secondary">
-                Update status
-              </Button>
-            </form>
-          </div>
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button type="submit" variant="secondary">
+              Update status
+            </Button>
+          </form>
+        </div>
           {snapshots.length > 0 ? (
             <div className="mt-6 rounded-xl bg-canvas p-4 text-sm">
               <p className="font-medium">Historical snapshots</p>

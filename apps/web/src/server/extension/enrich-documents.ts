@@ -24,11 +24,6 @@ function pathForType(type: string): string {
   return "Documents → Supporting";
 }
 
-function asOne<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
-}
-
 function versionsOf(doc: DocRow) {
   const versions = Array.isArray(doc.document_versions) ? doc.document_versions : [];
   return versions.filter((item) => item.status !== "failed");
@@ -121,8 +116,4 @@ export async function enrichDocumentAttachments(
         : "File field detected, but no document is available in your vault.",
     };
   });
-}
-
-export function asDocumentRow(value: unknown): DocRow | null {
-  return asOne(value as DocRow | DocRow[] | null);
 }

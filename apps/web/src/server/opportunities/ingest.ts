@@ -3,7 +3,7 @@ import { normalizeOpportunityUrl, urlsLikelySame } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 import {
   ensureApplication,
   markOpportunityAnalysisFailed,
