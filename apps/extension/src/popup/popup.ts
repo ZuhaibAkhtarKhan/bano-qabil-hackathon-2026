@@ -191,7 +191,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       return;
     }
 
-    const plan = await send<{ mappings: Mapping[] }>({
+    const plan = await send<{ mappings: Mapping[]; fillSessionId?: string }>({
       type: "CREATE_FILL_PLAN",
       applicationId,
       origin: inventory.origin || new URL(inventory.url).origin,
@@ -204,6 +204,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
     }>({
       type: "APPLY_SUGGESTIONS",
       applicationId,
+      fillSessionId: plan.fillSessionId,
       mappings: plan.mappings,
       highlightKeys: (inventory.fields as Array<{ key?: string }>).map((field) => String(field.key ?? "")).filter(Boolean),
       origin: inventory.origin || new URL(inventory.url).origin,
@@ -228,7 +229,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
 stopEl.addEventListener("click", async () => {
   try {
     await send({ type: "STOP_FILL_SESSION" });
-    log("Stopped. Open the popup and Fill again to resume.");
+    log("Stopped. Values synced to Application Memory — 1-Apply continues in the background.");
     await refreshFillSessionUi();
   } catch (error) {
     log(error instanceof Error ? error.message : "Could not stop.");

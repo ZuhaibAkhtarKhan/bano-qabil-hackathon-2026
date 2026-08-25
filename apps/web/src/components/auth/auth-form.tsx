@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
-import { authErrorFromSearchParams, mapAuthError, safeNextPath } from "@/lib/auth-errors";
+import { authErrorFromSearchParams, ACCOUNT_EXISTS_MESSAGE, mapAuthError, safeNextPath } from "@/lib/auth-errors";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
@@ -25,9 +25,11 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       error_code: searchParams.get("error_code"),
     }),
   );
-  const [pending, setPending] = useState(false);
+  const [passwordPending, setPasswordPending] = useState(false);
+  const [magicPending, setMagicPending] = useState(false);
   const configured = isSupabaseConfigured();
   const nextPath = safeNextPath(searchParams.get("next"), mode === "sign-up" ? "/app/onboarding/consent" : "/app");
+  const busy = passwordPending || magicPending;
 
   async function onPasswordSubmit(event: FormEvent) {
     event.preventDefault();
@@ -37,7 +39,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       setError("Supabase is not configured on this environment.");
       return;
     }
-    setPending(true);
+    setPasswordPending(true);
     try {
       const supabase = createBrowserSupabaseClient();
       if (mode === "sign-up") {
@@ -50,13 +52,23 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           },
         });
         if (signUpError) throw signUpError;
+
+        // Supabase returns a fake "success" for existing emails when confirmations
+        // are on: user is present but identities is empty.
+        const identities = data.user?.identities ?? [];
+        if (data.user && identities.length === 0) {
+          setError(ACCOUNT_EXISTS_MESSAGE);
+          setPasswordPending(false);
+          return;
+        }
+
         if (data.session) {
           router.push("/app/onboarding/consent");
           router.refresh();
           return;
         }
         setMessage("Check your email to confirm the account, then sign in.");
-        setPending(false);
+        setPasswordPending(false);
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
@@ -67,10 +79,12 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     } catch (caught) {
       setError(
         mapAuthError(
-          caught instanceof Error ? { message: caught.message } : { message: String(caught) },
+          caught instanceof Error
+            ? { message: caught.message, code: "code" in caught ? String((caught as { code?: string }).code ?? "") : "" }
+            : { message: String(caught) },
         ),
       );
-      setPending(false);
+      setPasswordPending(false);
     }
   }
 
@@ -85,7 +99,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       setError("Enter an email address for the magic link.");
       return;
     }
-    setPending(true);
+    setMagicPending(true);
     try {
       const supabase = createBrowserSupabaseClient();
       const { error: otpError } = await supabase.auth.signInWithOtp({
@@ -103,7 +117,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         ),
       );
     } finally {
-      setPending(false);
+      setMagicPending(false);
     }
   }
 
@@ -150,6 +164,14 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       {error ? (
         <p className="text-sm text-rose-700" role="alert">
           {error}
+          {error === ACCOUNT_EXISTS_MESSAGE ? (
+            <>
+              {" "}
+              <Link href="/sign-in" className="underline">
+                Sign in
+              </Link>
+            </>
+          ) : null}
         </p>
       ) : null}
       {message ? (
@@ -157,11 +179,17 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           {message}
         </p>
       ) : null}
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? (mode === "sign-up" ? "Creating account…" : "Signing in…") : mode === "sign-up" ? "Create account" : "Sign in"}
+      <Button type="submit" className="w-full" disabled={busy}>
+        {passwordPending
+          ? mode === "sign-up"
+            ? "Creating account…"
+            : "Signing in…"
+          : mode === "sign-up"
+            ? "Create account"
+            : "Sign in"}
       </Button>
-      <Button type="button" variant="secondary" className="w-full" disabled={pending} onClick={onMagicLink}>
-        {pending ? "Sending…" : "Email a magic link"}
+      <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={onMagicLink}>
+        {magicPending ? "Sending…" : "Email a magic link"}
       </Button>
     </form>
   );

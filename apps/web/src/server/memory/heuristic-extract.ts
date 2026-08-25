@@ -61,6 +61,20 @@ function kindForHeading(heading: string): string {
   return "project";
 }
 
+function looksLikePersonName(value: string | null | undefined): boolean {
+  const text = (value ?? "").trim();
+  if (!text || text.length > 80) return false;
+  if (
+    /resume|curriculum|cv\b|primary|document|upload|supporting|file|pdf|docx?|skills?|experience|education|projects?|summary|objective|profile|contact|references?/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  // Title-case multi-word names only — avoids headings and sentence fragments.
+  return /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}$/.test(text);
+}
+
 export function heuristicExtractDocument(text: string, documentLabel: string): ExtractedDocument {
   const cleaned = text.replace(/\u0000/g, " ").replace(/[ \t]+/g, " ").trim().slice(0, 40_000);
   const lines = cleaned
@@ -74,9 +88,10 @@ export function heuristicExtractDocument(text: string, documentLabel: string): E
   const github = firstMatch(cleaned, /(https?:\/\/(?:www\.)?github\.com\/[^\s)]+)/i);
   const website = firstMatch(cleaned, /(https?:\/\/(?:www\.)?(?:portfolio|[a-z0-9-]+\.(?:dev|me|io|com))[^\s)]*)/i);
 
-  const displayName =
-    lines.find((line) => /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}$/.test(line) && !/resume|curriculum|cv/i.test(line)) ??
-    (documentLabel.replace(/\.(pdf|docx?)$/i, "").replace(/[_-]+/g, " ").trim() || null);
+  const fromBody = lines.find((line) => looksLikePersonName(line));
+  const fromLabel = documentLabel.replace(/\.(pdf|docx?)$/i, "").replace(/[_-]+/g, " ").trim();
+  // Never treat vault labels like "Primary resume" as the applicant's name.
+  const displayName = fromBody ?? (looksLikePersonName(fromLabel) ? fromLabel : null);
 
   const headline =
     lines.find((line) => /engineer|developer|student|designer|analyst|intern|manager|researcher/i.test(line) && line.length < 120) ??

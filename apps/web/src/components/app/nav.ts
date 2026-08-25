@@ -5,6 +5,7 @@ import {
   FileBadge,
   Files,
   FolderSearch,
+  HandHelping,
   LayoutDashboard,
   Library,
   Link2,
@@ -29,6 +30,7 @@ export const WORKSPACE_NAV: NavSection[] = [
     label: "Operate",
     items: [
       { href: "/app", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/app/needs-you", label: "Need You", icon: HandHelping },
       { href: "/app/opportunities", label: "Opportunities", icon: FolderSearch },
       { href: "/app/applications", label: "Applications", icon: BriefcaseBusiness },
     ],

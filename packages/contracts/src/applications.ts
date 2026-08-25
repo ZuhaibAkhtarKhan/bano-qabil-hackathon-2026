@@ -124,11 +124,49 @@ export const fillPlanMappingSchema = z.object({
   sensitive: z.boolean(),
 });
 
+export const fillSessionEndReasonSchema = z.enum([
+  "stopped",
+  "tab_closed",
+  "origin_left",
+  "submitted_detected",
+]);
+
+export const fillSessionCapturedFieldSchema = z.object({
+  fieldKey: z.string().min(1).max(180),
+  label: z.string().max(180).default(""),
+  value: z.string().max(4000),
+  required: z.boolean().optional().default(false),
+  fieldType: z.string().max(40).optional(),
+});
+
+export const fillSessionEndRequestSchema = z.object({
+  reason: fillSessionEndReasonSchema,
+  origin: z.string().url().optional(),
+  fillSessionId: uuidSchema.optional(),
+  pageUrl: z.string().url().optional(),
+  pageText: z.string().max(50_000).optional(),
+  fields: z.array(fillSessionCapturedFieldSchema).max(120).default([]),
+});
+
+export const fillSessionEndResponseSchema = z.object({
+  applicationId: uuidSchema,
+  status: applicationStatusSchema,
+  nextAction: z.string(),
+  savedFieldCount: z.number().int().nonnegative(),
+  needsYouCount: z.number().int().nonnegative(),
+  submitted: z.boolean(),
+  submissionSignal: z.string().nullable(),
+});
+
 export type GroundedDraft = z.infer<typeof groundedDraftSchema>;
 export type AnswerVersion = z.infer<typeof answerVersionSchema>;
 export type ApplicationRecord = z.infer<typeof applicationRecordSchema>;
 export type SubmissionSnapshot = z.infer<typeof submissionSnapshotSchema>;
 export type FillPlanMapping = z.infer<typeof fillPlanMappingSchema>;
+export type FillSessionEndReason = z.infer<typeof fillSessionEndReasonSchema>;
+export type FillSessionCapturedField = z.infer<typeof fillSessionCapturedFieldSchema>;
+export type FillSessionEndRequest = z.infer<typeof fillSessionEndRequestSchema>;
+export type FillSessionEndResponse = z.infer<typeof fillSessionEndResponseSchema>;
 
 export function assertDraftIsGrounded(draft: GroundedDraft): string[] {
   const issues: string[] = [];

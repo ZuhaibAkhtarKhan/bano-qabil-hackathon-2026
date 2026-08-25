@@ -2,6 +2,8 @@ const MESSAGES: Record<string, string> = {
   "invalid login credentials": "Email or password is incorrect.",
   "email not confirmed": "Confirm your email from the message we sent, then sign in.",
   "user already registered": "An account with that email already exists. Sign in instead.",
+  "user_already_exists": "An account with that email already exists. Sign in instead.",
+  "email_exists": "An account with that email already exists. Sign in instead.",
   "password should be at least 6 characters": "Use a password with at least 8 characters.",
   "password should be at least 8 characters": "Use a password with at least 8 characters.",
   "unable to validate email address: invalid format": "Enter a valid email address.",
@@ -18,6 +20,8 @@ const MESSAGES: Record<string, string> = {
   "new password should be different from the old password": "Choose a password you have not used on this account.",
 };
 
+export const ACCOUNT_EXISTS_MESSAGE = "An account with that email already exists. Sign in instead.";
+
 export function mapAuthError(input: { message?: string | null; code?: string | null } | string | null | undefined): string {
   if (!input) return "Authentication failed.";
   const message = typeof input === "string" ? input : input.message ?? "";
@@ -26,6 +30,16 @@ export function mapAuthError(input: { message?: string | null; code?: string | n
   if (MESSAGES[key]) return MESSAGES[key];
   const fromMessage = MESSAGES[message.trim().toLowerCase()];
   if (fromMessage) return fromMessage;
+  const combined = `${code} ${message}`.toLowerCase();
+  if (
+    combined.includes("already registered") ||
+    combined.includes("already been registered") ||
+    combined.includes("already exists") ||
+    combined.includes("user_already_exists") ||
+    combined.includes("email_exists")
+  ) {
+    return ACCOUNT_EXISTS_MESSAGE;
+  }
   if (key.includes("expired") || key.includes("otp")) {
     return MESSAGES.otp_expired ?? "That email link is invalid or has expired. Request a new one.";
   }

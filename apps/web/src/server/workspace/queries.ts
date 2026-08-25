@@ -19,7 +19,6 @@ export async function loadDashboard() {
   const [
     { count: verifiedEvidenceCount },
     { count: documentCount },
-    { data: applications },
     { data: notifications },
     { data: opportunities },
     { count: resumeCount },
@@ -32,14 +31,6 @@ export async function loadDashboard() {
       .eq("excluded_from_ai", false),
     supabase.from("documents").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
     supabase
-      .from("applications")
-      .select(
-        "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source_url ), fit_evaluations ( score )",
-      )
-      .eq("user_id", profile.id)
-      .order("updated_at", { ascending: false })
-      .limit(40),
-    supabase
       .from("notifications")
       .select("id, title, body, read_at, created_at, application_id, opportunity_id, category, priority, action_url")
       .eq("user_id", profile.id)
@@ -48,14 +39,140 @@ export async function loadDashboard() {
     supabase
       .from("opportunities")
       .select(
-        "id, title, organization, category, source, source_url, location, analysis_status, deadline_at, created_at",
+        "id, title, organization, category, source, source_url, location, analysis_status, deadline_at, created_at, canonical_url",
       )
       .eq("user_id", profile.id)
       .order("created_at", { ascending: false })
-      .limit(8),
+      .limit(100),
     supabase.from("documents").select("id", { count: "exact", head: true }).eq("type", "resume").eq("user_id", profile.id),
     syncDeadlineReminders(supabase, actor).catch(() => null),
   ]);
+
+  // Match the extension applications API shape first — nested fit_evaluations has
+  // broken this query for some rows and returned an empty list.
+  let applicationRows: ApplicationListRow[] = [];
+  const primaryApps = await supabase
+    .from("applications")
+    .select(
+      "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source, source_url, canonical_url )",
+    )
+    .eq("user_id", profile.id)
+    .order("updated_at", { ascending: false })
+    .limit(100);
+
+  if (primaryApps.error) {
+    logError("dashboard.applications_list_failed", {
+      code: primaryApps.error.code,
+      message: primaryApps.error.message,
+    });
+    const fallbackApps = await supabase
+      .from("applications")
+      .select("id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at")
+      .eq("user_id", profile.id)
+      .order("updated_at", { ascending: false })
+      .limit(100);
+    applicationRows = (fallbackApps.data ?? []).map((row) => ({
+      ...(row as Omit<ApplicationListRow, "opportunities" | "fit_evaluations">),
+      opportunities: null,
+      fit_evaluations: null,
+    }));
+  } else {
+    applicationRows = (primaryApps.data ?? []) as ApplicationListRow[];
+  }
+
+  // Do not auto-create applications for orphan opportunities here. Ingest already
+  // calls ensureApplication; recreating on dashboard load resurrects user deletes.
+  const opportunityList = (opportunities ?? []) as OpportunityListRow[];
+
+  const applicationIds = applicationRows.map((row) => row.id);
+  const opportunityIds = [
+    ...new Set(applicationRows.map((row) => row.opportunity_id).filter((id): id is string => Boolean(id))),
+  ];
+  const fitByApplication = new Map<string, number>();
+  const requiredDocsByOpportunity = new Map<string, string[]>();
+  const attachedLabelsByApplication = new Map<string, string[]>();
+
+  if (applicationIds.length > 0) {
+    const [{ data: fits }, { data: requiredDocs }, { data: attachedRows }, { data: userDocuments }] = await Promise.all([
+      supabase
+        .from("fit_evaluations")
+        .select("application_id, score")
+        .eq("user_id", profile.id)
+        .in("application_id", applicationIds),
+      opportunityIds.length > 0
+        ? supabase
+            .from("opportunity_documents")
+            .select("opportunity_id, label, required")
+            .eq("user_id", profile.id)
+            .in("opportunity_id", opportunityIds)
+        : Promise.resolve({ data: [] as Array<{ opportunity_id: string; label: string; required: boolean }> }),
+      supabase
+        .from("application_documents")
+        .select("application_id, document_id")
+        .eq("user_id", profile.id)
+        .in("application_id", applicationIds),
+      supabase.from("documents").select("id, label, type").eq("user_id", profile.id),
+    ]);
+
+    for (const row of fits ?? []) {
+      if (typeof row.score === "number" && typeof row.application_id === "string") {
+        fitByApplication.set(row.application_id, row.score);
+      }
+    }
+
+    for (const row of requiredDocs ?? []) {
+      if (!row.required) continue;
+      const list = requiredDocsByOpportunity.get(String(row.opportunity_id)) ?? [];
+      list.push(String(row.label));
+      requiredDocsByOpportunity.set(String(row.opportunity_id), list);
+    }
+
+    const docMeta = new Map(
+      (userDocuments ?? []).map((doc) => [
+        String(doc.id),
+        { label: String(doc.label ?? ""), type: String(doc.type ?? "") },
+      ]),
+    );
+
+    for (const row of attachedRows ?? []) {
+      const meta = docMeta.get(String(row.document_id));
+      if (!meta) continue;
+      const labels = attachedLabelsByApplication.get(String(row.application_id)) ?? [];
+      // Prefer the vault label; also surface type so resume-typed docs count even if mislabeled.
+      labels.push(meta.label || meta.type);
+      if (meta.type === "resume" && !/\bresume\b|\bcv\b/i.test(meta.label)) {
+        labels.push("resume");
+      }
+      attachedLabelsByApplication.set(String(row.application_id), labels);
+    }
+  }
+
+  const applications = applicationRows.map((row) => {
+    const opportunity =
+      asOne(row.opportunities) ??
+      opportunityList.find((item) => item.id === row.opportunity_id) ??
+      null;
+    const score = fitByApplication.get(row.id);
+    return {
+      ...row,
+      opportunities: opportunity
+        ? {
+            title: opportunity.title,
+            organization: opportunity.organization,
+            category: opportunity.category,
+            source: "source" in opportunity ? (opportunity.source as string | null) : null,
+            source_url: opportunity.source_url,
+            canonical_url:
+              "canonical_url" in opportunity
+                ? ((opportunity as { canonical_url?: string | null }).canonical_url ?? null)
+                : null,
+          }
+        : row.opportunities,
+      fit_evaluations: score != null ? { score } : null,
+      requiredDocumentLabels: requiredDocsByOpportunity.get(row.opportunity_id) ?? [],
+      attachedDocumentLabels: attachedLabelsByApplication.get(row.id) ?? [],
+    };
+  });
 
   const completeness = computeProfileCompleteness({
     displayName: profile.display_name,
@@ -69,9 +186,9 @@ export async function loadDashboard() {
     completeness,
     verifiedEvidenceCount: verifiedEvidenceCount ?? 0,
     documentCount: documentCount ?? 0,
-    applications: (applications ?? []) as ApplicationListRow[],
+    applications,
     notifications: (notifications ?? []) as NotificationRow[],
-    opportunities: (opportunities ?? []) as OpportunityListRow[],
+    opportunities: opportunityList,
     resumeCount: resumeCount ?? 0,
   };
 }

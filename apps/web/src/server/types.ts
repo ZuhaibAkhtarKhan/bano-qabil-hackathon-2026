@@ -113,6 +113,7 @@ export type OpportunityListRow = {
   category: OpportunityCategory;
   source: string;
   source_url: string | null;
+  canonical_url?: string | null;
   location: string | null;
   analysis_status: string;
   deadline_at: string | null;
@@ -133,15 +134,21 @@ export type ApplicationListRow = {
         organization: string | null;
         category: OpportunityCategory;
         source_url: string | null;
+        source?: string | null;
+        canonical_url?: string | null;
       }
     | {
         title: string;
         organization: string | null;
         category: OpportunityCategory;
         source_url: string | null;
+        source?: string | null;
+        canonical_url?: string | null;
       }[]
     | null;
   fit_evaluations: { score: number } | { score: number }[] | null;
+  requiredDocumentLabels?: string[];
+  attachedDocumentLabels?: string[];
 };
 
 export type NotificationRow = {
