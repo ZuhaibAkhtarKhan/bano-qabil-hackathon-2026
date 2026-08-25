@@ -57,8 +57,6 @@ export {
   RESUME_TRACKS,
 } from "./intelligence/resume-matching";
 
-export { fitIndexFromRequirements } from "./intelligence/fit-index";
-
 export type {
   CandidateProfile,
   EligibilityDisplayState,

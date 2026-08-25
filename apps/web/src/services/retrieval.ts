@@ -133,23 +133,3 @@ export async function retrieveForGrounding(
     };
   }
 }
-
-/** @deprecated Use retrieveForGrounding */
-export async function retrieveEvidenceForQuestion(
-  supabase: SupabaseClient,
-  actor: Actor,
-  question: string,
-  limit = 4,
-): Promise<MemoryEvidence[]> {
-  const result = await retrieveForGrounding(supabase, actor, question, { limit });
-  return result.evidence;
-}
-
-export async function selectEvidenceForQuestion(
-  supabase: SupabaseClient,
-  actor: Actor,
-  question: string,
-  limit = 4,
-): Promise<RetrievalResult> {
-  return retrieveForGrounding(supabase, actor, question, { limit });
-}

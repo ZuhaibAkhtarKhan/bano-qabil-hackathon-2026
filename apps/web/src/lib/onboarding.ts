@@ -12,10 +12,3 @@ export async function ensureOnboardingStep(expected: OnboardingStep) {
   }
   return state;
 }
-
-export async function requireIncompleteOnboarding() {
-  const state = await loadOnboardingState();
-  if (!state) redirect("/sign-in?next=/app/onboarding/consent");
-  if (onboardingComplete(state.profile)) redirect("/app");
-  redirect(onboardingHref(state.step));
-}

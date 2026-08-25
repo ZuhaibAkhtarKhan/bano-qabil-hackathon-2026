@@ -12,6 +12,9 @@ const MESSAGES: Record<string, string> = {
   "not-configured":
     "Connect Supabase with NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable accounts.",
   over_email_send_rate_limit: "Too many emails were sent. Wait a minute and try again.",
+  unexpected_failure: "We couldn't send the confirmation email. Check Supabase SMTP settings (see supabase/email-templates/README.md).",
+  "error sending confirmation email":
+    "We couldn't send the confirmation email. Turn off Custom SMTP in Supabase, or fix SMTP credentials (username must be `resend`, password = API key).",
   "new password should be different from the old password": "Choose a password you have not used on this account.",
 };
 

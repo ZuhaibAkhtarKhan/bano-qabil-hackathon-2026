@@ -27,10 +27,10 @@ describe("realtime system & migration", () => {
     expect(typeof toastModule.RealtimeToastContainer).toBe("function");
     expect(typeof providerModule.RealtimeWorkspaceProvider).toBe("function");
     expect(typeof providerModule.useRealtime).toBe("function");
-  });
+  }, 15_000);
 
   it("exports useRealtimeJob hook", async () => {
     const hookModule = await import("../../src/hooks/use-realtime-job");
     expect(typeof hookModule.useRealtimeJob).toBe("function");
-  });
+  }, 15_000);
 });

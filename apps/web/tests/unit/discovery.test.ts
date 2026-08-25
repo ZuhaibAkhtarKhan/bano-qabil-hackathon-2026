@@ -69,3 +69,12 @@ describe("discover API route", () => {
     expect(typeof mod.POST).toBe("function");
   }, 15_000);
 });
+
+describe("live job board scrapers", () => {
+  it("exports fetchLiveJobBoardCandidates function", async () => {
+    const mod = await import("@/server/opportunities/live-scrapers");
+    expect(typeof mod.fetchLiveJobBoardCandidates).toBe("function");
+    const candidates = await mod.fetchLiveJobBoardCandidates();
+    expect(Array.isArray(candidates)).toBe(true);
+  });
+});

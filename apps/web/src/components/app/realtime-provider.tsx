@@ -171,7 +171,14 @@ export function RealtimeWorkspaceProvider({
         setIsRealtimeConnected(status === "SUBSCRIBED");
       });
 
+    // Refresh when user returns to the tab to ensure fresh state without periodic lag
+    const onFocus = () => {
+      router.refresh();
+    };
+    window.addEventListener("focus", onFocus);
+
     return () => {
+      window.removeEventListener("focus", onFocus);
       void supabase.removeChannel(channel);
     };
   }, [userId, addToast, router]);

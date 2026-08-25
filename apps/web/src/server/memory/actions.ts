@@ -9,7 +9,7 @@ import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/server/jobs/runner";
+import { runOwnedJob } from "@/infra/jobs/runner";
 import { processDocumentVersion } from "@/server/documents/service";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { recordAuditEvent } from "@/server/audit";
@@ -393,6 +393,3 @@ export async function uploadMemoryDocument(formData: FormData) {
   revalidatePath("/app/documents");
   redirectWith(`${MEMORY}?section=supporting`, { notice });
 }
-
-// Back-compat aliases used elsewhere
-export const addEvidence = addMemoryEvidence;

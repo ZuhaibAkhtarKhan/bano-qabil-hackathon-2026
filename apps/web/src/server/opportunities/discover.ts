@@ -15,6 +15,7 @@ import type { Actor } from "@/auth/actor";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { searchWebDiscoveryCandidates } from "@/server/opportunities/web-search";
 import type { EvidenceRow } from "@/server/types";
+import { fetchLiveJobBoardCandidates } from "./live-scrapers";
 
 function toCriteria(query: string, filters: DiscoveryFilters): DiscoveryCriteria {
   const parsed = parseDiscoveryCriteria(query);
@@ -179,16 +180,14 @@ export async function runOpportunityDiscovery(input: {
   if (error || !request) throw new Error("DISCOVERY_REQUEST_FAILED");
 
   try {
-    const [workspace, web, context] = await Promise.all([
+    const [workspace, web, context, liveBoardJobs] = await Promise.all([
       loadWorkspaceCandidates(supabase, actor.userId),
       searchWebDiscoveryCandidates(criteria).catch(() => [] as DiscoveryCandidate[]),
       loadRankContext(supabase, actor.userId),
+      fetchLiveJobBoardCandidates(query),
     ]);
-    const ranked = runDiscoveryPipeline(
-      [...sourcedDiscoveryCatalog(), ...web, ...workspace],
-      criteria,
-      context,
-    );
+    const candidates = [...sourcedDiscoveryCatalog(), ...web, ...workspace, ...liveBoardJobs];
+    const ranked = runDiscoveryPipeline(candidates, criteria, context);
 
     if (ranked.length > 0) {
       await supabase.from("discovery_results").insert(

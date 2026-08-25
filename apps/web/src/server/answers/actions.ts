@@ -174,18 +174,3 @@ export async function rejectAnswerAction(formData: FormData) {
   revalidateApplication(applicationId);
   return { error: null };
 }
-
-// ─── Load answer history (versions) ──────────────────────────────────────────
-
-export async function loadAnswerHistoryAction(answerId: string) {
-  const { supabase, actor } = await requireWorkspace();
-
-  const { data: versions } = await supabase
-    .from("answer_versions")
-    .select("id, version_number, text, state, evidence_ids, claim_flags, grounding_score, model, created_at")
-    .eq("answer_id", answerId)
-    .eq("user_id", actor.userId)
-    .order("version_number", { ascending: false });
-
-  return versions ?? [];
-}

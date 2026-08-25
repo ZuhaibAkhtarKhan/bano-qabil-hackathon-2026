@@ -66,6 +66,9 @@ async function ensureSiteAccessFromGesture(tabUrl: string): Promise<string> {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Open a public http(s) page first.");
   }
+  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1") {
+    throw new Error("Local pages cannot be ingested or filled.");
+  }
   const origins = [`${parsed.origin}/*`];
   const already = await chrome.permissions.contains({ origins });
   if (already) return parsed.origin;
@@ -182,16 +185,9 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       cachedApps = await send<ApplicationOption[]>({ type: "LIST_APPLICATIONS" });
     }
     const matched = selectApplicationForUrl(inventory.url);
-    let applicationId = matched?.id || applicationEl.value;
+    const applicationId = matched?.id || applicationEl.value;
     if (!applicationId) {
-      log("No saved application matched this URL. Saving the page first…");
-      const saved = await send<{ applicationId: string; duplicate?: boolean }>({ type: "SAVE_PAGE" });
-      applicationId = saved.applicationId;
-      await refreshSession();
-      if (applicationId) applicationEl.value = applicationId;
-    }
-    if (!applicationId) {
-      log("Could not save this page. Sign in under Options, then try Fill again.");
+      log("Save this page to 1-Apply first so we can match the application by URL.");
       return;
     }
 

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>Confirm your 1-Apply account</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#fdfff8;color:#151414;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+      Confirm your email to start building your application memory with 1-Apply.
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#fdfff8;">
+      <tr>
+        <td align="center" style="padding:40px 16px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background-color:#ffffff;border:1px solid #e0eadd;border-radius:12px;overflow:hidden;">
+            <!-- Top accent bar -->
+            <tr>
+              <td style="height:4px;background:linear-gradient(90deg,#b5c4f5 0%,#5adeb7 50%,#f9eba6 100%);font-size:0;line-height:0;">&nbsp;</td>
+            </tr>
+
+            <!-- Header: matches apps/web Wordmark — brand-mark.jpg + “Apply” -->
+            <tr>
+              <td style="padding:28px 32px 8px 32px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="width:32px;height:32px;vertical-align:middle;">
+                      <img
+                        src="data:image/jpeg;base64,/9j/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wgARCABAAEADASIAAhEBAxEB/8QAGgABAQEBAAMAAAAAAAAAAAAAAAYJCAMEB//EABYBAQEBAAAAAAAAAAAAAAAAAAACAf/aAAwDAQACEAMQAAAB5tEgAAAPY7x+YdFaDWZYkBUeSTGilBM01MyxIADQ6mmaamZYl//EACAQAAECBQUAAAAAAAAAAAAAAAYDIAACBAU2BxAUFkD/2gAIAQEAAQUC8VOgpVLhwwmL2p2lohxknyFN4Tk7ZeoHVZ6gfeL408Xxp4vjW/8A/8QAFBEBAAAAAAAAAAAAAAAAAAAAQP/aAAgBAwEBPwEH/8QAFBEBAAAAAAAAAAAAAAAAAAAAQP/aAAgBAgEBPwEH/8QALRAAAgEBBQIPAAAAAAAAAAAAAQIDBQAEMHSyIFEREiEiIyQxNUBBQlJxgZP/2gAIAQEABj8C8FHDEpklkYKqjzNlh5GvMnOmk3nd8DbFYvadK46up9K+77wFRapfFVRwACZrd7Xz92tTJZGLyPdo2Zm7SeKMCk5SLQMCk5SLQMCk5SLQNj//xAAkEAEAAAQDCQAAAAAAAAAAAAABABEhMUBBgRAgMFFhcZHB8P/aAAgBAQABPyHBXU4HsyCDoSI3jOgauey+7QcUDqlHvydK58AsZAoAsXj5T3Cw/wBpqZV5rjHjx5//2gAMAwEAAgADAAAAEPvvvvhrPvrlPvvlPv/EABQRAQAAAAAAAAAAAAAAAAAAAED/2gAIAQMBAT8QB//EABYRAAMAAAAAAAAAAAAAAAAAAAEgMP/aAAgBAgEBPxBRP//EABwQAQEAAQUBAAAAAAAAAAAAAAERMRAgIUBhAP/aAAgBAQABPxDpD7IKlh+qh9HpR6x4gsFD2ArRAIlHI7UsvlgCgcAp7xQzeDJDY0AxAAmktzacWe7lQquV7jdu3//Z"
+                        alt=""
+                        width="32"
+                        height="32"
+                        style="display:block;width:32px;height:32px;border:0;border-radius:7px;"
+                      />
+                    </td>
+                    <td style="padding-left:8px;vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.02em;line-height:1;color:#151414;">
+                      Apply
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Body -->
+            <tr>
+              <td style="padding:8px 32px 0 32px;">
+                <p style="margin:0 0 8px 0;font-size:11px;line-height:1.4;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#767676;">
+                  Application memory
+                </p>
+                <h1 style="margin:0 0 16px 0;font-family:Georgia,Times New Roman,serif;font-size:32px;line-height:1.15;font-weight:400;letter-spacing:-0.02em;color:#151414;">
+                  Confirm your email
+                </h1>
+                <p style="margin:0 0 24px 0;font-size:16px;line-height:1.6;color:#5a5a5a;">
+                  Thanks for signing up. Confirm <strong style="color:#151414;">{{ .Email }}</strong> to create your evidence once and reuse it across every application — without inventing a stronger version of you.
+                </p>
+              </td>
+            </tr>
+
+            <!-- CTA -->
+            <tr>
+              <td style="padding:0 32px 24px 32px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="border-radius:8px;background-color:#151414;">
+                      <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;padding:14px 24px;font-size:14px;font-weight:600;line-height:1;color:#ffffff;text-decoration:none;">
+                        Confirm email address
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Fallback link -->
+            <tr>
+              <td style="padding:0 32px 28px 32px;">
+                <p style="margin:0 0 8px 0;font-size:13px;line-height:1.5;color:#767676;">
+                  If the button doesn’t work, copy and paste this link into your browser:
+                </p>
+                <p style="margin:0;font-size:12px;line-height:1.5;word-break:break-all;">
+                  <a href="{{ .ConfirmationURL }}" style="color:#151414;text-decoration:underline;">{{ .ConfirmationURL }}</a>
+                </p>
+              </td>
+            </tr>
+
+            <!-- Footer note -->
+            <tr>
+              <td style="padding:20px 32px;border-top:1px solid #e0eadd;background-color:#f3f7eb;">
+                <p style="margin:0;font-size:12px;line-height:1.5;color:#767676;">
+                  If you didn’t create a 1-Apply account, you can ignore this email. Truth before fluency.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:20px 0 0 0;font-size:11px;line-height:1.5;color:#767676;text-align:center;">
+            © 1-Apply · Create once. Apply everywhere.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

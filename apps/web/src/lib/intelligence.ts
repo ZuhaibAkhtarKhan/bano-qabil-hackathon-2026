@@ -1,14 +1,4 @@
-import type { EligibilityDisplayState, EligibilityState } from "@1apply/domain";
 import type { StatusTone } from "@/lib/status";
-
-export const ELIGIBILITY_LABEL: Record<EligibilityState, EligibilityDisplayState> = {
-  met: "SATISFIED",
-  not_met: "NOT SATISFIED",
-  unclear: "UNKNOWN",
-  not_evaluated: "UNKNOWN",
-  partial: "PARTIAL",
-  needs_confirmation: "NEEDS CONFIRMATION",
-};
 
 export function eligibilityTone(state: string): StatusTone {
   if (state === "met" || state === "SATISFIED") return "mint";

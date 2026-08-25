@@ -4,10 +4,9 @@ import { FinalCta } from "@/components/marketing/final-cta";
 import { Hero } from "@/components/marketing/hero";
 import { LandingCursor } from "@/components/marketing/landing-cursor";
 import { Pillars } from "@/components/marketing/pillars";
+import { Pricing } from "@/components/marketing/pricing";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
-import { WorkflowPlanar } from "@/components/marketing/workflow-planar";
-
 export default function HomePage() {
   return (
     <div id="top" className="bg-canvas">
@@ -17,8 +16,8 @@ export default function HomePage() {
         <Hero />
         <CategoryMarquee />
         <Pillars />
-        <WorkflowPlanar />
         <EngineExplorer />
+        <Pricing />
         <FinalCta />
       </main>
       <SiteFooter />

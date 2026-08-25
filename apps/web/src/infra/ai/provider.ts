@@ -1,5 +1,3 @@
-import type { ZodType } from "zod";
-
 export class AiNotConfiguredError extends Error {
   constructor() {
     super("No AI provider is configured. Generation is server-side only.");
@@ -36,8 +34,4 @@ export interface AiProvider {
   extract(request: ExtractionRequest): Promise<unknown>;
   classify(request: ClassificationRequest): Promise<{ label: string; confidence: number }>;
   completeStructured(request: StructuredGenerationRequest): Promise<unknown>;
-}
-
-export function parseStructured<T>(schema: ZodType<T>, value: unknown): T {
-  return schema.parse(value);
 }
