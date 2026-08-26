@@ -1,13 +1,14 @@
-import { planAutomation, type ApplicationAutomationSnapshot } from "@1apply/domain";
+import { planAutomation, requiredDocumentCovered, type ApplicationAutomationSnapshot } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { computeApplicationCompleteness } from "@/lib/application-workflow";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { runOwnedJob } from "@/infra/jobs/runner";
+import { syncDeadlineReminders } from "@/server/applications/reminders";
 
 async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<ApplicationAutomationSnapshot[]> {
-  const [{ data: applications }, { data: integrations }] = await Promise.all([
+  const [{ data: applications }, { data: integrations }, { data: documents }] = await Promise.all([
     supabase
       .from("applications")
       .select("id, opportunity_id, status, deadline_at, deadline_timezone, last_reminder_at, opportunities ( title, organization )")
@@ -15,6 +16,7 @@ async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<Ap
       .order("updated_at", { ascending: false })
       .limit(40),
     supabase.from("integrations").select("kind, status").eq("user_id", actor.userId),
+    supabase.from("documents").select("id, type, label").eq("user_id", actor.userId),
   ]);
 
   const gmailConnected = (integrations ?? []).some((row) => row.kind === "gmail" && row.status === "connected");
@@ -34,7 +36,7 @@ async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<Ap
     ] = await Promise.all([
       supabase.from("opportunity_questions").select("id").eq("opportunity_id", application.opportunity_id),
       supabase.from("application_answers").select("id, state, approved_text").eq("application_id", application.id),
-      supabase.from("application_documents").select("id").eq("application_id", application.id),
+      supabase.from("application_documents").select("id, document_id").eq("application_id", application.id),
       supabase.from("opportunity_documents").select("label, required").eq("opportunity_id", application.opportunity_id),
       supabase.from("fit_evaluations").select("score").eq("application_id", application.id).maybeSingle(),
       supabase.from("review_items").select("id, resolved").eq("application_id", application.id),
@@ -46,13 +48,20 @@ async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<Ap
         .limit(1),
     ]);
 
-    const requiredLabels = (requiredDocs ?? []).filter((row) => row.required).map((row) => String(row.label));
+    const required = (requiredDocs ?? []).filter((row) => row.required);
+    const attachedIds = new Set((attached ?? []).map((row) => String(row.document_id)));
+    const attachedVault = (documents ?? [])
+      .filter((row) => attachedIds.has(String(row.id)))
+      .map((row) => ({ type: String(row.type), label: String(row.label) }));
+    const missingDocs = required.filter((row) => !requiredDocumentCovered(String(row.label), attachedVault));
     const approved = (answers ?? []).filter((row) => row.state === "approved" || Boolean(row.approved_text));
     const completeness = computeApplicationCompleteness({
       requiredQuestions: (questions ?? []).length,
       approvedAnswers: approved.length,
-      requiredDocuments: requiredLabels,
-      attachedDocumentLabels: requiredLabels.length ? requiredLabels.slice(0, (attached ?? []).length) : [],
+      requiredDocuments: required.map((row) => String(row.label)),
+      attachedDocumentLabels: required
+        .filter((row) => requiredDocumentCovered(String(row.label), attachedVault))
+        .map((row) => String(row.label)),
       eligibilityNeedsReview: [],
       missingFitItems: [],
       recommendedResumeSelected: true,
@@ -71,7 +80,7 @@ async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<Ap
       completenessPercent: completeness.percent,
       totalQuestions: (questions ?? []).length,
       approvedAnswers: approved.length,
-      pendingDocuments: Math.max(0, requiredLabels.length - (attached ?? []).length),
+      pendingDocuments: missingDocs.length,
       fitScore: (fit?.score as number | null) ?? null,
       unresolvedReviewCount: (review ?? []).filter((row) => !row.resolved).length,
       hasCaptcha: false,
@@ -116,6 +125,7 @@ export async function runUserAutomationSweep(supabase: SupabaseClient, actor: Ac
         }
       }
     }
+    await syncDeadlineReminders(supabase, actor);
   };
 
   try {

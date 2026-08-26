@@ -98,7 +98,7 @@ export async function loadOnboardingState() {
   }
 
   const supabase = await createServerSupabaseClient();
-  const [{ count: documentCount }, { count: evidenceCount }, { count: verifiedEvidenceCount }, { data: evidence }] =
+  const [{ count: documentCount }, { count: evidenceCount }, { count: verifiedEvidenceCount }, { data: evidence }, { data: documents }] =
     await Promise.all([
       supabase.from("documents").select("id", { count: "exact", head: true }),
       supabase.from("evidence_items").select("id", { count: "exact", head: true }),
@@ -114,6 +114,7 @@ export async function loadOnboardingState() {
         )
         .order("created_at", { ascending: false })
         .limit(40),
+      supabase.from("documents").select("id, type, label").order("created_at", { ascending: false }),
     ]);
 
   const hasIdentity = Boolean(profile.display_name?.trim());
@@ -137,6 +138,7 @@ export async function loadOnboardingState() {
     evidenceCount: evidenceCount ?? 0,
     verifiedEvidenceCount: verifiedEvidenceCount ?? 0,
     evidence: (evidence ?? []) as EvidenceRow[],
+    documents: (documents ?? []) as Array<{ id: string; type: string; label: string }>,
     canFinish: canFinishOnboarding({ hasConsent: consent, hasIdentity }),
     consentUpdateFields,
   };

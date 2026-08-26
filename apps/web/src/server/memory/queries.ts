@@ -30,7 +30,7 @@ export async function loadMemoryWorkspace() {
     supabase
       .from("profiles")
       .select(
-        "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization, timezone",
+        "id, email, display_name, headline, phone, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization, timezone, preferences",
       )
       .eq("id", profile.id)
       .single(),
@@ -108,6 +108,10 @@ export async function loadMemoryWorkspace() {
     documentById,
     applications: (applications ?? []) as ApplicationListRow[],
     snapshotCount: snapshotCount ?? 0,
+    preferences: ((full as { preferences?: Record<string, unknown> } | null)?.preferences ?? profile.preferences) as Record<
+      string,
+      unknown
+    >,
   };
 }
 

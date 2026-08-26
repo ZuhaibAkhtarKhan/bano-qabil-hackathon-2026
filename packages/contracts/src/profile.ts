@@ -37,7 +37,7 @@ export const onboardingStepSchema = z.enum([
 export const ONBOARDING_STEPS = [
   { id: "consent", label: "Consent", href: "/app/onboarding/consent" },
   { id: "profile", label: "Profile", href: "/app/onboarding/profile" },
-  { id: "documents", label: "Documents", href: "/app/onboarding/documents" },
+  { id: "documents", label: "Your kit", href: "/app/onboarding/documents" },
   { id: "review", label: "Review", href: "/app/onboarding/review" },
   { id: "ready", label: "Ready", href: "/app/onboarding/ready" },
 ] as const;
@@ -71,8 +71,8 @@ export function resolveOnboardingStep(input: {
   if (input.storedStep === "ready") return "ready";
   if (input.storedStep === "review") return "review";
   if (input.storedStep === "done") return "done";
-  if (input.documentCount > 0 || input.evidenceCount > 0 || input.skippedDocuments) return "review";
   if (input.storedStep === "documents") return "documents";
+  if (input.documentCount > 0 || input.evidenceCount > 0 || input.skippedDocuments) return "review";
   return "documents";
 }
 

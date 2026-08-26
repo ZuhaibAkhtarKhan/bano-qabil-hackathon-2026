@@ -77,6 +77,7 @@ export {
 export {
   computeDeadlineInfo,
   DEFAULT_AUTO_SUBMIT_POLICY,
+  SILENCE_AUTO_SUBMIT_POLICY,
   evaluateAutoSubmit,
   generateReminder,
   prioritizeApplications,
@@ -88,6 +89,24 @@ export {
   type Reminder,
   type ReminderInput,
 } from "./deadline-intelligence";
+
+export {
+  classifyPendingPacket,
+  classifyRequiredDocumentLabel,
+  classifyVaultDocument,
+  kitStatus,
+  matchVaultDocument,
+  packetAnswerText,
+  packetSummary,
+  planKitAttachments,
+  requiredDocumentCovered,
+  type KitDocumentKind,
+  type KitStatus,
+  type PacketAnswer,
+  type PacketLane,
+  type PendingPacketInput,
+  type VaultDocument,
+} from "./kit";
 
 export {
   deduplicateDiscoveries,

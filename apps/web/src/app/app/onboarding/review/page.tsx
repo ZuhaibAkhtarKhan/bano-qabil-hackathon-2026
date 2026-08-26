@@ -23,7 +23,7 @@ export default async function OnboardingReviewPage({
     <OnboardingShell
       eyebrow="Onboarding"
       title="Review extracted memory"
-      body="Extracted items stay unverified until you confirm them. Verified evidence is what generation may cite. Nothing here is auto-approved."
+      body="Confirm name, university, and education. Extracted items stay unverified until you confirm them. Suggestions later will use verified evidence only."
       step="review"
     >
       {noticeMessage ? (

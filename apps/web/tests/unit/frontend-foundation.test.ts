@@ -91,10 +91,7 @@ describe("workspace navigation", () => {
       "/app/opportunities",
       "/app/applications",
       "/app/memory",
-      "/app/documents",
-      "/app/resumes",
       "/app/notifications",
-      "/app/integrations",
       "/app/settings",
     ]);
   });

@@ -39,7 +39,7 @@ describe("onboarding routing", () => {
     ).toBe("consent");
   });
 
-  it("moves to review after upload or skip", () => {
+  it("stays on kit upload until the user continues", () => {
     expect(
       resolveOnboardingStep({
         hasConsent: true,
@@ -49,6 +49,20 @@ describe("onboarding routing", () => {
         skippedDocuments: false,
         onboardingCompleted: false,
         storedStep: "documents",
+      }),
+    ).toBe("documents");
+  });
+
+  it("moves to review after continue or skip", () => {
+    expect(
+      resolveOnboardingStep({
+        hasConsent: true,
+        hasIdentity: true,
+        documentCount: 1,
+        evidenceCount: 2,
+        skippedDocuments: false,
+        onboardingCompleted: false,
+        storedStep: "review",
       }),
     ).toBe("review");
   });

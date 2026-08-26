@@ -19,9 +19,9 @@ export default async function MemoryPage({
   return (
     <WorkspaceMain>
       <PageHeader
-        eyebrow="Application Memory"
-        title="Who you are — traceable to sources"
-        body="Upload resumes, review extracted facts, verify what is true, and resolve conflicts when documents disagree. Nothing extracted is treated as verified until you confirm it."
+        eyebrow="Your kit"
+        title="Who you are — reused on every posting"
+        body="Confirm name, university, and education. Upload CNIC, B-form, and resume once. Suggestions later are optional. Extra sections below are for details, not a second home."
       />
       <FlashBanner notice={notice} error={error} />
       <MemoryWorkspace data={data} section={section} />

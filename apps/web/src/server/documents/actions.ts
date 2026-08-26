@@ -21,6 +21,7 @@ import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { reindexUserRetrievalCorpus } from "@/services/embeddings";
 import { recordAuditEvent } from "@/server/audit";
+import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 
 const DOCUMENTS = "/app/documents";
 
@@ -126,6 +127,8 @@ export async function uploadDocument(formData: FormData) {
     buffer: upload.buffer,
     mimeType: upload.mimeType,
   });
+
+  await autoAttachKitAcrossOpenApplications(supabase, actor);
 
   revalidatePath("/app");
   revalidatePath(DOCUMENTS);

@@ -14,6 +14,8 @@ describe("Phase 6 document types", () => {
   it("includes resume variants and supporting documents", () => {
     expect(documentTypeSchema.options).toContain("resume_variant");
     expect(documentTypeSchema.options).toContain("supporting_document");
+    expect(documentTypeSchema.options).toContain("identity_document");
+    expect(documentTypeSchema.options).toContain("family_document");
   });
 });
 

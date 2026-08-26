@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { MemoryCategory } from "@1apply/contracts";
-import { MEMORY_SECTIONS } from "@1apply/domain";
+import { MEMORY_SECTIONS, kitStatus } from "@1apply/domain";
+import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
@@ -145,13 +146,52 @@ export function MemoryWorkspace({
     ) : null;
 
   const hiddenSection = <input type="hidden" name="section" value={section} />;
+  const prefs = parseWorkspacePreferences(data.preferences);
+  const kit = kitStatus({
+    displayName: data.profile.display_name,
+    university: prefs.university,
+    educationSummary: prefs.educationSummary,
+    documents: data.documents,
+  });
 
   const personalPanel = (
     <div className="grid gap-8">
+      <Card className="p-5">
+        <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Repeat documents</p>
+        <p className="mt-1 text-sm text-ink-muted">
+          Resume {kit.hasResume ? "ready" : "missing"} · CNIC {kit.hasIdentityDocument ? "ready" : "missing"} · B-form{" "}
+          {kit.hasFamilyDocument ? "ready" : "missing"}. Matched labels auto-attach on new postings.
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {[
+            { type: "resume", label: "Primary resume", title: "Resume / CV" },
+            { type: "identity_document", label: "CNIC", title: "CNIC" },
+            { type: "family_document", label: "B-form", title: "B-form" },
+          ].map((slot) => (
+            <form key={slot.type} action={uploadMemoryDocument} className="grid gap-2 rounded-xl border border-sand/50 p-3">
+              {hiddenSection}
+              <input type="hidden" name="type" value={slot.type} />
+              <input type="hidden" name="label" value={slot.label} />
+              <p className="text-sm font-medium">{slot.title}</p>
+              <Input id={`kit-${slot.type}`} name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
+              <Button type="submit" variant="secondary" size="sm">
+                Upload
+              </Button>
+            </form>
+          ))}
+        </div>
+      </Card>
+
       <form action={updateIdentity} className="grid gap-4">
         {hiddenSection}
         <Field label="Name" htmlFor="displayName">
           <Input id="displayName" name="displayName" defaultValue={data.profile.display_name ?? ""} required />
+        </Field>
+        <Field label="University" htmlFor="university">
+          <Input id="university" name="university" defaultValue={prefs.university} />
+        </Field>
+        <Field label="Education" htmlFor="educationSummary">
+          <Input id="educationSummary" name="educationSummary" defaultValue={prefs.educationSummary} placeholder="BS Computer Science, 2026" />
         </Field>
         <Field label="Headline" htmlFor="headline">
           <Input id="headline" name="headline" defaultValue={data.profile.headline ?? ""} />
@@ -471,7 +511,10 @@ export function MemoryWorkspace({
         </Field>
         <Field label="Type" htmlFor="doc-type">
           <Select id="doc-type" name="type" defaultValue="resume">
-            <option value="resume">Resume</option>
+            <option value="resume">Resume / CV</option>
+            <option value="identity_document">CNIC / national ID</option>
+            <option value="family_document">B-form / family document</option>
+            <option value="transcript">Transcript</option>
             <option value="other">Supporting document</option>
           </Select>
         </Field>

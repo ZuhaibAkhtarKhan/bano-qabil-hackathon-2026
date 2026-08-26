@@ -1,6 +1,7 @@
 export {
   APPLICATION_LIFECYCLE,
   applicationStatusSchema,
+  DOCUMENT_TYPE_LABELS,
   documentTypeSchema,
   documentVersionStatusSchema,
   eligibilityStateSchema,

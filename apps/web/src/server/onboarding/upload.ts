@@ -1,108 +1,68 @@
 "use server";
 
-import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
+import { documentTypeSchema } from "@1apply/contracts";
+
 import { extractDocumentText } from "@/lib/documents/extract-text";
-import { logError } from "@/lib/log";
+import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import { documentStoragePath } from "@/infra/storage/documents";
-import { loadAppConfig } from "@/config/env";
+import { createDocumentWithVersion, processDocumentVersion } from "@/server/documents/service";
+import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/infra/jobs/runner";
-import { processDocumentVersion } from "@/server/documents/service";
+import { recordAuditEvent } from "@/server/audit";
 
-const MAX_BYTES = 8 * 1024 * 1024;
-const ALLOWED_TYPES = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/x-markdown",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-]);
-
-function mimeFromName(name: string, reported: string): string {
-  const lower = name.toLowerCase();
-  if (reported && ALLOWED_TYPES.has(reported)) return reported;
-  if (lower.endsWith(".txt")) return "text/plain";
-  if (lower.endsWith(".md")) return "text/markdown";
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  return reported;
-}
+const DOCUMENTS = "/app/onboarding/documents";
 
 export async function uploadOnboardingResume(formData: FormData) {
+  await uploadOnboardingKitDocument(formData);
+}
+
+export async function uploadOnboardingKitDocument(formData: FormData) {
   const { user, profile, supabase, actor } = await requireWorkspace();
   const file = formData.get("file");
-  const label = String(formData.get("label") ?? "Primary resume").trim() || "Primary resume";
+  const label = String(formData.get("label") ?? "Document").trim() || "Document";
+  const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "resume"));
 
-  if (!(file instanceof File) || file.size === 0) {
-    redirectWith("/app/onboarding/documents", { error: "required" });
-  }
-  if (file.size > MAX_BYTES) {
-    redirectWith("/app/onboarding/documents", { error: "upload" });
+  if (!(file instanceof File) || file.size === 0 || !typeParsed.success) {
+    redirectWith(DOCUMENTS, { error: "required" });
   }
 
-  const mimeType = mimeFromName(file.name, file.type);
-  if (!ALLOWED_TYPES.has(mimeType)) {
-    redirectWith("/app/onboarding/documents", { error: "upload" });
+  let upload;
+  try {
+    upload = await readValidatedUpload(file);
+  } catch (error) {
+    redirectWith(DOCUMENTS, {
+      error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload",
+    });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const fileHash = createHash("sha256").update(buffer).digest("hex");
-  const documentId = crypto.randomUUID();
-  const versionId = crypto.randomUUID();
-  const storagePath = documentStoragePath({
-    actor,
-    documentId,
-    versionId,
-    type: "resume",
-    fileName: file.name,
-  });
-  const bucket = loadAppConfig().storageBucket;
-
-  const { error: uploadError } = await supabase.storage
-    .from(bucket)
-    .upload(storagePath, buffer, { contentType: mimeType, upsert: false });
-
-  if (uploadError) {
-    logError("onboarding.upload_failed", { code: uploadError.message });
-    redirectWith("/app/onboarding/documents", { error: "upload" });
+  let documentId: string;
+  let versionId: string;
+  try {
+    const created = await createDocumentWithVersion({
+      supabase,
+      actor,
+      userId: user.id,
+      type: typeParsed.data,
+      label,
+      upload,
+    });
+    if (created.duplicate) {
+      redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+    }
+    documentId = created.documentId;
+    versionId = created.versionId;
+  } catch {
+    redirectWith(DOCUMENTS, { error: "upload" });
   }
 
-  const { error: documentError } = await supabase.from("documents").insert({
-    id: documentId,
-    user_id: user.id,
-    type: "resume",
-    label,
-  });
-  if (documentError) {
-    await supabase.storage.from(bucket).remove([storagePath]);
-    redirectWith("/app/onboarding/documents", { error: "save" });
+  await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId, source: "onboarding" });
+
+  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
+    await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
   }
-
-  const { error: versionError } = await supabase.from("document_versions").insert({
-    id: versionId,
-    document_id: documentId,
-    user_id: user.id,
-    version_label: "v1",
-    storage_path: storagePath,
-    file_hash: fileHash,
-    mime_type: mimeType,
-    byte_size: file.size,
-    status: "processing",
-  });
-
-  if (versionError) {
-    await supabase.from("documents").delete().eq("id", documentId);
-    await supabase.storage.from(bucket).remove([storagePath]);
-    redirectWith("/app/onboarding/documents", { error: "save" });
-  }
-
-  await supabase.from("documents").update({ current_version_id: versionId }).eq("id", documentId);
-  await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
 
   await runOwnedJob(
     supabase,
@@ -115,27 +75,18 @@ export async function uploadOnboardingResume(formData: FormData) {
         versionId,
         documentLabel: label,
         profileDisplayName: profile.display_name,
-        buffer,
-        mimeType,
+        buffer: upload.buffer,
+        mimeType: upload.mimeType,
       });
     },
   );
 
-  await supabase
-    .from("profiles")
-    .update({
-      onboarding_step: "review",
-      preferences: {
-        ...((profile.preferences as Record<string, unknown> | null) ?? {}),
-        onboardingSkippedDocuments: false,
-      },
-    })
-    .eq("id", user.id);
+  await autoAttachKitAcrossOpenApplications(supabase, actor);
 
-  const notice = (await extractDocumentText(buffer, mimeType)) ? "extracted" : "binary_stored";
+  const notice = (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored";
 
   revalidatePath("/app/onboarding");
   revalidatePath("/app/memory");
   revalidatePath("/app/documents");
-  redirectWith("/app/onboarding/review", { notice });
+  redirectWith(DOCUMENTS, { notice });
 }

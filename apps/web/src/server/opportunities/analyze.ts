@@ -16,6 +16,9 @@ import {
 } from "@/lib/opportunities/untrusted";
 import { opportunityExtractionSchema, tryGetAiProvider } from "@/infra/ai/openai";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
+import { autoAttachMatchingDocuments } from "@/server/applications/attach-kit";
+import { draftSuggestedAnswersForApplication } from "@/server/answers/generate";
+import { runOwnedJob } from "@/infra/jobs/runner";
 
 type Extraction = z.infer<typeof opportunityExtractionSchema>;
 
@@ -147,6 +150,7 @@ export async function persistOpportunityAnalysis(input: {
   applicationId: string;
   extracted: Extraction;
   source: OpportunitySource;
+  actor?: Actor;
 }) {
   const category = opportunityCategorySchema.safeParse(input.extracted.category);
   const deadlineAt = parseDeadline(input.extracted.deadline);
@@ -232,6 +236,26 @@ export async function persistOpportunityAnalysis(input: {
       })),
     );
   }
+
+  if (input.actor) {
+    await autoAttachMatchingDocuments(input.supabase, input.actor, input.applicationId, input.opportunityId);
+    try {
+      await runOwnedJob(
+        input.supabase,
+        { actor: input.actor, type: "answer_draft", inputRef: input.applicationId },
+        async () => {
+          await draftSuggestedAnswersForApplication(
+            input.supabase,
+            input.actor!,
+            input.applicationId,
+            input.opportunityId,
+          );
+        },
+      );
+    } catch {
+      // Suggestions are optional. Analysis still succeeds without them.
+    }
+  }
 }
 
 export async function markOpportunityAnalysisFailed(
@@ -303,6 +327,7 @@ export async function runOpportunityAnalysisJob(input: {
     applicationId: input.applicationId,
     extracted,
     source: input.source,
+    actor: input.actor,
   });
   await evaluateApplicationIntelligence(input.supabase, input.actor, input.applicationId, input.opportunityId);
   return { status: "ready" as const };
