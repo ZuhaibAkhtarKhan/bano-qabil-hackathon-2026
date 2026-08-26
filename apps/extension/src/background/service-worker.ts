@@ -1,6 +1,7 @@
 import {
   connectWithWebsiteSession,
   createFillPlan,
+  endFillSession,
   fetchDocumentFile,
   fetchSession,
   generateAiDraft,
@@ -63,6 +64,7 @@ type FillSession = {
   tabId: number;
   enabled: boolean;
   updatedAt: number;
+  fillSessionId?: string;
 };
 
 const FILL_SESSION_KEY = "fillSession";
@@ -254,7 +256,14 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
       highlightKeys: inventory.fields.map((field) => field.key),
     })) as { filled?: Array<{ filled?: boolean }> };
 
-    await saveFillSession({ ...session, tabId, origin, updatedAt: Date.now(), enabled: true });
+    await saveFillSession({
+      ...session,
+      tabId,
+      origin,
+      updatedAt: Date.now(),
+      enabled: true,
+      fillSessionId: plan.fillSessionId || session.fillSessionId,
+    });
     const filled = result.filled?.filter((item) => item.filled).length ?? 0;
     return { ok: true, filled };
   } catch (error) {
@@ -264,10 +273,16 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
   }
 }
 
-async function clearFillSession(tabId?: number): Promise<void> {
+async function clearFillSession(
+  tabId?: number,
+  reason: "stopped" | "tab_closed" | "origin_left" = "stopped",
+): Promise<void> {
   const session = await loadFillSession();
   if (!session) return;
   if (tabId != null && session.tabId !== tabId) return;
+
+  await syncFillSessionEnd(session, reason);
+
   await chrome.storage.local.remove(FILL_SESSION_KEY);
   if (session.tabId) {
     try {
@@ -275,6 +290,51 @@ async function clearFillSession(tabId?: number): Promise<void> {
     } catch {
       // Tab may already be gone.
     }
+  }
+}
+
+type CapturedFillState = {
+  origin: string;
+  pageUrl: string;
+  pageText: string;
+  fields: Array<{
+    fieldKey: string;
+    label: string;
+    value: string;
+    required: boolean;
+    fieldType: string;
+  }>;
+};
+
+async function captureFilledState(tabId: number): Promise<CapturedFillState | null> {
+  try {
+    return await sendToTab<CapturedFillState>(tabId, { type: "CAPTURE_FILLED_STATE" });
+  } catch {
+    return null;
+  }
+}
+
+async function syncFillSessionEnd(
+  session: FillSession,
+  reason: "stopped" | "tab_closed" | "origin_left" | "submitted_detected",
+): Promise<void> {
+  let captured: CapturedFillState | null = null;
+  if (session.tabId) {
+    captured = await captureFilledState(session.tabId);
+  }
+
+  try {
+    await endFillSession({
+      applicationId: session.applicationId,
+      reason,
+      origin: captured?.origin || session.origin,
+      fillSessionId: session.fillSessionId,
+      pageUrl: captured?.pageUrl,
+      pageText: captured?.pageText,
+      fields: captured?.fields ?? [],
+    });
+  } catch {
+    // Best-effort: local stop must still succeed if the API is unreachable.
   }
 }
 
@@ -293,7 +353,7 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
       const origin = tabOrigin(tab);
       if (origin !== session.origin) {
         // Only clear when the user clearly left the site.
-        if (info.status === "complete") await clearFillSession(tabId);
+        if (info.status === "complete") await clearFillSession(tabId, "origin_left");
         return;
       }
     } catch {
@@ -308,7 +368,7 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void clearFillSession(tabId);
+  void clearFillSession(tabId, "tab_closed");
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -341,6 +401,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === "STOP_FILL_SESSION") {
       const session = await loadFillSession();
+      if (session) {
+        await syncFillSessionEnd(session, "stopped");
+      }
       await chrome.storage.local.remove(FILL_SESSION_KEY);
       if (session?.tabId) {
         try {
@@ -445,6 +508,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       await ensureHostAccess(origin);
       const applicationId = String(message.applicationId ?? "");
+      const fillSessionId = message.fillSessionId ? String(message.fillSessionId) : undefined;
       if (applicationId) {
         await saveFillSession({
           applicationId,
@@ -452,6 +516,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabId: tab.id,
           enabled: true,
           updatedAt: Date.now(),
+          fillSessionId,
         });
       }
 

@@ -39,6 +39,11 @@ export {
 export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
 
 export {
+  detectSubmissionSignals,
+  type SubmissionSignalResult,
+} from "./submission-signals";
+
+export {
   buildAnswerPrompt,
   classifyQuestion,
   extractClaims,

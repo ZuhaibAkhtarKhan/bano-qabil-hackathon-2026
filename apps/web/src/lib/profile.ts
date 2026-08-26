@@ -55,6 +55,22 @@ export async function getCurrentUserAndProfile() {
     .maybeSingle();
 
   if (existing) {
+    const currentName = String(existing.display_name ?? "").trim();
+    const metadataName = String((user.user_metadata?.display_name as string | undefined) ?? "").trim();
+    const looksLikeResumeLabel = /^(primary\s+)?resume$|curriculum|^\s*cv\s*$/i.test(currentName);
+    if (looksLikeResumeLabel && metadataName) {
+      await supabase.from("profiles").update({ display_name: metadataName }).eq("id", user.id);
+      return {
+        user,
+        profile: {
+          ...(existing as ProfileRow),
+          display_name: metadataName,
+          onboarding_step: parseOnboardingStep(existing.onboarding_step) ?? "consent",
+          preferences: (existing.preferences as Record<string, unknown> | null) ?? {},
+        },
+      };
+    }
+
     return {
       user,
       profile: {

@@ -51,7 +51,7 @@ export const WORKFLOW_ORDER: readonly NormalizedApplicationStatus[] = [
 ] as const;
 
 export function normalizeApplicationStatus(status: ApplicationStatus): NormalizedApplicationStatus {
-  return LEGACY_TO_NORMALIZED[status];
+  return LEGACY_TO_NORMALIZED[status] ?? "saved";
 }
 
 export function applicationStatusLabel(status: ApplicationStatus | NormalizedApplicationStatus): string {

@@ -175,6 +175,42 @@ export function createFillPlan(input: {
   });
 }
 
+export function endFillSession(input: {
+  applicationId: string;
+  reason: "stopped" | "tab_closed" | "origin_left" | "submitted_detected";
+  origin?: string;
+  fillSessionId?: string;
+  pageUrl?: string;
+  pageText?: string;
+  fields?: Array<{
+    fieldKey: string;
+    label?: string;
+    value: string;
+    required?: boolean;
+    fieldType?: string;
+  }>;
+}) {
+  return request<{
+    applicationId: string;
+    status: string;
+    nextAction: string;
+    savedFieldCount: number;
+    needsYouCount: number;
+    submitted: boolean;
+    submissionSignal: string | null;
+  }>(`/api/applications/${input.applicationId}/fill-session/end`, {
+    method: "POST",
+    body: JSON.stringify({
+      reason: input.reason,
+      origin: input.origin,
+      fillSessionId: input.fillSessionId,
+      pageUrl: input.pageUrl,
+      pageText: input.pageText,
+      fields: input.fields ?? [],
+    }),
+  });
+}
+
 export function generateAiDraft(input: {
   applicationId: string;
   question: string;

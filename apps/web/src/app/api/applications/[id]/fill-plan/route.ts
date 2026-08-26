@@ -10,6 +10,7 @@ import { enrichAiAnswerableMappings } from "@/server/extension/enrich-ai-answers
 import { enrichDocumentAttachments } from "@/server/extension/enrich-documents";
 import { enrichYesNoEligibilityMappings } from "@/server/extension/enrich-yes-no";
 import { recordAuditEvent } from "@/server/audit";
+import { markFillStarted } from "@/server/applications/fill-lifecycle";
 
 const fieldSchema = z.object({
   key: z.string(),
@@ -197,6 +198,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     fillSessionId: fillSession.id,
     fieldCount: mappings.length,
   });
+
+  await markFillStarted(session.supabase, session.actor, parsedId.data);
 
   return withExtensionCors(
     request,

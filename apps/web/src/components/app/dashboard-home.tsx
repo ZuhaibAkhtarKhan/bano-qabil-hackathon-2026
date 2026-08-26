@@ -1,0 +1,419 @@
+"use client";
+
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { Bell, HelpCircle, Search } from "lucide-react";
+
+import { useRealtime } from "@/components/app/realtime-provider";
+import { ButtonLink } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/feedback";
+import { cn } from "@/lib/cn";
+
+export type DashboardMatch = {
+  id: string;
+  href: string;
+  company: string;
+  role: string;
+  match: number | null;
+  tone: "sand" | "mint" | "violet" | "coral";
+  sourceLabel: string | null;
+};
+
+export type DashboardApplicationRow = {
+  id: string;
+  href: string;
+  company: string;
+  role: string;
+  resume: string;
+  cover: string;
+  statusLabel: string;
+  statusTone: "mint" | "teal" | "coral" | "sand" | "muted";
+  filter: "all" | "in_flight" | "needs_you" | "failed" | "skipped";
+  appliedLabel: string;
+  initial: string;
+  sourceLabel: string | null;
+};
+
+const CARD_TONES = {
+  sand: "border-amber-200/80 bg-[#faf6e8]",
+  mint: "border-emerald-200/80 bg-[#eef8f1]",
+  violet: "border-violet-200/80 bg-[#f3f0fb]",
+  coral: "border-rose-200/80 bg-[#fbf0f0]",
+} as const;
+
+const STATUS_DOT = {
+  mint: "bg-emerald-500",
+  teal: "bg-cyan-500",
+  coral: "bg-rose-500",
+  sand: "bg-amber-500",
+  muted: "bg-zinc-400",
+} as const;
+
+const FILTERS = [
+  { id: "all" as const, label: "All" },
+  { id: "in_flight" as const, label: "In flight" },
+  { id: "needs_you" as const, label: "Needs you" },
+  { id: "failed" as const, label: "Failed" },
+  { id: "skipped" as const, label: "Skipped" },
+];
+
+export function DashboardHome({
+  matches,
+  applications,
+}: {
+  matches: DashboardMatch[];
+  applications: DashboardApplicationRow[];
+}) {
+  const { unreadCount } = useRealtime();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
+  const matchesRef = useRef<HTMLElement>(null);
+  const [revealProgress, setRevealProgress] = useState(0);
+  const targetProgressRef = useRef(0);
+  const smoothProgressRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const node = matchesRef.current;
+    if (!node || matches.length === 0) return;
+
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+    const measureTarget = () => {
+      const rect = node.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      if (reduced) {
+        targetProgressRef.current = rect.top < vh * 0.92 ? 1 : 0;
+        return;
+      }
+
+      const startY = vh * 0.95;
+      const endY = vh * 0.42;
+      const raw = (startY - rect.top) / (startY - endY);
+      const clamped = Math.min(1, Math.max(0, raw));
+      targetProgressRef.current = clamped * clamped * (3 - 2 * clamped);
+    };
+
+    let running = true;
+    const tick = () => {
+      if (!running) return;
+      measureTarget();
+      smoothProgressRef.current = lerp(smoothProgressRef.current, targetProgressRef.current, 0.068);
+      setRevealProgress(smoothProgressRef.current);
+      rafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    smoothProgressRef.current = 0;
+    targetProgressRef.current = 0;
+    setRevealProgress(0);
+    measureTarget();
+    rafRef.current = window.requestAnimationFrame(tick);
+
+    return () => {
+      running = false;
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+    };
+  }, [matches]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return applications.filter((row) => {
+      if (filter !== "all" && row.filter !== filter) return false;
+      if (!q) return true;
+      return `${row.company} ${row.role} ${row.statusLabel} ${row.sourceLabel ?? ""}`.toLowerCase().includes(q);
+    });
+  }, [applications, filter, query]);
+
+  return (
+    <div className="min-h-full bg-white">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-6 lg:px-8">
+        <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
+        <label className="mx-auto hidden max-w-md flex-1 sm:block">
+          <span className="sr-only">Search applications</span>
+          <span className="relative block">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search by title, company…"
+              className="w-full rounded-full border border-line bg-[#fafbf8] py-2 pl-10 pr-4 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-ink/30 focus:bg-white"
+            />
+          </span>
+        </label>
+        <div className="ml-auto flex items-center gap-2">
+          <Link
+            href="/app/notifications"
+            className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
+            aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          >
+            <Bell className="h-4 w-4" aria-hidden="true" />
+            {unreadCount > 0 ? (
+              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
+            ) : null}
+          </Link>
+          <Link
+            href="/app/settings"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
+            aria-label="Help and settings"
+          >
+            <HelpCircle className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
+      </header>
+
+      <div className="space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+        <section ref={matchesRef} aria-labelledby="top-matches-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="top-matches-heading" className="text-base font-semibold tracking-tight text-ink">
+              Top job matches
+            </h2>
+            <Link href="/app/opportunities" className="text-sm font-medium text-ink-muted hover:text-ink">
+              Browse jobs →
+            </Link>
+          </div>
+
+          {matches.length === 0 ? (
+            <div className="mt-3">
+              <EmptyState
+                eyebrow="Matches"
+                title="No opportunities yet"
+                body="Save a page from the extension or add an opportunity here — matches and applications show up in one pipeline."
+                actions={<ButtonLink href="/app/opportunities">Add opportunity</ButtonLink>}
+              />
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {matches.map((job, index) => (
+                <JobMatchCard key={job.id} job={job} revealProgress={revealProgress} stagger={index * 0.09} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="all-apps-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 id="all-apps-heading" className="text-base font-semibold tracking-tight text-ink">
+                All applications
+              </h2>
+              <p className="mt-1 text-xs text-ink-muted">
+                Includes roles saved or filled from the browser extension — one tracker for everything.
+              </p>
+            </div>
+            <ButtonLink href="/app/applications" variant="secondary" size="sm">
+              Open Tracker
+            </ButtonLink>
+          </div>
+
+          <div className="mt-3 sm:hidden">
+            <label className="relative block">
+              <span className="sr-only">Search applications</span>
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search by title, company…"
+                className="w-full rounded-full border border-line bg-[#fafbf8] py-2 pl-10 pr-4 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-ink/30 focus:bg-white"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {FILTERS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setFilter(item.id)}
+                className={cn(
+                  "rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
+                  filter === item.id
+                    ? "bg-[#1a3329] text-white"
+                    : "border border-line bg-white text-ink-muted hover:text-ink",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                eyebrow="Applications"
+                title={applications.length === 0 ? "No applications yet" : "No matches for this filter"}
+                body={
+                  applications.length === 0
+                    ? "Save a job page from the extension or create an opportunity on the site. Both land in this list."
+                    : "Try another filter or clear the search."
+                }
+                actions={
+                  applications.length === 0 ? (
+                    <ButtonLink href="/app/opportunities">Add opportunity</ButtonLink>
+                  ) : undefined
+                }
+              />
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-line">
+              <table className="w-full min-w-[720px] table-fixed text-left text-sm">
+                <thead className="border-b border-line bg-[#fafbf8] text-[11px] uppercase tracking-wider text-ink-muted">
+                  <tr>
+                    <th className="w-[36%] px-4 py-3 font-medium">Position</th>
+                    <th className="w-[11%] px-4 py-3 font-medium">Resume</th>
+                    <th className="w-[13%] px-4 py-3 font-medium">Cover letter</th>
+                    <th className="w-[22%] px-4 py-3 font-medium">Status</th>
+                    <th className="w-[18%] px-4 py-3 font-medium">Applied</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((row) => (
+                    <tr key={row.id} className="border-b border-line last:border-b-0 hover:bg-[#fafbf8]/60">
+                      <td className="px-4 py-3.5">
+                        <Link href={row.href} className="flex items-center gap-3">
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white text-xs font-semibold text-ink">
+                            {row.initial}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="truncate font-medium leading-tight text-ink">{row.company}</span>
+                              {row.sourceLabel ? (
+                                <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                                  {row.sourceLabel}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="block truncate text-xs text-ink-muted">{row.role}</span>
+                          </span>
+                        </Link>
+                      </td>
+                      <td
+                        className={cn(
+                          "px-4 py-3.5 text-xs",
+                          row.resume === "Ready"
+                            ? "text-emerald-700"
+                            : row.resume === "Missing"
+                              ? "text-rose-700"
+                              : "text-ink-muted",
+                        )}
+                      >
+                        {row.resume}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-4 py-3.5 text-xs",
+                          row.cover === "Ready"
+                            ? "text-emerald-700"
+                            : row.cover === "Missing"
+                              ? "text-rose-700"
+                              : "text-ink-muted",
+                        )}
+                      >
+                        {row.cover}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink">
+                          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[row.statusTone])} aria-hidden="true" />
+                          <span className="truncate">{row.statusLabel}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-ink-muted">{row.appliedLabel}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function JobMatchCard({
+  job,
+  revealProgress,
+  stagger,
+}: {
+  job: DashboardMatch;
+  revealProgress: number;
+  stagger: number;
+}) {
+  const target = job.match ?? 0;
+  const cardProgress = Math.min(1, Math.max(0, (revealProgress - stagger) / Math.max(0.001, 1 - stagger)));
+  const display = target * cardProgress;
+
+  return (
+    <article className={cn("flex min-h-[10.5rem] flex-col rounded-2xl border p-4", CARD_TONES[job.tone])}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-medium uppercase tracking-wide text-ink-muted">{job.company}</p>
+          <h3 className="mt-1 text-sm font-semibold leading-snug tracking-tight text-ink">{job.role}</h3>
+          {job.sourceLabel ? (
+            <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{job.sourceLabel}</p>
+          ) : null}
+        </div>
+        <MatchRing percent={display} label={Math.round(display)} target={job.match} />
+      </div>
+      <div className="mt-auto flex items-center justify-between gap-2 pt-5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-line bg-white text-[10px] font-semibold text-ink">
+            {job.company.slice(0, 2).toUpperCase()}
+          </span>
+          <span className="truncate text-xs font-medium text-ink-muted">{job.company.split(" ")[0]}</span>
+        </div>
+        <Link
+          href={job.href}
+          className="shrink-0 rounded-full bg-[#1a3329] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#142820]"
+        >
+          Apply
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function MatchRing({
+  percent,
+  label,
+  target,
+}: {
+  percent: number;
+  label: number;
+  target: number | null;
+}) {
+  const r = 17;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, percent));
+  const offset = c - (clamped / 100) * c;
+
+  return (
+    <div
+      className="dashboard-match-ring relative h-11 w-11 shrink-0"
+      aria-label={target == null ? "Match score pending" : `${Math.round(target)}% match`}
+    >
+      <svg viewBox="0 0 44 44" className="h-full w-full -rotate-90" aria-hidden="true">
+        <circle cx="22" cy="22" r={r} fill="none" stroke="#e5e7eb" strokeWidth="3" />
+        <circle
+          cx="22"
+          cy="22"
+          r={r}
+          fill="none"
+          stroke="#10b981"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          className="dashboard-match-ring-progress"
+          style={{ transition: "stroke-dashoffset 140ms linear" }}
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold tabular-nums text-ink">
+        {target == null ? "—" : `${label}%`}
+      </span>
+    </div>
+  );
+}

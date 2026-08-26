@@ -3,8 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { computeApplicationCompleteness } from "@/lib/application-workflow";
+import { probeApplicationSubmission } from "@/server/applications/fill-lifecycle";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { runOwnedJob } from "@/infra/jobs/runner";
+import { logError } from "@/lib/log";
 import { syncDeadlineReminders } from "@/server/applications/reminders";
 
 async function loadSnapshots(supabase: SupabaseClient, actor: Actor): Promise<ApplicationAutomationSnapshot[]> {
@@ -101,6 +103,38 @@ export async function runUserAutomationSweep(supabase: SupabaseClient, actor: Ac
   const run = async () => {
     const snapshots = await loadSnapshots(supabase, actor);
     const correlationId = crypto.randomUUID();
+
+    // Background host-signal probe for in-flight applications (extension does not decide submit).
+    const [{ data: inflight }, { data: opportunities }] = await Promise.all([
+      supabase
+        .from("applications")
+        .select("id, opportunity_id, status")
+        .eq("user_id", actor.userId)
+        .in("status", ["in_progress", "review_required", "ready_to_apply", "analyzing"])
+        .limit(15),
+      supabase
+        .from("opportunities")
+        .select("id, source_url, canonical_url")
+        .eq("user_id", actor.userId),
+    ]);
+    const urlByOpp = new Map(
+      (opportunities ?? []).map((row) => [
+        String(row.id),
+        (row.canonical_url as string | null) || (row.source_url as string | null),
+      ]),
+    );
+    for (const row of inflight ?? []) {
+      try {
+        await probeApplicationSubmission({
+          supabase,
+          actor,
+          applicationId: String(row.id),
+          sourceUrl: urlByOpp.get(String(row.opportunity_id)) ?? null,
+        });
+      } catch (err) {
+        logError("automation.submission_probe_failed", { err, applicationId: row.id });
+      }
+    }
 
     for (const snapshot of snapshots) {
       const decisions = planAutomation(snapshot);

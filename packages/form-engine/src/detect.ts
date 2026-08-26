@@ -1,4 +1,5 @@
 import { fieldSignals, type DetectedField, type FieldType } from "./types";
+import { humanQuestionLabel, isNoiseFormField } from "./question-label";
 
 export const APPLY_FIELD_ATTR = "data-1apply-key";
 export const APPLY_EMPTY_ATTR = "data-1apply-empty";
@@ -56,34 +57,95 @@ export function isMarkedRequired(item: Element, heading: Element | null | undefi
   return false;
 }
 
+function cleanQuestionText(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").replace(/\*+$/, "").trim().slice(0, 200);
+}
+
+function looksLikeQuestionText(value: string): boolean {
+  if (!value || value.length < 2) return false;
+  if (/^[a-f0-9_-]{16,}$/i.test(value)) return false;
+  if (/^(entry\.\d+|wf-\d+)/i.test(value)) return false;
+  return true;
+}
+
 function labelFor(el: Element, root: ParentNode): string {
   const id = attr(el, "id");
   if (id && "querySelector" in root) {
     const labelled = (root as Document | Element).querySelector(`label[for="${cssEscape(id)}"]`);
-    if (labelled?.textContent) return labelled.textContent.trim();
+    const text = cleanQuestionText(labelled?.textContent);
+    if (looksLikeQuestionText(text)) return text;
   }
   const wrapped = el.closest("label");
   if (wrapped?.textContent) {
     const clone = wrapped.cloneNode(true) as HTMLElement;
-    for (const control of Array.from(clone.querySelectorAll("input, textarea, select"))) control.remove();
-    const text = clone.textContent?.trim() ?? "";
-    if (text) return text.slice(0, 200);
+    for (const control of Array.from(clone.querySelectorAll("input, textarea, select, button"))) control.remove();
+    const text = cleanQuestionText(clone.textContent);
+    if (looksLikeQuestionText(text)) return text;
   }
 
   const labelledBy = attr(el, "aria-labelledby");
   if (labelledBy && "getElementById" in root) {
     const parts = labelledBy
       .split(/\s+/)
-      .map((token) => (root as Document).getElementById?.(token)?.textContent?.trim() ?? "")
-      .filter(Boolean);
-    if (parts.length) return parts.join(" ");
+      .map((token) => cleanQuestionText((root as Document).getElementById?.(token)?.textContent))
+      .filter((text) => looksLikeQuestionText(text));
+    if (parts.length) return parts.join(" ").slice(0, 200);
   }
 
   const item = el.closest('[role="listitem"]');
   const heading = item?.querySelector('[role="heading"]');
-  if (heading?.textContent) return heading.textContent.trim().slice(0, 200);
+  const headingText = cleanQuestionText(heading?.textContent);
+  if (looksLikeQuestionText(headingText)) return headingText;
 
-  return attr(el, "aria-label");
+  const aria = cleanQuestionText(attr(el, "aria-label"));
+  if (looksLikeQuestionText(aria)) return aria;
+
+  // Common ATS / custom form wrappers: question lives in a sibling or parent title node.
+  // Only search tight wrappers — never the whole <form>/body (that returns unrelated labels).
+  const host = el.closest(
+    "[data-question], [data-field-label], .form-group, .form-field, .field, .question, .application-question, .freebirdFormviewerComponentsQuestionBaseRoot, fieldset, [role='group']",
+  );
+  if (host && !["form", "body", "html", "main", "section"].includes(host.tagName.toLowerCase())) {
+    for (const selector of [
+      "[data-question]",
+      "[data-field-label]",
+      ".question-title",
+      ".form-label",
+      ".field-label",
+      "label",
+      "legend",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      '[role="heading"]',
+      "p",
+      "span",
+    ]) {
+      const node = host.querySelector(selector);
+      if (!node || node === el || el.contains(node)) continue;
+      const text = cleanQuestionText(
+        node.getAttribute?.("data-question") || node.getAttribute?.("data-field-label") || node.textContent,
+      );
+      if (looksLikeQuestionText(text) && text.length >= 3 && text.length <= 200) return text;
+    }
+  }
+
+  // Preceding sibling question text (e.g. <label>Question</label><input> or <p>Question?</p><input>).
+  let sibling = el.previousElementSibling;
+  for (let i = 0; i < 4 && sibling; i += 1) {
+    if (!isLocalQuestionNode(sibling)) {
+      sibling = sibling.previousElementSibling;
+      continue;
+    }
+    const text = cleanQuestionText(
+      sibling.getAttribute?.("data-question") || sibling.getAttribute?.("aria-label") || sibling.textContent,
+    );
+    if (looksLikeQuestionText(text) && text.length >= 2 && text.length <= 200) return text;
+    sibling = sibling.previousElementSibling;
+  }
+
+  return "";
 }
 
 function nearbyText(el: Element): string {
@@ -91,30 +153,56 @@ function nearbyText(el: Element): string {
   const item = el.closest('[role="listitem"]');
   if (item) {
     const heading = item.querySelector('[role="heading"]');
-    if (heading?.textContent) bits.push(heading.textContent.trim().slice(0, 160));
+    if (heading?.textContent) bits.push(cleanQuestionText(heading.textContent));
     const describedBy = attr(el, "aria-describedby");
     if (describedBy && el.ownerDocument) {
       for (const token of describedBy.split(/\s+/)) {
         const node = el.ownerDocument.getElementById(token);
-        if (node?.textContent) bits.push(node.textContent.trim().slice(0, 80));
+        if (node?.textContent) bits.push(cleanQuestionText(node.textContent).slice(0, 80));
       }
     }
+    const description = item.querySelector('[role="text"], .freebirdFormviewerComponentsQuestionBaseDescription');
+    if (description?.textContent) bits.push(cleanQuestionText(description.textContent).slice(0, 160));
     return bits.filter(Boolean).join(" ").slice(0, 240);
   }
 
   const prev = el.previousElementSibling;
-  if (prev && !["input", "textarea", "select", "button"].includes(prev.tagName.toLowerCase())) {
-    bits.push(prev.textContent?.trim() ?? "");
+  if (prev && isLocalQuestionNode(prev)) {
+    bits.push(cleanQuestionText(prev.textContent));
   }
   const parent = el.parentElement;
-  if (parent) {
+  if (parent && isTightQuestionHost(parent)) {
     const dt = parent.previousElementSibling;
-    if (dt && dt.tagName.toLowerCase() === "dt") bits.push(dt.textContent?.trim() ?? "");
+    if (dt && dt.tagName.toLowerCase() === "dt") bits.push(cleanQuestionText(dt.textContent));
+    const title = parent.querySelector("label, legend, [role='heading'], .question-title, .field-label");
+    if (title && !el.contains(title) && title !== el) bits.push(cleanQuestionText(title.textContent));
   }
-  const group = el.closest("fieldset, [role='group'], .form-group, .field");
-  const legend = group?.querySelector("legend");
-  if (legend) bits.push(legend.textContent?.trim() ?? "");
+  const group = el.closest("fieldset, [role='group'], .form-group, .field, .question");
+  if (group && isTightQuestionHost(group)) {
+    const legend = group.querySelector("legend, [role='heading'], label, .question-title");
+    if (legend && !el.contains(legend)) bits.push(cleanQuestionText(legend.textContent));
+  }
   return bits.filter(Boolean).join(" ").slice(0, 240);
+}
+
+function isTightQuestionHost(el: Element): boolean {
+  return !["form", "body", "html", "main", "section", "article", "div"].includes(el.tagName.toLowerCase()) ||
+    /form-group|form-field|field|question|application-question|listitem/i.test(
+      `${el.className} ${el.getAttribute("role") ?? ""} ${el.getAttribute("data-question") ?? ""}`,
+    );
+}
+
+/** Preceding nodes that are question copy, not another whole question card. */
+function isLocalQuestionNode(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+  if (["label", "legend", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "em"].includes(tag)) {
+    return true;
+  }
+  if (["input", "textarea", "select", "button", "form"].includes(tag)) return false;
+  // Reject wrappers that contain other controls — those belong to a different question.
+  if (el.querySelector("input, textarea, select, button, [role='listbox'], [role='textbox']")) return false;
+  const text = cleanQuestionText(el.textContent);
+  return looksLikeQuestionText(text) && text.length <= 200;
 }
 
 function optionLabel(el: Element): string {
@@ -192,7 +280,9 @@ function existingListitemKey(el: Element, root: ParentNode): string | null {
 
 function pushField(fields: DetectedField[], field: Omit<DetectedField, "signals">) {
   const next: DetectedField = { ...field, signals: "" };
+  next.label = humanQuestionLabel(next);
   next.signals = fieldSignals(next);
+  if (isNoiseFormField(next)) return;
   fields.push(next);
 }
 
@@ -205,7 +295,7 @@ function inventoryGoogleFormsListitems(root: ParentNode, seen: Set<string>): Det
     if (seen.has(key)) continue;
 
     const heading = item.querySelector('[role="heading"]');
-    const label = heading?.textContent?.trim() ?? labelFor(item, root);
+    const label = cleanQuestionText(heading?.textContent) || labelFor(item, root);
     const textBlob = `${label} ${item.textContent ?? ""}`.toLowerCase();
 
     const listbox = item.querySelector('[role="listbox"]');
@@ -459,7 +549,7 @@ export function inventoryFromDocument(root: ParentNode): DetectedField[] {
     const multiple = el.hasAttribute("multiple");
     const type = normalizeType(tag, inputType, multiple);
     const options = choiceOptions(el, inputType, root);
-    const field: DetectedField = {
+    const draft: DetectedField = {
       key,
       name,
       id,
@@ -480,7 +570,10 @@ export function inventoryFromDocument(root: ParentNode): DetectedField[] {
       autocomplete: attr(el, "autocomplete"),
       signals: "",
     };
-    field.signals = fieldSignals(field);
+    draft.label = humanQuestionLabel(draft);
+    draft.signals = fieldSignals(draft);
+    if (isNoiseFormField(draft)) continue;
+
     stamp(el, key);
     stampCard(el.closest('[role="listitem"]'), key);
     if ((inputType === "radio" || inputType === "checkbox") && key.startsWith("listitem:")) {
@@ -489,7 +582,7 @@ export function inventoryFromDocument(root: ParentNode): DetectedField[] {
         stamp(sibling, key);
       }
     }
-    fields.push(field);
+    fields.push(draft);
   }
 
   return fields;
