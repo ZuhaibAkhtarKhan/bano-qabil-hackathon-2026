@@ -1,13 +1,10 @@
-import { documentTypeSchema, DOCUMENT_TYPE_LABELS } from "@1apply/contracts";
-
+import { DeleteDocumentButton } from "@/components/app/delete-document-button";
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
+import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
-import { Field, FileUpload, Input, Select } from "@/components/ui/field";
 import { DocumentCard } from "@/components/ui/product-cards";
-import { formatDocumentType } from "@/lib/documents/versioning";
 import { uploadDocument } from "@/server/documents/actions";
 import { loadDocumentsWorkspace } from "@/server/workspace/queries";
 
@@ -24,31 +21,12 @@ export default async function DocumentsPage({
       <PageHeader
         eyebrow="Vault"
         title="Version history for kit files"
-        body="Your kit is the front door. This page keeps versions. CNIC and B-form types auto-attach when a posting asks for them."
+        body="Resumes use categories for your remembrance. Re-uploading the same category creates the next version by time. Deleting a file also removes extracted memory from that file."
       />
       <FlashBanner notice={notice} error={error} />
 
       <Card className="mt-8 max-w-xl p-6">
-        <form action={uploadDocument} className="grid gap-4">
-          <Field label="Label" htmlFor="document-label">
-            <Input id="document-label" name="label" required placeholder="General resume" />
-          </Field>
-          <Field label="Type" htmlFor="document-type">
-            <Select id="document-type" name="type" defaultValue="resume">
-              {documentTypeSchema.options.map((type) => (
-                <option key={type} value={type}>
-                  {DOCUMENT_TYPE_LABELS[type] ?? formatDocumentType(type)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <FileUpload
-            id="document-file"
-            label="File"
-            accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
-          />
-          <Button type="submit">Upload first version</Button>
-        </form>
+        <ResumeAwareUploadForm action={uploadDocument} mode="documents" submitLabel="Upload" />
       </Card>
 
       {documents.length === 0 ? (
@@ -56,14 +34,22 @@ export default async function DocumentsPage({
           <EmptyState
             eyebrow="Empty"
             title="No files yet"
-            body="Upload a resume or supporting document. Re-uploads create new versions without deleting history."
+            body="Upload a resume or supporting document. Same resume category appends versions without deleting history."
           />
         </div>
       ) : (
         <ul className="mt-8 grid max-w-2xl gap-4">
           {documents.map((document) => (
-            <li key={document.id}>
+            <li key={document.id} className="grid gap-2">
               <DocumentCard document={document} href={`/app/documents/${document.id}`} />
+              <div className="flex justify-end">
+                <DeleteDocumentButton
+                  documentId={document.id}
+                  returnTo="/app/documents"
+                  label="Delete document"
+                  confirmMessage={`Delete “${document.label}” permanently? Extracted facts from it will also be removed from Application Memory.`}
+                />
+              </div>
             </li>
           ))}
         </ul>

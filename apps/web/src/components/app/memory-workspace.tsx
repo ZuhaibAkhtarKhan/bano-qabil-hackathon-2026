@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { MemoryCategory } from "@1apply/contracts";
 import { MEMORY_SECTIONS, kitStatus } from "@1apply/domain";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
+import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
@@ -160,25 +161,38 @@ export function MemoryWorkspace({
         <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Repeat documents</p>
         <p className="mt-1 text-sm text-ink-muted">
           Resume {kit.hasResume ? "ready" : "missing"} · CNIC {kit.hasIdentityDocument ? "ready" : "missing"} · B-form{" "}
-          {kit.hasFamilyDocument ? "ready" : "missing"}. Matched labels auto-attach on new postings.
+          {kit.hasFamilyDocument ? "ready" : "missing"}. Resume categories are for your remembrance; matching scores every
+          resume with AI. Same category appends the next version by upload time.
         </p>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          {[
-            { type: "resume", label: "Primary resume", title: "Resume / CV" },
-            { type: "identity_document", label: "CNIC", title: "CNIC" },
-            { type: "family_document", label: "B-form", title: "B-form" },
-          ].map((slot) => (
-            <form key={slot.type} action={uploadMemoryDocument} className="grid gap-2 rounded-xl border border-sand/50 p-3">
-              {hiddenSection}
-              <input type="hidden" name="type" value={slot.type} />
-              <input type="hidden" name="label" value={slot.label} />
-              <p className="text-sm font-medium">{slot.title}</p>
-              <Input id={`kit-${slot.type}`} name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
-              <Button type="submit" variant="secondary" size="sm">
-                Upload
-              </Button>
-            </form>
-          ))}
+        <div className="mt-4 grid gap-4">
+          <div className="rounded-xl border border-sand/50 p-3">
+            <p className="text-sm font-medium">Resume / CV</p>
+            <div className="mt-3">
+              <ResumeAwareUploadForm
+                action={uploadMemoryDocument}
+                mode="kit"
+                hiddenFields={{ section: "personal" }}
+                submitLabel="Upload resume"
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {[
+              { type: "identity_document", label: "CNIC", title: "CNIC" },
+              { type: "family_document", label: "B-form", title: "B-form" },
+            ].map((slot) => (
+              <form key={slot.type} action={uploadMemoryDocument} className="grid gap-2 rounded-xl border border-sand/50 p-3">
+                {hiddenSection}
+                <input type="hidden" name="type" value={slot.type} />
+                <input type="hidden" name="label" value={slot.label} />
+                <p className="text-sm font-medium">{slot.title}</p>
+                <Input id={`kit-${slot.type}`} name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
+                <Button type="submit" variant="secondary" size="sm">
+                  Upload
+                </Button>
+              </form>
+            ))}
+          </div>
         </div>
       </Card>
 
@@ -503,26 +517,15 @@ export function MemoryWorkspace({
 
   const supportingPanel = (
     <div className="grid gap-8">
-      <form action={uploadMemoryDocument} className="grid gap-4 rounded-xl border border-sand/50 p-4">
-        {hiddenSection}
+      <div className="grid gap-4 rounded-xl border border-sand/50 p-4">
         <p className="text-sm font-medium">Upload resumes and supporting documents</p>
-        <Field label="Label" htmlFor="doc-label">
-          <Input id="doc-label" name="label" defaultValue="Resume" />
-        </Field>
-        <Field label="Type" htmlFor="doc-type">
-          <Select id="doc-type" name="type" defaultValue="resume">
-            <option value="resume">Resume / CV</option>
-            <option value="identity_document">CNIC / national ID</option>
-            <option value="family_document">B-form / family document</option>
-            <option value="transcript">Transcript</option>
-            <option value="other">Supporting document</option>
-          </Select>
-        </Field>
-        <Field label="Files (.txt, .md, .pdf, .docx — max 8 MB each)" htmlFor="doc-file">
-          <Input id="doc-file" name="file" type="file" multiple required accept=".txt,.md,.pdf,.docx" />
-        </Field>
-        <Button type="submit">Upload and extract</Button>
-      </form>
+        <ResumeAwareUploadForm
+          action={uploadMemoryDocument}
+          mode="supporting"
+          hiddenFields={{ section: "supporting" }}
+          submitLabel="Upload and extract"
+        />
+      </div>
 
       <section>
         <h3 className="text-sm font-medium">Your documents</h3>

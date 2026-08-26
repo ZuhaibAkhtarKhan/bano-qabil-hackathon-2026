@@ -68,6 +68,7 @@ export async function loadIntelligenceContext(
       .from("documents")
       .select("id, label, type, current_version_id")
       .eq("user_id", actor.userId)
+      // Score every resume/variant — category is remembrance-only and must not filter matching.
       .in("type", ["resume", "resume_variant"]),
   ]);
 

@@ -14,6 +14,7 @@ import {
   addDocumentVersion,
   assertOwnedVersion,
   createDocumentWithVersion,
+  deleteOwnedDocument,
   processDocumentVersion,
   setCurrentDocumentVersion,
 } from "@/server/documents/service";
@@ -22,6 +23,7 @@ import { runOwnedJob } from "@/infra/jobs/runner";
 import { reindexUserRetrievalCorpus } from "@/services/embeddings";
 import { recordAuditEvent } from "@/server/audit";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import { categoryFromFormData, ingestCategorizedResume, noticeForResumeUpload } from "@/server/resumes/upload";
 
 const DOCUMENTS = "/app/documents";
 
@@ -79,7 +81,7 @@ export async function uploadDocument(formData: FormData) {
   const label = String(formData.get("label") ?? "").trim();
   const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "other"));
 
-  if (!(file instanceof File) || !label || !typeParsed.success) {
+  if (!(file instanceof File) || !typeParsed.success) {
     redirectWith(DOCUMENTS, { error: "required" });
   }
 
@@ -88,6 +90,34 @@ export async function uploadDocument(formData: FormData) {
     upload = await readValidatedUpload(file);
   } catch (error) {
     redirectWith(DOCUMENTS, { error: mapUploadError(error) });
+  }
+
+  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
+    const category = categoryFromFormData(formData);
+    if (!category) redirectWith(DOCUMENTS, { error: "required" });
+    try {
+      const result = await ingestCategorizedResume({
+        supabase,
+        actor,
+        userId: user.id,
+        profileDisplayName: profile.display_name,
+        upload,
+        category,
+        source: "documents",
+      });
+      if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+    } catch {
+      redirectWith(DOCUMENTS, { error: "upload" });
+    }
+    revalidatePath("/app");
+    revalidatePath(DOCUMENTS);
+    revalidatePath("/app/memory");
+    revalidatePath("/app/resumes");
+    redirectWith(DOCUMENTS, { notice: await noticeForResumeUpload(upload) });
+  }
+
+  if (!label) {
+    redirectWith(DOCUMENTS, { error: "required" });
   }
 
   let documentId: string;
@@ -111,10 +141,6 @@ export async function uploadDocument(formData: FormData) {
   }
 
   await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId });
-
-  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
-    await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
-  }
 
   await runVersionJobs({
     supabase,
@@ -212,6 +238,34 @@ export async function setCurrentVersion(formData: FormData) {
   revalidatePath(DOCUMENTS);
   revalidatePath(documentPath(documentId));
   redirectWith(documentPath(documentId), { notice: "version_selected" });
+}
+
+export async function deleteDocument(formData: FormData) {
+  const { supabase, actor } = await requireWorkspace();
+  const documentId = String(formData.get("documentId") ?? "").trim();
+  const returnToRaw = String(formData.get("returnTo") ?? DOCUMENTS).trim();
+  const returnTo =
+    returnToRaw.startsWith("/app/documents") || returnToRaw.startsWith("/app/resumes") || returnToRaw.startsWith("/app/memory")
+      ? returnToRaw
+      : DOCUMENTS;
+
+  if (!documentId) redirectWith(returnTo, { error: "required" });
+
+  try {
+    await deleteOwnedDocument(supabase, actor, documentId);
+    await recordAuditEvent(supabase, "document.deleted", { documentId });
+  } catch (error) {
+    logError("documents.delete_failed", { documentId, error: String(error) });
+    redirectWith(returnTo, { error: "save" });
+  }
+
+  revalidatePath("/app");
+  revalidatePath(DOCUMENTS);
+  revalidatePath("/app/resumes");
+  revalidatePath("/app/memory");
+  revalidatePath("/app/applications");
+  revalidatePath("/app/needs-you");
+  redirectWith(returnTo, { notice: "document_deleted" });
 }
 
 export async function downloadDocumentVersion(formData: FormData) {

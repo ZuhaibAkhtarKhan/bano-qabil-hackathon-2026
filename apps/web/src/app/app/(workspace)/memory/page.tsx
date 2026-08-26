@@ -32,7 +32,7 @@ export default async function MemoryPage({
       <PageHeader
         eyebrow="Your kit"
         title="Who you are — reused on every posting"
-        body="Confirm name, university, and education. Upload CNIC, B-form, and resume once. Suggestions later are optional. Extra sections below are for details, not a second home."
+        body="Confirm name, university, and education. Upload CNIC, B-form, and categorized resumes once — same category later becomes the next version. Suggestions later are optional."
       />
       {remind === "kit" && kit.missing.length > 0 ? (
         <div className="mt-6">

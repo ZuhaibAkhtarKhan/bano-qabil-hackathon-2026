@@ -120,6 +120,14 @@ export {
 } from "./kit";
 
 export {
+  RESUME_CATEGORY_PRESETS,
+  resolveResumeCategory,
+  resumeCategoryDisplayLabel,
+  type ResolvedResumeCategory,
+  type ResumeCategoryPresetKey,
+} from "./resume-categories";
+
+export {
   deduplicateDiscoveries,
   emptyDiscoveryCriteria,
   filterDiscoveries,

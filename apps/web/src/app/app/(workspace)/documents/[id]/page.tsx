@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { DeleteDocumentButton } from "@/components/app/delete-document-button";
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,14 @@ export default async function DocumentDetailPage({
         eyebrow="Document"
         title={document.label}
         body={`${formatDocumentType(document.type)} · ${versions.length} version${versions.length === 1 ? "" : "s"} retained`}
+        actions={
+          <DeleteDocumentButton
+            documentId={document.id}
+            returnTo="/app/documents"
+            label="Delete document"
+            confirmMessage={`Delete “${document.label}” permanently? Extracted facts from it will also be removed from Application Memory.`}
+          />
+        }
       />
       <p className="mt-2 text-sm">
         <Link href="/app/documents" className="text-teal underline">

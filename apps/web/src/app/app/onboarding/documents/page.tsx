@@ -4,12 +4,14 @@ import { uploadOnboardingKitDocument } from "@/server/onboarding/upload";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { loadOnboardingState } from "@/lib/profile";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
+import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
 import { Button } from "@/components/ui/button";
 import { Field, FileUpload, Input } from "@/components/ui/field";
 import { Notice } from "@/components/ui/feedback";
 import { ERRORS, FLASH } from "@/server/http/flash";
 import { kitStatus } from "@1apply/domain";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
+import { loadResumeCatalog } from "@/server/resumes/queries";
 
 export default async function OnboardingDocumentsPage({
   searchParams,
@@ -28,12 +30,13 @@ export default async function OnboardingDocumentsPage({
     educationSummary: prefs.educationSummary,
     documents: state?.documents ?? [],
   });
+  const resumeCatalog = await loadResumeCatalog().catch(() => []);
 
   return (
     <OnboardingShell
       eyebrow="Onboarding"
       title="Your kit"
-      body="Upload once: resume, CNIC, and B-form. 1-Apply reuses them on later postings. Skip only if you do not have a file yet — we will ask again the next time you sign in."
+      body="Upload once: resume by category, CNIC, and B-form. Re-uploading the same category creates the next version automatically."
       step="documents"
     >
       {noticeMessage ? (
@@ -53,20 +56,24 @@ export default async function OnboardingDocumentsPage({
       </p>
 
       <div className="grid gap-4">
-        <form action={uploadOnboardingKitDocument} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
-          <input type="hidden" name="type" value="resume" />
+        <div className="grid gap-4 rounded-2xl border border-line bg-white p-6">
           <h2 className="text-base font-medium">Resume / CV</h2>
-          <Field label="Label" htmlFor="resume-label">
-            <Input id="resume-label" name="label" defaultValue="Primary resume" required />
-          </Field>
-          <FileUpload
-            id="resume-file"
-            label="Resume file"
-            accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
-            hint="TXT or MD extracts education. PDF and DOCX are stored even when text cannot be read."
-          />
-          <Button type="submit">Upload resume</Button>
-        </form>
+          <p className="text-sm text-ink-muted">
+            Pick a category to remember this resume. Matching still scores every resume with AI — category is not a job
+            filter.
+          </p>
+          <ResumeAwareUploadForm action={uploadOnboardingKitDocument} mode="kit" submitLabel="Upload resume" />
+          {resumeCatalog.length > 0 ? (
+            <ul className="mt-2 grid gap-2 text-sm text-ink-muted">
+              {resumeCatalog.map((group) => (
+                <li key={group.documentId}>
+                  {group.categoryLabel} · current {group.currentVersionLabel ?? "v1"} · {group.versions.length} version
+                  {group.versions.length === 1 ? "" : "s"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
 
         <form action={uploadOnboardingKitDocument} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
           <input type="hidden" name="type" value="identity_document" />

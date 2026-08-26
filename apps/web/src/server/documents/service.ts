@@ -232,6 +232,89 @@ export async function setCurrentDocumentVersion(
     .eq("user_id", actor.userId);
 }
 
+/**
+ * Fully remove a vault document and every memory row derived from it.
+ * Storage objects, versions, resume sidecar, application attachments, and
+ * extracted evidence/facts are purged so deleted files never linger in Memory.
+ */
+export async function deleteOwnedDocument(
+  supabase: SupabaseClient,
+  actor: Actor,
+  documentId: string,
+): Promise<void> {
+  await assertOwnedDocument(supabase, actor, documentId);
+
+  const { data: versions } = await supabase
+    .from("document_versions")
+    .select("id, storage_path")
+    .eq("document_id", documentId)
+    .eq("user_id", actor.userId);
+
+  const versionIds = (versions ?? []).map((row) => String(row.id));
+  const storagePaths = (versions ?? [])
+    .map((row) => String(row.storage_path ?? ""))
+    .filter(Boolean);
+
+  const [{ data: evidenceRows }, { data: factRows }] = await Promise.all([
+    supabase
+      .from("evidence_items")
+      .select("id")
+      .eq("user_id", actor.userId)
+      .eq("source_document_id", documentId),
+    supabase
+      .from("profile_facts")
+      .select("id")
+      .eq("user_id", actor.userId)
+      .eq("source_document_id", documentId),
+  ]);
+
+  const evidenceIds = (evidenceRows ?? []).map((row) => String(row.id));
+  const factIds = (factRows ?? []).map((row) => String(row.id));
+
+  if (evidenceIds.length > 0) {
+    await supabase.from("answer_evidence").delete().in("evidence_id", evidenceIds);
+  }
+  await supabase.from("evidence_items").delete().eq("user_id", actor.userId).eq("source_document_id", documentId);
+
+  if (factIds.length > 0) {
+    const { data: conflicts } = await supabase
+      .from("memory_conflicts")
+      .select("id, fact_ids")
+      .eq("user_id", actor.userId);
+    const conflictIds = (conflicts ?? [])
+      .filter((row) => {
+        const ids = Array.isArray(row.fact_ids) ? row.fact_ids.map(String) : [];
+        return ids.some((id) => factIds.includes(id));
+      })
+      .map((row) => String(row.id));
+    if (conflictIds.length > 0) {
+      await supabase.from("memory_conflicts").delete().eq("user_id", actor.userId).in("id", conflictIds);
+    }
+  }
+  await supabase.from("profile_facts").delete().eq("user_id", actor.userId).eq("source_document_id", documentId);
+
+  await supabase.from("application_documents").delete().eq("user_id", actor.userId).eq("document_id", documentId);
+  await supabase.from("resume_matches").delete().eq("document_id", documentId);
+
+  await supabase
+    .from("documents")
+    .update({ current_version_id: null })
+    .eq("id", documentId)
+    .eq("user_id", actor.userId);
+
+  if (versionIds.length > 0) {
+    await supabase.from("document_versions").delete().eq("user_id", actor.userId).in("id", versionIds);
+  }
+
+  const { error } = await supabase.from("documents").delete().eq("id", documentId).eq("user_id", actor.userId);
+  if (error) throw new Error("DOCUMENT_DELETE_FAILED");
+
+  if (storagePaths.length > 0) {
+    const bucket = loadAppConfig().storageBucket;
+    await supabase.storage.from(bucket).remove(storagePaths);
+  }
+}
+
 export async function processDocumentVersion(input: {
   supabase: SupabaseClient;
   userId: string;

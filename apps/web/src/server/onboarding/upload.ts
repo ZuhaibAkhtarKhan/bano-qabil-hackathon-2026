@@ -12,6 +12,7 @@ import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attac
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { recordAuditEvent } from "@/server/audit";
+import { categoryFromFormData, ingestCategorizedResume, noticeForResumeUpload } from "@/server/resumes/upload";
 
 const DOCUMENTS = "/app/onboarding/documents";
 
@@ -38,6 +39,32 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
     });
   }
 
+  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
+    const category = categoryFromFormData(formData);
+    if (!category) redirectWith(DOCUMENTS, { error: "required" });
+
+    try {
+      const result = await ingestCategorizedResume({
+        supabase,
+        actor,
+        userId: user.id,
+        profileDisplayName: profile.display_name,
+        upload,
+        category,
+        source: "onboarding",
+      });
+      if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+    } catch {
+      redirectWith(DOCUMENTS, { error: "upload" });
+    }
+
+    revalidatePath("/app/onboarding");
+    revalidatePath("/app/memory");
+    revalidatePath("/app/documents");
+    revalidatePath("/app/resumes");
+    redirectWith(DOCUMENTS, { notice: await noticeForResumeUpload(upload) });
+  }
+
   let documentId: string;
   let versionId: string;
   try {
@@ -59,10 +86,6 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
   }
 
   await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId, source: "onboarding" });
-
-  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
-    await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
-  }
 
   await runOwnedJob(
     supabase,

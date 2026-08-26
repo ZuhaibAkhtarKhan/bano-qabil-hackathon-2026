@@ -30,6 +30,7 @@ export const FLASH = {
   already_submitted: "This application already has a frozen snapshot.",
   status_updated: "Application status updated.",
   deleted: "Removed from Application Memory.",
+  document_deleted: "Document deleted. Extracted memory from that file was removed too.",
   conflict_resolved: "Conflict resolved. The chosen value is verified; other sources were rejected.",
   conflict_detected: "New facts were extracted. Review conflicts before verifying.",
   version_selected: "Selected version is now the latest for this document.",

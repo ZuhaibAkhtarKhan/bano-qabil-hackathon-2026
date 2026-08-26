@@ -18,6 +18,7 @@ import { extractDocumentText } from "@/lib/documents/extract-text";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { mergeWorkspacePreferences } from "@/lib/workspace-preferences";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import { categoryFromFormData, ingestCategorizedResume, noticeForResumeUpload } from "@/server/resumes/upload";
 
 const MEMORY = "/app/memory";
 
@@ -348,7 +349,42 @@ export async function uploadMemoryDocument(formData: FormData) {
 
   if (files.length === 0) redirectWith(sectionReturn(formData) || `${MEMORY}?section=supporting`, { error: "required" });
 
-  let notice: "uploaded" | "extracted" | "binary_stored" | "conflict_detected" = "uploaded";
+  let notice: "uploaded" | "extracted" | "binary_stored" | "conflict_detected" | "duplicate_file" = "uploaded";
+
+  // Resumes always go through the categorized ingest so onboarding + memory stay in sync.
+  if (type === "resume" || type === "resume_variant") {
+    const category = categoryFromFormData(formData);
+    if (!category) redirectWith(sectionReturn(formData), { error: "required" });
+    for (const file of files) {
+      let upload;
+      try {
+        upload = await readValidatedUpload(file);
+      } catch (error) {
+        redirectWith(sectionReturn(formData), {
+          error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload",
+        });
+      }
+      try {
+        const result = await ingestCategorizedResume({
+          supabase,
+          actor,
+          userId: user.id,
+          profileDisplayName: profile.display_name,
+          upload,
+          category,
+          source: "memory",
+        });
+        if (result.duplicate) notice = "duplicate_file";
+        else notice = await noticeForResumeUpload(upload);
+      } catch {
+        redirectWith(sectionReturn(formData), { error: "upload" });
+      }
+    }
+    revalidatePath(MEMORY);
+    revalidatePath("/app/documents");
+    revalidatePath("/app/resumes");
+    redirectWith(sectionReturn(formData), { notice });
+  }
 
   for (const [index, file] of files.entries()) {
     let upload;
@@ -399,9 +435,6 @@ export async function uploadMemoryDocument(formData: FormData) {
       status: "processing",
     });
     await supabase.from("documents").update({ current_version_id: versionId }).eq("id", documentId);
-    if (type === "resume" || type === "resume_variant") {
-      await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
-    }
 
     const extractedText = await extractDocumentText(upload.buffer, upload.mimeType);
     if (extractedText) notice = "extracted";
