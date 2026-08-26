@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { dashboardBuckets } from "@/lib/dashboard";
 import { SEMANTIC_STATUS, answerSemanticStatus, evidenceSemanticStatus } from "@/lib/status";
 import { WORKSPACE_NAV } from "@/components/app/nav";
+import { currentGuideStep, nextGuideSteps } from "@1apply/domain";
 import type { ApplicationListRow } from "@/server/types";
 
 function application(partial: Partial<ApplicationListRow> & Pick<ApplicationListRow, "id" | "status">): ApplicationListRow {
@@ -94,5 +95,19 @@ describe("workspace navigation", () => {
       "/app/notifications",
       "/app/settings",
     ]);
+  });
+});
+
+describe("skippable go-here guide", () => {
+  it("orders kit, posting, packets, then optional settings", () => {
+    const steps = nextGuideSteps({
+      kitMissing: ["CNIC"],
+      opportunityCount: 0,
+      applicationCount: 0,
+      needsYouCount: 0,
+      prepareAndSendIfSilent: false,
+    });
+    expect(steps.map((step) => step.id)).toEqual(["kit", "posting"]);
+    expect(currentGuideStep(steps)?.cta).toBe("Go to Your kit");
   });
 });

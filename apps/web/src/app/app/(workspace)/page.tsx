@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 
+import { currentGuideStep, nextGuideSteps } from "@1apply/domain";
+
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
+import { WorkspaceGuideCard } from "@/components/app/workspace-guide";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, MetricCard } from "@/components/ui/card";
 import { Timeline } from "@/components/ui/data";
@@ -33,9 +36,18 @@ function Section({
 }
 
 export default async function DashboardPage() {
-  const { profile, kit, packets, notifications, applications, prepareAndSendIfSilent } = await loadDashboard();
+  const { profile, kit, packets, notifications, applications, opportunities, prepareAndSendIfSilent, guideDismissed } =
+    await loadDashboard();
   const lanes = groupPackets(packets);
   const submitted = applications.filter((row) => row.status === "submitted");
+  const guideSteps = nextGuideSteps({
+    kitMissing: kit.missing,
+    opportunityCount: opportunities.length,
+    applicationCount: applications.length,
+    needsYouCount: lanes.needsYou.length,
+    prepareAndSendIfSilent,
+  });
+  const showKitCard = (!kit.ready || kit.missing.length > 0) && (guideDismissed || currentGuideStep(guideSteps)?.id !== "kit");
 
   return (
     <WorkspaceMain>
@@ -46,7 +58,9 @@ export default async function DashboardPage() {
         actions={<ButtonLink href="/app/opportunities">Add a posting</ButtonLink>}
       />
 
-      {!kit.ready || kit.missing.length > 0 ? (
+      <WorkspaceGuideCard dismissed={guideDismissed} steps={guideSteps} />
+
+      {showKitCard ? (
         <Card className="mt-8 p-6">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Your kit</p>
           <h2 className="mt-1 font-display text-2xl">Upload once, reuse everywhere</h2>

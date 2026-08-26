@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { experienceKindSchema, documentTypeSchema } from "@1apply/contracts";
 import { categoryFromKind, memoryFactKey } from "@1apply/domain";
@@ -93,6 +94,15 @@ export async function updatePrepareAndSend(formData: FormData) {
   revalidatePath("/app");
   revalidatePath("/app/settings");
   redirectWith("/app/settings", { notice: "saved" });
+}
+
+export async function skipWorkspaceGuide() {
+  const { profile, supabase } = await requireWorkspace();
+  const preferences = mergeWorkspacePreferences(profile.preferences, { guideDismissed: true });
+  const { error } = await supabase.from("profiles").update({ preferences }).eq("id", profile.id);
+  if (error) redirectWith("/app", { error: "save" });
+  revalidatePath("/app");
+  redirect("/app");
 }
 
 export async function addMemoryEvidence(formData: FormData) {

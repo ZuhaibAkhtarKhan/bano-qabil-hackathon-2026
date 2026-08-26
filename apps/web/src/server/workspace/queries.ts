@@ -2,7 +2,9 @@ import { computeProfileCompleteness } from "@1apply/contracts";
 import {
   classifyPendingPacket,
   computeDeadlineInfo,
+  currentGuideStep,
   kitStatus,
+  nextGuideSteps,
   packetAnswerText,
   packetSummary,
   requiredDocumentCovered,
@@ -103,6 +105,41 @@ export async function loadDashboard() {
     kit,
     packets,
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
+    guideDismissed: prefs.guideDismissed,
+  };
+}
+
+export async function loadWorkspaceGuide() {
+  const { profile, supabase } = await requireWorkspace();
+  const prefs = parseWorkspacePreferences(profile.preferences);
+  if (prefs.guideDismissed) {
+    return { dismissed: true as const, steps: [], next: null };
+  }
+
+  const [{ data: kitDocuments }, { count: opportunityCount }, { count: applicationCount }] = await Promise.all([
+    supabase.from("documents").select("type, label").eq("user_id", profile.id),
+    supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+    supabase.from("applications").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+  ]);
+
+  const kit = kitStatus({
+    displayName: profile.display_name,
+    university: prefs.university,
+    educationSummary: prefs.educationSummary,
+    documents: (kitDocuments ?? []).map((row) => ({ type: String(row.type), label: String(row.label) })),
+  });
+  const steps = nextGuideSteps({
+    kitMissing: kit.missing,
+    opportunityCount: opportunityCount ?? 0,
+    applicationCount: applicationCount ?? 0,
+    needsYouCount: 0,
+    prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
+  });
+
+  return {
+    dismissed: false as const,
+    steps,
+    next: currentGuideStep(steps),
   };
 }
 

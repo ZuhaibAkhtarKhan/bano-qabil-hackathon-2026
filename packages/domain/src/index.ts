@@ -91,6 +91,12 @@ export {
 } from "./deadline-intelligence";
 
 export {
+  currentGuideStep,
+  nextGuideSteps,
+  type GuideStep,
+} from "./guide";
+
+export {
   classifyPendingPacket,
   classifyRequiredDocumentLabel,
   classifyVaultDocument,
