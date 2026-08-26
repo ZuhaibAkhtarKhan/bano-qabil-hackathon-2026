@@ -3,9 +3,11 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, HelpCircle, Search } from "lucide-react";
+import { currentGuideStep, type GuideStep } from "@1apply/domain";
 
 import { useRealtime } from "@/components/app/realtime-provider";
-import { ButtonLink } from "@/components/ui/button";
+import { skipWorkspaceGuide } from "@/server/memory/actions";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { cn } from "@/lib/cn";
 
@@ -34,6 +36,32 @@ export type DashboardApplicationRow = {
   sourceLabel: string | null;
 };
 
+export type DashboardKitProps = {
+  ready: boolean;
+  missing: string[];
+  showCard: boolean;
+};
+
+export type DashboardGuideProps = {
+  dismissed: boolean;
+  steps: GuideStep[];
+};
+
+export type DashboardLaneProps = {
+  needsYou: number;
+  sendsAtDeadline: number;
+  waitingHost: number;
+  prepareAndSendIfSilent: boolean;
+  needsYouPreview: Array<{
+    id: string;
+    title: string;
+    host: string;
+    deadlineLabel: string;
+    summary: string;
+    href: string;
+  }>;
+};
+
 const CARD_TONES = {
   sand: "border-amber-200/80 bg-[#faf6e8]",
   mint: "border-emerald-200/80 bg-[#eef8f1]",
@@ -60,9 +88,17 @@ const FILTERS = [
 export function DashboardHome({
   matches,
   applications,
+  displayName = null,
+  kit,
+  guide,
+  lanes,
 }: {
   matches: DashboardMatch[];
   applications: DashboardApplicationRow[];
+  displayName?: string | null;
+  kit?: DashboardKitProps;
+  guide?: DashboardGuideProps;
+  lanes?: DashboardLaneProps;
 }) {
   const { unreadCount } = useRealtime();
   const [query, setQuery] = useState("");
@@ -72,6 +108,8 @@ export function DashboardHome({
   const targetProgressRef = useRef(0);
   const smoothProgressRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+  const guideNext = guide && !guide.dismissed ? currentGuideStep(guide.steps) : null;
+  const guideLater = guideNext && guide ? guide.steps.filter((step) => step.id !== guideNext.id) : [];
 
   useLayoutEffect(() => {
     const node = matchesRef.current;
@@ -129,7 +167,12 @@ export function DashboardHome({
   return (
     <div className="min-h-full bg-white">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-6 lg:px-8">
-        <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
+          {displayName ? (
+            <p className="truncate text-xs text-ink-muted">Welcome back, {displayName}</p>
+          ) : null}
+        </div>
         <label className="mx-auto hidden max-w-md flex-1 sm:block">
           <span className="sr-only">Search applications</span>
           <span className="relative block">
@@ -144,6 +187,9 @@ export function DashboardHome({
           </span>
         </label>
         <div className="ml-auto flex items-center gap-2">
+          <ButtonLink href="/app/opportunities" size="sm">
+            Add a posting
+          </ButtonLink>
           <Link
             href="/app/notifications"
             className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
@@ -165,13 +211,118 @@ export function DashboardHome({
       </header>
 
       <div className="space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+        {guideNext ? (
+          <section className="rounded-2xl border border-line bg-[#fafbf8] p-5" aria-labelledby="guide-heading">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Next step</p>
+            <h2 id="guide-heading" className="mt-1 text-base font-semibold tracking-tight text-ink">
+              {guideNext.title}
+            </h2>
+            <p className="mt-1.5 text-sm text-ink-muted">{guideNext.body}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <ButtonLink href={guideNext.href} size="sm">
+                {guideNext.cta}
+              </ButtonLink>
+              <form action={skipWorkspaceGuide}>
+                <Button type="submit" variant="ghost" size="sm">
+                  Skip tutorial
+                </Button>
+              </form>
+            </div>
+            {guideLater.length > 0 ? (
+              <ol className="mt-4 grid gap-1.5 text-xs text-ink-muted">
+                {guideLater.map((step, index) => (
+                  <li key={step.id} className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span>
+                      Then {index + 2}: {step.title}
+                      {step.optional ? " (optional)" : ""}
+                    </span>
+                    <Link className="font-medium text-ink hover:underline" href={step.href}>
+                      {step.cta}
+                    </Link>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </section>
+        ) : null}
+
+        {kit?.showCard ? (
+          <section className="rounded-2xl border border-amber-200/80 bg-[#faf6e8] p-5" aria-labelledby="kit-heading">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Your kit</p>
+            <h2 id="kit-heading" className="mt-1 text-base font-semibold tracking-tight text-ink">
+              Upload once, reuse everywhere
+            </h2>
+            <p className="mt-1.5 text-sm text-ink-muted">
+              Name, university, resume, CNIC, and B-form live in one place. Missing:{" "}
+              {kit.missing.join(", ") || "nothing"}.
+            </p>
+            <div className="mt-4">
+              <ButtonLink href="/app/memory" size="sm">
+                Open your kit
+              </ButtonLink>
+            </div>
+          </section>
+        ) : null}
+
+        {lanes ? (
+          <section aria-labelledby="packet-lanes-heading">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="packet-lanes-heading" className="text-base font-semibold tracking-tight text-ink">
+                Packets needing attention
+              </h2>
+              <Link href="/app/needs-you" className="text-sm font-medium text-ink-muted hover:text-ink">
+                Open Need You →
+              </Link>
+            </div>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Needs you</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.needsYou}</dd>
+                <p className="mt-1 text-xs text-ink-muted">Missing facts, docs, or answers</p>
+              </div>
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Sends at deadline</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.sendsAtDeadline}</dd>
+                <p className="mt-1 text-xs text-ink-muted">
+                  {lanes.prepareAndSendIfSilent
+                    ? "Silence will freeze the packet"
+                    : "Turn on in Settings to auto-freeze"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Waiting on host</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.waitingHost}</dd>
+                <p className="mt-1 text-xs text-ink-muted">CAPTCHA, signature, or payment</p>
+              </div>
+            </dl>
+            {lanes.needsYouPreview.length > 0 ? (
+              <ul className="mt-3 grid gap-2">
+                {lanes.needsYouPreview.map((packet) => (
+                  <li key={packet.id}>
+                    <Link
+                      href={packet.href}
+                      className="block rounded-2xl border border-line bg-white px-4 py-3 hover:bg-[#fafbf8]/60"
+                    >
+                      <p className="text-sm font-medium text-ink">{packet.title}</p>
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        {packet.host} · {packet.deadlineLabel}
+                      </p>
+                      <p className="mt-1 text-xs text-ink-muted">{packet.summary}</p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
+
         <section ref={matchesRef} aria-labelledby="top-matches-heading">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 id="top-matches-heading" className="text-base font-semibold tracking-tight text-ink">
               Top job matches
             </h2>
             <Link href="/app/opportunities" className="text-sm font-medium text-ink-muted hover:text-ink">
-              Browse jobs →
+              Add a posting →
             </Link>
           </div>
 
@@ -180,8 +331,8 @@ export function DashboardHome({
               <EmptyState
                 eyebrow="Matches"
                 title="No opportunities yet"
-                body="Save a page from the extension or add an opportunity here — matches and applications show up in one pipeline."
-                actions={<ButtonLink href="/app/opportunities">Add opportunity</ButtonLink>}
+                body="Save a page from the extension or add a posting here — matches and applications show up in one pipeline."
+                actions={<ButtonLink href="/app/opportunities">Add a posting</ButtonLink>}
               />
             </div>
           ) : (
@@ -247,12 +398,12 @@ export function DashboardHome({
                 title={applications.length === 0 ? "No applications yet" : "No matches for this filter"}
                 body={
                   applications.length === 0
-                    ? "Save a job page from the extension or create an opportunity on the site. Both land in this list."
+                    ? "Save a job page from the extension or add a posting on the site. Both land in this list."
                     : "Try another filter or clear the search."
                 }
                 actions={
                   applications.length === 0 ? (
-                    <ButtonLink href="/app/opportunities">Add opportunity</ButtonLink>
+                    <ButtonLink href="/app/opportunities">Add a posting</ButtonLink>
                   ) : undefined
                 }
               />

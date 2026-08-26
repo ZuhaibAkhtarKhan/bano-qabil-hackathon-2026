@@ -27,7 +27,7 @@ describe("workspace guide", () => {
     expect(currentGuideStep(steps)).toMatchObject({ id: "posting", href: "/app/opportunities" });
   });
 
-  it("points at applications when packets need the user", () => {
+  it("points at Need You when packets need the user", () => {
     const steps = nextGuideSteps({
       kitMissing: [],
       opportunityCount: 1,
@@ -35,7 +35,7 @@ describe("workspace guide", () => {
       needsYouCount: 2,
       prepareAndSendIfSilent: true,
     });
-    expect(currentGuideStep(steps)).toMatchObject({ id: "packet", href: "/app/applications" });
+    expect(currentGuideStep(steps)).toMatchObject({ id: "packet", href: "/app/needs-you" });
     expect(steps.some((step) => step.id === "settings")).toBe(false);
   });
 });

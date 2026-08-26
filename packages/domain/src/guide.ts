@@ -41,8 +41,8 @@ export function nextGuideSteps(input: {
         input.needsYouCount === 1
           ? "1 packet is missing facts, documents, or answers."
           : `${input.needsYouCount} packets are missing facts, documents, or answers.`,
-      href: "/app/applications",
-      cta: "Go to Applications",
+      href: "/app/needs-you",
+      cta: "Go to Need You",
     });
   }
   if (!input.prepareAndSendIfSilent && input.applicationCount > 0) {
