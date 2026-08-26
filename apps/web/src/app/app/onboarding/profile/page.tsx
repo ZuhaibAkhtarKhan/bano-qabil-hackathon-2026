@@ -1,5 +1,6 @@
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { loadOnboardingProfileDetails } from "@/lib/profile";
+import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
@@ -18,13 +19,31 @@ export default async function OnboardingProfilePage({
   return (
     <OnboardingShell
       eyebrow="Onboarding"
-      title="Create your profile"
-      body="Start with the basics. Resume extraction can fill the rest — you will review before anything counts as verified."
+      title="Name, university, education"
+      body="Confirm the facts that repeat on every form. Resume extraction can fill the rest — you will review before anything counts as verified."
       step="profile"
     >
       <form action={saveOnboardingProfile} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
         <Field label="Full name" htmlFor="displayName" hint="Required to continue.">
           <Input id="displayName" name="displayName" defaultValue={profile?.display_name ?? ""} required />
+        </Field>
+        <Field label="University" htmlFor="university" hint="Required. Used on every posting.">
+          <Input
+            id="university"
+            name="university"
+            defaultValue={parseWorkspacePreferences(state.profile.preferences).university}
+            placeholder="NUST"
+            required
+          />
+        </Field>
+        <Field label="Education" htmlFor="educationSummary" hint="Required. Degree and year, for example BS Computer Science, 2026.">
+          <Input
+            id="educationSummary"
+            name="educationSummary"
+            defaultValue={parseWorkspacePreferences(state.profile.preferences).educationSummary}
+            placeholder="BS Computer Science, 2026"
+            required
+          />
         </Field>
         <Field label="Headline" htmlFor="headline">
           <Input id="headline" name="headline" defaultValue={profile?.headline ?? ""} placeholder="Full-stack intern · retrieval systems" />
@@ -59,14 +78,14 @@ export default async function OnboardingProfilePage({
         </Field>
         {error === "required" ? (
           <p className="text-sm text-rose-700" role="alert">
-            Name is required before you can continue.
+            Name, university, and education are required before you can continue.
           </p>
         ) : error === "save" ? (
           <p className="text-sm text-rose-700" role="alert">
             Could not save your profile. Try again.
           </p>
         ) : null}
-        <Button type="submit">Continue to documents</Button>
+        <Button type="submit">Continue to your kit</Button>
       </form>
       <p className="mt-4 text-xs text-ink-muted">
         Signed in as {state.profile.email}. Education, projects, experience, and skills can be extracted from your resume on the next step.

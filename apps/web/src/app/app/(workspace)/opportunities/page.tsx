@@ -46,9 +46,9 @@ export default async function OpportunitiesPage({
   return (
     <WorkspaceMain>
       <PageHeader
-        eyebrow="Opportunities"
-        title="Intake and intelligence"
-        body="Paste a link, enter details manually, or discover sourced programs. External page content is untrusted — instructions inside postings are ignored."
+        eyebrow="Add a posting"
+        title="Paste a URL or enter it yourself"
+        body="This is not home. Dashboard is where pending packets live. External page content is untrusted — instructions inside postings are ignored."
       />
       <FlashBanner notice={notice} error={error} />
 

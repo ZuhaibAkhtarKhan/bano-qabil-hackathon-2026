@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
-import { experienceKindSchema } from "@1apply/contracts";
+import { experienceKindSchema, documentTypeSchema } from "@1apply/contracts";
 import { categoryFromKind, memoryFactKey } from "@1apply/domain";
 
 import { documentStoragePath } from "@/infra/storage/documents";
@@ -10,11 +11,13 @@ import { loadAppConfig } from "@/config/env";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/infra/jobs/runner";
-import { processDocumentVersion } from "@/server/documents/service";
+import { insertOwnedDocument, processDocumentVersion } from "@/server/documents/service";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { recordAuditEvent } from "@/server/audit";
 import { extractDocumentText } from "@/lib/documents/extract-text";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
+import { mergeWorkspacePreferences } from "@/lib/workspace-preferences";
+import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 
 const MEMORY = "/app/memory";
 
@@ -41,6 +44,12 @@ export async function updateIdentity(formData: FormData) {
   const displayName = String(formData.get("displayName") ?? "").trim();
   if (!displayName) redirectWith(sectionReturn(formData), { error: "required" });
 
+  const { data: existing } = await supabase.from("profiles").select("preferences").eq("id", profile.id).maybeSingle();
+  const preferences = mergeWorkspacePreferences((existing?.preferences as Record<string, unknown> | null) ?? {}, {
+    university: String(formData.get("university") ?? "").trim(),
+    educationSummary: String(formData.get("educationSummary") ?? "").trim(),
+  });
+
   const { error } = await supabase
     .from("profiles")
     .update({
@@ -55,6 +64,7 @@ export async function updateIdentity(formData: FormData) {
       linkedin_url: String(formData.get("linkedinUrl") ?? "").trim() || null,
       github_url: String(formData.get("githubUrl") ?? "").trim() || null,
       portfolio_url: String(formData.get("portfolioUrl") ?? "").trim() || null,
+      preferences,
     })
     .eq("id", profile.id);
 
@@ -73,6 +83,26 @@ export async function updateTimezone(formData: FormData) {
   revalidatePath("/app");
   revalidatePath("/app/settings");
   redirectWith("/app/settings", { notice: "saved" });
+}
+
+export async function updatePrepareAndSend(formData: FormData) {
+  const { profile, supabase } = await requireWorkspace();
+  const enabled = String(formData.get("prepareAndSendIfSilent") ?? "") === "on";
+  const preferences = mergeWorkspacePreferences(profile.preferences, { prepareAndSendIfSilent: enabled });
+  const { error } = await supabase.from("profiles").update({ preferences }).eq("id", profile.id);
+  if (error) redirectWith("/app/settings", { error: "save" });
+  revalidatePath("/app");
+  revalidatePath("/app/settings");
+  redirectWith("/app/settings", { notice: "saved" });
+}
+
+export async function skipWorkspaceGuide() {
+  const { profile, supabase } = await requireWorkspace();
+  const preferences = mergeWorkspacePreferences(profile.preferences, { guideDismissed: true });
+  const { error } = await supabase.from("profiles").update({ preferences }).eq("id", profile.id);
+  if (error) redirectWith("/app", { error: "save" });
+  revalidatePath("/app");
+  redirect("/app");
 }
 
 export async function addMemoryEvidence(formData: FormData) {
@@ -313,9 +343,10 @@ export async function uploadMemoryDocument(formData: FormData) {
     .getAll("file")
     .filter((entry): entry is File => entry instanceof File && entry.size > 0);
   const labelBase = String(formData.get("label") ?? "Supporting document").trim() || "Supporting document";
-  const type = String(formData.get("type") ?? "resume");
+  const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "resume"));
+  const type = typeParsed.success ? typeParsed.data : "other";
 
-  if (files.length === 0) redirectWith(`${MEMORY}?section=supporting`, { error: "required" });
+  if (files.length === 0) redirectWith(sectionReturn(formData) || `${MEMORY}?section=supporting`, { error: "required" });
 
   let notice: "uploaded" | "extracted" | "binary_stored" | "conflict_detected" = "uploaded";
 
@@ -324,10 +355,9 @@ export async function uploadMemoryDocument(formData: FormData) {
     try {
       upload = await readValidatedUpload(file);
     } catch (error) {
-      redirectWith(
-        `${MEMORY}?section=supporting`,
-        { error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload" },
-      );
+      redirectWith(sectionReturn(formData), {
+        error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload",
+      });
     }
 
     const label = files.length > 1 ? `${labelBase} (${index + 1})` : labelBase;
@@ -337,7 +367,7 @@ export async function uploadMemoryDocument(formData: FormData) {
       actor,
       documentId,
       versionId,
-      type: type === "resume" ? "resume" : "other",
+      type,
       fileName: upload.sanitizedFilename,
     });
     const bucket = loadAppConfig().storageBucket;
@@ -345,14 +375,18 @@ export async function uploadMemoryDocument(formData: FormData) {
     const { error: uploadError } = await supabase.storage
       .from(bucket)
       .upload(storagePath, upload.buffer, { contentType: upload.mimeType, upsert: false });
-    if (uploadError) redirectWith(`${MEMORY}?section=supporting`, { error: "upload" });
+    if (uploadError) redirectWith(sectionReturn(formData), { error: "upload" });
 
-    await supabase.from("documents").insert({
+    const documentInsert = await insertOwnedDocument(supabase, {
       id: documentId,
       user_id: user.id,
-      type: type === "resume" ? "resume" : "other",
+      type,
       label,
     });
+    if (documentInsert.error) {
+      await supabase.storage.from(bucket).remove([storagePath]);
+      redirectWith(sectionReturn(formData), { error: "upload" });
+    }
     await supabase.from("document_versions").insert({
       id: versionId,
       document_id: documentId,
@@ -365,7 +399,7 @@ export async function uploadMemoryDocument(formData: FormData) {
       status: "processing",
     });
     await supabase.from("documents").update({ current_version_id: versionId }).eq("id", documentId);
-    if (type === "resume") {
+    if (type === "resume" || type === "resume_variant") {
       await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
     }
 
@@ -389,7 +423,8 @@ export async function uploadMemoryDocument(formData: FormData) {
     });
   }
 
+  await autoAttachKitAcrossOpenApplications(supabase, actor);
   revalidatePath(MEMORY);
   revalidatePath("/app/documents");
-  redirectWith(`${MEMORY}?section=supporting`, { notice });
+  redirectWith(sectionReturn(formData), { notice });
 }

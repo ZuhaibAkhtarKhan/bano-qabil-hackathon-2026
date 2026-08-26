@@ -257,6 +257,7 @@ export async function createManualOpportunityRecord(input: {
     applicationId,
     extracted,
     source: "manual",
+    actor: input.actor,
   });
   await evaluateApplicationIntelligence(input.supabase, input.actor, applicationId, opportunity.id);
 

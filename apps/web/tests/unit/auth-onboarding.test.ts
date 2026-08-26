@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   consentUpdateFields,
   onboardingHref,
+  postAuthHref,
   resolveOnboardingStep,
 } from "@1apply/contracts";
 
+import { kitMissingItems } from "@/lib/post-auth";
 import { mapAuthError, safeNextPath } from "@/lib/auth-errors";
 import { mapExtractedEvidenceKind } from "@/lib/extraction";
 import { hasConsent, onboardingComplete } from "@/lib/profile-state";
@@ -35,6 +37,8 @@ describe("onboarding routing", () => {
       resolveOnboardingStep({
         hasConsent: false,
         hasIdentity: false,
+        hasUniversity: false,
+        hasEducation: false,
         documentCount: 0,
         evidenceCount: 0,
         skippedDocuments: false,
@@ -44,16 +48,50 @@ describe("onboarding routing", () => {
     ).toBe("consent");
   });
 
-  it("moves to review after upload or skip", () => {
+  it("keeps new users on profile until name, university, and education are filled", () => {
     expect(
       resolveOnboardingStep({
         hasConsent: true,
         hasIdentity: true,
+        hasUniversity: false,
+        hasEducation: true,
+        documentCount: 0,
+        evidenceCount: 0,
+        skippedDocuments: false,
+        onboardingCompleted: false,
+        storedStep: "documents",
+      }),
+    ).toBe("profile");
+  });
+
+  it("stays on kit upload until the user continues", () => {
+    expect(
+      resolveOnboardingStep({
+        hasConsent: true,
+        hasIdentity: true,
+        hasUniversity: true,
+        hasEducation: true,
         documentCount: 1,
         evidenceCount: 2,
         skippedDocuments: false,
         onboardingCompleted: false,
         storedStep: "documents",
+      }),
+    ).toBe("documents");
+  });
+
+  it("moves to review after continue or skip", () => {
+    expect(
+      resolveOnboardingStep({
+        hasConsent: true,
+        hasIdentity: true,
+        hasUniversity: true,
+        hasEducation: true,
+        documentCount: 1,
+        evidenceCount: 2,
+        skippedDocuments: false,
+        onboardingCompleted: false,
+        storedStep: "review",
       }),
     ).toBe("review");
   });
@@ -61,6 +99,46 @@ describe("onboarding routing", () => {
   it("links each step to a route", () => {
     expect(onboardingHref("profile")).toBe("/app/onboarding/profile");
     expect(onboardingHref("done")).toBe("/app");
+  });
+
+  it("sends a finished account with a skipped kit back to Your kit on login", () => {
+    expect(
+      postAuthHref({
+        onboardingCompleted: true,
+        onboardingStep: "done",
+        kitMissing: ["CNIC", "B-form"],
+      }),
+    ).toBe("/app/memory?remind=kit");
+  });
+
+  it("lets a complete kit into the dashboard after login", () => {
+    expect(
+      postAuthHref({
+        onboardingCompleted: true,
+        onboardingStep: "done",
+        kitMissing: [],
+      }),
+    ).toBe("/app");
+  });
+
+  it("keeps unfinished signup on the onboarding path", () => {
+    expect(
+      postAuthHref({
+        onboardingCompleted: false,
+        onboardingStep: "consent",
+        kitMissing: ["university", "CNIC"],
+      }),
+    ).toBe("/app/onboarding/consent");
+  });
+
+  it("lists skipped kit files for the login reminder", () => {
+    expect(
+      kitMissingItems({
+        displayName: "Saadia",
+        preferences: { university: "NUST", educationSummary: "BS CS" },
+        documents: [{ type: "resume", label: "CV" }],
+      }),
+    ).toEqual(["CNIC", "B-form"]);
   });
 
   it("stores consent without marking onboarding complete", () => {

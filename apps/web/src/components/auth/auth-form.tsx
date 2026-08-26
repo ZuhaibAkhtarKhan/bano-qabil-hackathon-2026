@@ -72,7 +72,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
-        router.push(nextPath);
+        router.push("/app?afterAuth=1");
         router.refresh();
         return;
       }

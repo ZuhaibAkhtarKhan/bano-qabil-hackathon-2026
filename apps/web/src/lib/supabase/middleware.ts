@@ -2,13 +2,46 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { onboardingHref } from "@1apply/contracts";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { safeNextPath } from "@/lib/auth-errors";
 import { isSupabaseConfigured } from "@/lib/env";
+import { destinationAfterAuth, KIT_REMINDED_COOKIE } from "@/lib/post-auth";
 import { hasConsent, onboardingComplete } from "@/lib/profile-state";
 
 const PROFILE_FIELDS =
   "id, email, display_name, headline, phone, terms_accepted_at, ai_processing_accepted_at, onboarding_completed_at, onboarding_step, preferences";
+
+function redirectWithSession(url: URL, from: NextResponse, kitReminded = false) {
+  const next = NextResponse.redirect(url);
+  for (const cookie of from.cookies.getAll()) {
+    next.cookies.set(cookie);
+  }
+  if (kitReminded) {
+    next.cookies.set(KIT_REMINDED_COOKIE, "1", { path: "/", sameSite: "lax" });
+  }
+  return next;
+}
+
+async function landingPath(
+  supabase: SupabaseClient,
+  userId: string,
+  profile: {
+    display_name: string | null;
+    onboarding_completed_at: string | null;
+    onboarding_step: string | null;
+    preferences: Record<string, unknown>;
+  },
+) {
+  const { data: documents } = await supabase.from("documents").select("type, label").eq("user_id", userId);
+  return destinationAfterAuth({
+    onboardingCompletedAt: profile.onboarding_completed_at,
+    onboardingStep: profile.onboarding_step,
+    displayName: profile.display_name,
+    preferences: profile.preferences,
+    documents: documents ?? [],
+  });
+}
 
 export async function updateSession(request: NextRequest) {
   const response = NextResponse.next({ request });
@@ -61,10 +94,19 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (isAuthPage && user) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/app";
-    url.search = "";
-    return NextResponse.redirect(url);
+    const { data: profile } = await supabase.from("profiles").select(PROFILE_FIELDS).eq("id", user.id).maybeSingle();
+    const dest = profile
+      ? await landingPath(supabase, user.id, {
+          display_name: profile.display_name,
+          onboarding_completed_at: profile.onboarding_completed_at,
+          onboarding_step: profile.onboarding_step,
+          preferences: (profile.preferences as Record<string, unknown> | null) ?? {},
+        })
+      : "/app";
+    const reminded = request.cookies.get(KIT_REMINDED_COOKIE)?.value === "1";
+    const target = dest.includes("remind=kit") && reminded ? "/app" : dest;
+    const url = new URL(target, request.url);
+    return redirectWithSession(url, response, dest.includes("remind=kit") && !reminded);
   }
 
   if (user && isApp) {
@@ -97,6 +139,17 @@ export async function updateSession(request: NextRequest) {
         url.pathname = "/app";
         url.search = "";
         return NextResponse.redirect(url);
+      }
+
+      if (path === "/app" && request.nextUrl.searchParams.get("afterAuth") === "1") {
+        const dest = await landingPath(supabase, user.id, {
+          display_name: profileRow.display_name,
+          onboarding_completed_at: profileRow.onboarding_completed_at,
+          onboarding_step: profileRow.onboarding_step,
+          preferences: profileRow.preferences,
+        });
+        const url = new URL(dest, request.url);
+        return redirectWithSession(url, response, dest.includes("remind=kit"));
       }
     }
   }

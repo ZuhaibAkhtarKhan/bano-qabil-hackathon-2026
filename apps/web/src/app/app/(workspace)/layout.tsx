@@ -6,7 +6,9 @@ import { onboardingHref } from "@1apply/contracts";
 import { AppSidebar } from "@/components/app/sidebar";
 import { MobileTopbar } from "@/components/app/mobile-topbar";
 import { RealtimeWorkspaceProvider } from "@/components/app/realtime-provider";
+import { WorkspaceGuideBar } from "@/components/app/workspace-guide";
 import { getCurrentUserAndProfile, onboardingComplete } from "@/lib/profile";
+import { loadWorkspaceGuide } from "@/server/workspace/queries";
 
 export default async function WorkspaceLayout({ children }: { children: ReactNode }) {
   const { user, profile } = await getCurrentUserAndProfile();
@@ -17,6 +19,8 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
   if (!onboardingComplete(profile)) {
     redirect(onboardingHref(profile.onboarding_step));
   }
+
+  const guide = await loadWorkspaceGuide();
 
   return (
     <RealtimeWorkspaceProvider userId={user.id} initialUnreadCount={0}>
@@ -34,6 +38,7 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
         </div>
         <div className="min-w-0">
           <MobileTopbar email={profile.email} />
+          <WorkspaceGuideBar dismissed={guide.dismissed} steps={guide.steps} />
           {children}
         </div>
       </div>

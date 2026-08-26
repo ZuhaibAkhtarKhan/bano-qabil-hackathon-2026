@@ -57,11 +57,11 @@ export async function generateAnswerAction(formData: FormData) {
       userId: actor.userId,
       applicationId: parsed.data.applicationId,
       subjectId: result.answerId,
-      title: result.state === "needs_review" ? "Answer needs review" : "Answer draft ready",
+      title: result.state === "needs_review" ? "Answer needs review" : "Suggestion ready",
       body:
         result.state === "needs_review"
-          ? "A draft was stored but needs your review before it can be used in a snapshot."
-          : "A grounded draft is ready. Review citations, then approve it.",
+          ? "A draft was stored but needs your review. It is a suggestion only."
+          : "A grounded suggestion is ready. Keep it, edit it, or ignore it — nothing is sent until you do, unless you opted in to freeze at the deadline.",
     });
     revalidateApplication(parsed.data.applicationId);
     return { error: null, result };
@@ -140,8 +140,8 @@ export async function approveAnswerAction(formData: FormData) {
     userId: actor.userId,
     applicationId,
     subjectId: answerId,
-    title: "Answer approved",
-    body: "Approved text can now enter a submission snapshot.",
+    title: "Suggestion kept",
+    body: "This suggestion is now the approved packet text until you edit it again.",
   });
 
   revalidateApplication(applicationId);

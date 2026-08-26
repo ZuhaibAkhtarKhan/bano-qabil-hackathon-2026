@@ -8,8 +8,9 @@ import { Card } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { isAiConfigured } from "@/infra/ai/openai";
 import { getCurrentUserAndProfile } from "@/lib/profile";
+import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { StatusPill } from "@/components/ui/status-pill";
-import { updateTimezone } from "@/server/memory/actions";
+import { updatePrepareAndSend, updateTimezone } from "@/server/memory/actions";
 
 export default async function SettingsPage({
   searchParams,
@@ -20,6 +21,7 @@ export default async function SettingsPage({
   const { notice, error } = await searchParams;
   const aiReady = isAiConfigured();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const prefs = parseWorkspacePreferences(profile?.preferences ?? {});
 
   return (
     <WorkspaceMain>
@@ -73,10 +75,35 @@ export default async function SettingsPage({
         </Card>
 
         <Card className="p-6">
+          <h2 className="text-base font-medium">Prepare and send if I don’t respond</h2>
+          <p className="mt-2 text-sm text-ink-muted">
+            Off by default. When on, Dashboard shows the packet that will freeze at the deadline unless you edit.
+            1-Apply never clicks host Submit, and never bypasses CAPTCHA, signature, or payment.
+          </p>
+          <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="prepareAndSendIfSilent"
+                defaultChecked={prefs.prepareAndSendIfSilent}
+                className="mt-1"
+              />
+              <span>Freeze this packet at the deadline if I stay silent. Email/in-app notice goes out first.</span>
+            </label>
+            <Button type="submit" variant="secondary">
+              Save send preference
+            </Button>
+          </form>
+        </Card>
+
+        <Card className="p-6">
           <h2 className="text-base font-medium">Browser extension</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            The extension uses your signed-in session in this browser to save pages, list applications, and build fill
-            plans from Application Memory. It never clicks submit.
+            Connect Gmail or Calendar from{" "}
+            <a className="underline" href="/app/integrations">
+              Integrations
+            </a>
+            . The extension never clicks submit.
           </p>
           <ExtensionConnectCard appUrl={appUrl} />
         </Card>

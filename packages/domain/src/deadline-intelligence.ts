@@ -37,6 +37,11 @@ export type ReminderInput = {
   interviewDates: string[];
   contacts: string[];
   followUps: string[];
+  prepareAndSendIfSilent?: boolean;
+  packetSummary?: string;
+  identityPresent?: boolean;
+  packetNoticeSent?: boolean;
+  allQuestionsHavePacketText?: boolean;
 };
 
 export type Reminder = {
@@ -126,7 +131,7 @@ export function generateReminder(input: ReminderInput, now: Date = new Date()): 
 
   const remainingQuestions = input.totalQuestions - input.answeredQuestions;
 
-  if (remainingQuestions > 0 && deadline.urgency !== "none") {
+  if (remainingQuestions > 0 && deadline.urgency !== "none" && !input.prepareAndSendIfSilent) {
     return {
       state: "answer_required",
       urgency: deadline.urgency,
@@ -144,6 +149,17 @@ export function generateReminder(input: ReminderInput, now: Date = new Date()): 
       title: `${title}${org}: ${input.pendingDocuments} document${input.pendingDocuments === 1 ? "" : "s"} needed`,
       body: `Attach required documents before the deadline. ${deadline.label}.`,
       priority: priorityFromUrgency(deadline.urgency, 60),
+      actionable: true,
+    };
+  }
+
+  if (input.prepareAndSendIfSilent && (deadline.urgency === "imminent" || deadline.urgency === "soon" || deadline.urgency === "overdue")) {
+    return {
+      state: "deadline_approaching",
+      urgency: deadline.urgency,
+      title: `${title}${org}: will freeze this packet unless you edit`,
+      body: `Unless you edit, 1-Apply will freeze this packet at the deadline. ${input.packetSummary ?? "Current suggestions and attached documents will be recorded."} ${deadline.label}. 1-Apply will not click host Submit or bypass CAPTCHA.`,
+      priority: priorityFromUrgency(deadline.urgency, 90),
       actionable: true,
     };
   }
@@ -203,6 +219,10 @@ export type AutoSubmitPolicy = {
   enabled: boolean;
   allowAutoGenerate: boolean;
   requireAllAnswersApproved: boolean;
+  silenceTreatsSuggestionsAsPacket: boolean;
+  freezeOnlyAtOrAfterDeadline: boolean;
+  requireIdentity: boolean;
+  requirePriorPacketNotice: boolean;
   requireDocumentsAttached: boolean;
   requireFitScoreAbove: number | null;
   neverBypassCaptcha: true;
@@ -218,6 +238,10 @@ export const DEFAULT_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   enabled: false,
   allowAutoGenerate: false,
   requireAllAnswersApproved: true,
+  silenceTreatsSuggestionsAsPacket: false,
+  freezeOnlyAtOrAfterDeadline: false,
+  requireIdentity: false,
+  requirePriorPacketNotice: false,
   requireDocumentsAttached: true,
   requireFitScoreAbove: 60,
   neverBypassCaptcha: true,
@@ -227,6 +251,18 @@ export const DEFAULT_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   neverBypassLegalAttestation: true,
   boundedToDeadlineHours: 24,
   auditTrail: true,
+};
+
+export const SILENCE_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
+  ...DEFAULT_AUTO_SUBMIT_POLICY,
+  enabled: true,
+  allowAutoGenerate: true,
+  requireAllAnswersApproved: false,
+  silenceTreatsSuggestionsAsPacket: true,
+  freezeOnlyAtOrAfterDeadline: true,
+  requireIdentity: true,
+  requirePriorPacketNotice: true,
+  requireFitScoreAbove: null,
 };
 
 export type AutoSubmitDecision = {
@@ -256,17 +292,32 @@ export function evaluateAutoSubmit(
   if (humanActions.length > 0) {
     return {
       action: "pause",
-      reason: "Human action is required before submission can proceed.",
+      reason: "Human action is required before submission can proceed. 1-Apply never bypasses CAPTCHA, signature, or payment.",
       humanActionRequired: humanActions,
     };
   }
 
+  if (policy.requireIdentity && input.identityPresent === false) {
+    return { action: "block", reason: "Identity is empty. Silence-send will not freeze an empty kit.", humanActionRequired: [] };
+  }
+
+  if (policy.requirePriorPacketNotice && !input.packetNoticeSent) {
+    return { action: "block", reason: "Pre-deadline packet notice has not been sent yet.", humanActionRequired: [] };
+  }
+
   if (policy.requireAllAnswersApproved && !input.allAnswersApproved) {
-    return {
-      action: "block",
-      reason: `${input.totalQuestions - input.answeredQuestions} question(s) do not have approved answers.`,
-      humanActionRequired: [],
-    };
+    const silenceReady = policy.silenceTreatsSuggestionsAsPacket && input.allQuestionsHavePacketText;
+    if (!silenceReady) {
+      return {
+        action: "block",
+        reason: `${input.totalQuestions - input.answeredQuestions} question(s) do not have approved answers.`,
+        humanActionRequired: [],
+      };
+    }
+  }
+
+  if (policy.silenceTreatsSuggestionsAsPacket && input.allQuestionsHavePacketText === false) {
+    return { action: "block", reason: "The packet is missing suggested or edited answers.", humanActionRequired: [] };
   }
 
   if (policy.requireDocumentsAttached && !input.documentsAttached) {
@@ -286,7 +337,14 @@ export function evaluateAutoSubmit(
   }
 
   const deadline = computeDeadlineInfo(input.deadlineAt, input.deadlineTimezone, now);
-  if (deadline.hoursRemaining !== null && deadline.hoursRemaining > policy.boundedToDeadlineHours) {
+  if (policy.freezeOnlyAtOrAfterDeadline) {
+    if (deadline.hoursRemaining === null) {
+      return { action: "block", reason: "No deadline is on file, so silence-send cannot freeze a packet.", humanActionRequired: [] };
+    }
+    if (deadline.hoursRemaining > 0) {
+      return { action: "block", reason: "Deadline has not been reached. The packet stays editable.", humanActionRequired: [] };
+    }
+  } else if (deadline.hoursRemaining !== null && deadline.hoursRemaining > policy.boundedToDeadlineHours) {
     return {
       action: "block",
       reason: `Deadline is ${Math.round(deadline.hoursRemaining)} hours away, outside the ${policy.boundedToDeadlineHours}-hour auto-submit window.`,
@@ -294,7 +352,13 @@ export function evaluateAutoSubmit(
     };
   }
 
-  return { action: "proceed", reason: "All checks passed. Ready for user-confirmed submission.", humanActionRequired: [] };
+  return {
+    action: "proceed",
+    reason: policy.freezeOnlyAtOrAfterDeadline
+      ? "Deadline reached. Freeze the current packet snapshot. Do not click host Submit."
+      : "All checks passed. Ready for user-confirmed submission.",
+    humanActionRequired: [],
+  };
 }
 
 export function prioritizeApplications(

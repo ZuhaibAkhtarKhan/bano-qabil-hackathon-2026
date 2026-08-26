@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeDeadlineInfo,
   DEFAULT_AUTO_SUBMIT_POLICY,
+  SILENCE_AUTO_SUBMIT_POLICY,
   evaluateAutoSubmit,
   evaluateSubmissionGuard,
   generateReminder,
@@ -352,6 +353,41 @@ describe("auto-submit policy", () => {
       },
     );
     expect(decision.action).toBe("proceed");
+  });
+
+  it("freezes a silence packet only at or after the deadline", () => {
+    const beforeDeadline = evaluateAutoSubmit(
+      SILENCE_AUTO_SUBMIT_POLICY,
+      {
+        ...makeReminderInput({
+          deadlineAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+          identityPresent: true,
+          packetNoticeSent: true,
+          allQuestionsHavePacketText: true,
+        }),
+        allAnswersApproved: false,
+        documentsAttached: true,
+        hasUnsupportedClaims: false,
+      },
+    );
+    expect(beforeDeadline.action).toBe("block");
+
+    const atDeadline = evaluateAutoSubmit(
+      SILENCE_AUTO_SUBMIT_POLICY,
+      {
+        ...makeReminderInput({
+          deadlineAt: new Date(Date.now() - 60 * 1000).toISOString(),
+          identityPresent: true,
+          packetNoticeSent: true,
+          allQuestionsHavePacketText: true,
+        }),
+        allAnswersApproved: false,
+        documentsAttached: true,
+        hasUnsupportedClaims: false,
+      },
+    );
+    expect(atDeadline.action).toBe("proceed");
+    expect(atDeadline.reason).toMatch(/Do not click host Submit/);
   });
 
   it("never bypasses CAPTCHA/signature/payment even when enabled", () => {

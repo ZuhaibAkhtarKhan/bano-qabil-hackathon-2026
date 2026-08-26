@@ -242,6 +242,11 @@ export function AnswerPanel({
         </div>
         {answer && <SemanticBadge status={status} />}
       </div>
+      {answer && answer.state !== "approved" && displayText ? (
+        <p className="text-xs text-ink-muted">
+          Suggestion only. Keep it, edit it, or ignore it. If you opted in to prepare-and-send, this is the packet text that freezes at the deadline unless you change it.
+        </p>
+      ) : null}
 
       {/* Live drafting status */}
       {isPending && (
@@ -400,7 +405,7 @@ export function AnswerPanel({
               disabled={isPending}
               className="bg-emerald-600 text-white hover:bg-emerald-700"
             >
-              Approve
+              Keep this suggestion
             </Button>
             <Button
               size="sm"

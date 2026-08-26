@@ -60,9 +60,11 @@ const FILTERS = [
 export function DashboardHome({
   matches,
   applications,
+  showChrome = true,
 }: {
   matches: DashboardMatch[];
   applications: DashboardApplicationRow[];
+  showChrome?: boolean;
 }) {
   const { unreadCount } = useRealtime();
   const [query, setQuery] = useState("");
@@ -127,44 +129,46 @@ export function DashboardHome({
   }, [applications, filter, query]);
 
   return (
-    <div className="min-h-full bg-white">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-6 lg:px-8">
-        <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
-        <label className="mx-auto hidden max-w-md flex-1 sm:block">
-          <span className="sr-only">Search applications</span>
-          <span className="relative block">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by title, company…"
-              className="w-full rounded-full border border-line bg-[#fafbf8] py-2 pl-10 pr-4 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-ink/30 focus:bg-white"
-            />
-          </span>
-        </label>
-        <div className="ml-auto flex items-center gap-2">
-          <Link
-            href="/app/notifications"
-            className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
-            aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
-          >
-            <Bell className="h-4 w-4" aria-hidden="true" />
-            {unreadCount > 0 ? (
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
-            ) : null}
-          </Link>
-          <Link
-            href="/app/settings"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
-            aria-label="Help and settings"
-          >
-            <HelpCircle className="h-4 w-4" aria-hidden="true" />
-          </Link>
-        </div>
-      </header>
+    <div className={showChrome ? "min-h-full bg-white" : undefined}>
+      {showChrome ? (
+        <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-6 lg:px-8">
+          <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
+          <label className="mx-auto hidden max-w-md flex-1 sm:block">
+            <span className="sr-only">Search applications</span>
+            <span className="relative block">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search by title, company…"
+                className="w-full rounded-full border border-line bg-[#fafbf8] py-2 pl-10 pr-4 text-sm text-ink outline-none placeholder:text-ink-muted focus:border-ink/30 focus:bg-white"
+              />
+            </span>
+          </label>
+          <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/app/notifications"
+              className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
+              aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+            >
+              <Bell className="h-4 w-4" aria-hidden="true" />
+              {unreadCount > 0 ? (
+                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
+              ) : null}
+            </Link>
+            <Link
+              href="/app/settings"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
+              aria-label="Help and settings"
+            >
+              <HelpCircle className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </div>
+        </header>
+      ) : null}
 
-      <div className="space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+      <div className={showChrome ? "space-y-8 px-4 py-6 sm:px-6 lg:px-8" : "space-y-8"}>
         <section ref={matchesRef} aria-labelledby="top-matches-heading">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 id="top-matches-heading" className="text-base font-semibold tracking-tight text-ink">
@@ -208,7 +212,7 @@ export function DashboardHome({
             </ButtonLink>
           </div>
 
-          <div className="mt-3 sm:hidden">
+          <div className={showChrome ? "mt-3 sm:hidden" : "mt-3"}>
             <label className="relative block">
               <span className="sr-only">Search applications</span>
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />

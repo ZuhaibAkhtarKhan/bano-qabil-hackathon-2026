@@ -1,16 +1,13 @@
-import type { LucideIcon } from "lucide-react";
 import {
   Bell,
   BriefcaseBusiness,
-  FileBadge,
-  Files,
   FolderSearch,
   HandHelping,
   LayoutDashboard,
   Library,
-  Link2,
   Settings,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 export type NavItem = {
   href: string;
@@ -31,25 +28,20 @@ export const WORKSPACE_NAV: NavSection[] = [
     items: [
       { href: "/app", label: "Dashboard", icon: LayoutDashboard },
       { href: "/app/needs-you", label: "Need You", icon: HandHelping },
-      { href: "/app/opportunities", label: "Opportunities", icon: FolderSearch },
+      { href: "/app/opportunities", label: "Add a posting", icon: FolderSearch },
       { href: "/app/applications", label: "Applications", icon: BriefcaseBusiness },
     ],
   },
   {
-    id: "memory",
-    label: "Memory",
-    items: [
-      { href: "/app/memory", label: "Application Memory", icon: Library },
-      { href: "/app/documents", label: "Documents", icon: Files },
-      { href: "/app/resumes", label: "Resumes", icon: FileBadge },
-    ],
+    id: "kit",
+    label: "Your kit",
+    items: [{ href: "/app/memory", label: "Your kit", icon: Library }],
   },
   {
     id: "account",
     label: "Account",
     items: [
       { href: "/app/notifications", label: "Notifications", icon: Bell },
-      { href: "/app/integrations", label: "Integrations", icon: Link2 },
       { href: "/app/settings", label: "Settings", icon: Settings },
     ],
   },

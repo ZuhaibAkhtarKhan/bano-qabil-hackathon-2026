@@ -1,9 +1,21 @@
 import { computeProfileCompleteness } from "@1apply/contracts";
+import {
+  classifyPendingPacket,
+  computeDeadlineInfo,
+  currentGuideStep,
+  kitStatus,
+  nextGuideSteps,
+  packetAnswerText,
+  packetSummary,
+  requiredDocumentCovered,
+} from "@1apply/domain";
 
 import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { syncDeadlineReminders } from "@/server/applications/reminders";
+import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
+import type { PendingPacket } from "@/lib/dashboard";
 import {
   asOne,
   type ApplicationListRow,
@@ -22,6 +34,7 @@ export async function loadDashboard() {
     { data: notifications },
     { data: opportunities },
     { count: resumeCount },
+    { data: kitDocuments },
   ] = await Promise.all([
     supabase
       .from("evidence_items")
@@ -45,6 +58,7 @@ export async function loadDashboard() {
       .order("created_at", { ascending: false })
       .limit(100),
     supabase.from("documents").select("id", { count: "exact", head: true }).eq("type", "resume").eq("user_id", profile.id),
+    supabase.from("documents").select("id, type, label").eq("user_id", profile.id),
     syncDeadlineReminders(supabase, actor).catch(() => null),
   ]);
 
@@ -180,6 +194,21 @@ export async function loadDashboard() {
     verifiedEvidenceCount: verifiedEvidenceCount ?? 0,
     documentCount: documentCount ?? 0,
   });
+  const prefs = parseWorkspacePreferences(profile.preferences);
+  const kit = kitStatus({
+    displayName: profile.display_name,
+    university: prefs.university,
+    educationSummary: prefs.educationSummary,
+    documents: (kitDocuments ?? []).map((row) => ({ type: String(row.type), label: String(row.label) })),
+  });
+  const packets = await loadDashboardPackets(
+    supabase,
+    (applications ?? []) as ApplicationListRow[],
+    kitDocuments ?? [],
+    prefs.prepareAndSendIfSilent,
+    Boolean(profile.display_name?.trim()),
+    profile.timezone,
+  );
 
   return {
     profile,
@@ -190,7 +219,132 @@ export async function loadDashboard() {
     notifications: (notifications ?? []) as NotificationRow[],
     opportunities: opportunityList,
     resumeCount: resumeCount ?? 0,
+    kit,
+    packets,
+    prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
+    guideDismissed: prefs.guideDismissed,
   };
+}
+
+export async function loadWorkspaceGuide() {
+  const { profile, supabase } = await requireWorkspace();
+  const prefs = parseWorkspacePreferences(profile.preferences);
+  if (prefs.guideDismissed) {
+    return { dismissed: true as const, steps: [], next: null };
+  }
+
+  const [{ data: kitDocuments }, { count: opportunityCount }, { count: applicationCount }] = await Promise.all([
+    supabase.from("documents").select("type, label").eq("user_id", profile.id),
+    supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+    supabase.from("applications").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+  ]);
+
+  const kit = kitStatus({
+    displayName: profile.display_name,
+    university: prefs.university,
+    educationSummary: prefs.educationSummary,
+    documents: (kitDocuments ?? []).map((row) => ({ type: String(row.type), label: String(row.label) })),
+  });
+  const steps = nextGuideSteps({
+    kitMissing: kit.missing,
+    opportunityCount: opportunityCount ?? 0,
+    applicationCount: applicationCount ?? 0,
+    needsYouCount: 0,
+    prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
+  });
+
+  return {
+    dismissed: false as const,
+    steps,
+    next: currentGuideStep(steps),
+  };
+}
+
+async function loadDashboardPackets(
+  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"],
+  applications: ApplicationListRow[],
+  documents: Array<{ id: string; type: string; label: string }>,
+  prepareAndSendIfSilent: boolean,
+  identityPresent: boolean,
+  timezone: string | null,
+): Promise<PendingPacket[]> {
+  const open = applications.filter(
+    (row) => !["submitted", "rejected", "withdrawn", "archived", "offer", "accepted"].includes(row.status),
+  );
+  if (open.length === 0) return [];
+  const applicationIds = open.map((row) => row.id);
+  const opportunityIds = [...new Set(open.map((row) => row.opportunity_id))];
+
+  const [{ data: questions }, { data: answers }, { data: requiredDocs }, { data: attached }] = await Promise.all([
+    supabase.from("opportunity_questions").select("id, opportunity_id").in("opportunity_id", opportunityIds),
+    supabase
+      .from("application_answers")
+      .select("application_id, question_id, state, approved_text, original_ai_text, user_edited_text")
+      .in("application_id", applicationIds),
+    supabase.from("opportunity_documents").select("opportunity_id, label, required").in("opportunity_id", opportunityIds),
+    supabase.from("application_documents").select("application_id, document_id").in("application_id", applicationIds),
+  ]);
+
+  const docById = new Map(documents.map((row) => [row.id, row]));
+
+  return open.map((row) => {
+    const oppQuestions = (questions ?? []).filter((item) => item.opportunity_id === row.opportunity_id);
+    const appAnswers = (answers ?? []).filter((item) => item.application_id === row.id);
+    const required = (requiredDocs ?? []).filter((item) => item.opportunity_id === row.opportunity_id && item.required);
+    const attachedIds = new Set(
+      (attached ?? []).filter((item) => item.application_id === row.id).map((item) => String(item.document_id)),
+    );
+    const attachedVault = [...attachedIds]
+      .map((id) => docById.get(id))
+      .filter((item): item is { id: string; type: string; label: string } => Boolean(item))
+      .map((item) => ({ type: item.type, label: item.label }));
+    const missingDocs = required
+      .filter((item) => !requiredDocumentCovered(String(item.label), attachedVault))
+      .map((item) => String(item.label));
+    const packetCount = oppQuestions.filter((question) =>
+      appAnswers.some(
+        (answer) =>
+          String(answer.question_id) === String(question.id) &&
+          packetAnswerText({
+            approvedText: (answer.approved_text as string | null) ?? null,
+            userEditedText: (answer.user_edited_text as string | null) ?? null,
+            originalAiText: (answer.original_ai_text as string | null) ?? null,
+          }),
+      ),
+    ).length;
+    const suggestionCount = appAnswers.filter((item) => item.state === "ai_generated" || item.state === "user_edited").length;
+    const summary = packetSummary({
+      attachedCount: attachedIds.size,
+      requiredCount: required.length,
+      questionCount: oppQuestions.length,
+      packetAnswerCount: packetCount,
+      suggestionCount,
+    });
+    const lane = classifyPendingPacket({
+      status: row.status,
+      deadlineAt: row.deadline_at,
+      hasCaptcha: false,
+      hasSignature: false,
+      hasPayment: false,
+      identityPresent,
+      missingRequiredDocuments: missingDocs,
+      questionsWithoutPacketText: Math.max(0, oppQuestions.length - packetCount),
+      suggestionCount,
+      prepareAndSendIfSilent,
+    });
+    const deadline = computeDeadlineInfo(row.deadline_at, timezone);
+    return {
+      id: row.id,
+      title: asOne(row.opportunities)?.title ?? "Untitled opportunity",
+      host: asOne(row.opportunities)?.organization ?? "Unknown host",
+      deadlineAt: row.deadline_at,
+      deadlineLabel: deadline.label,
+      lane,
+      summary,
+      suggestionCount,
+      missingDocs,
+    };
+  });
 }
 
 
