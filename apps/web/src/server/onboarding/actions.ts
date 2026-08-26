@@ -15,14 +15,16 @@ export async function saveOnboardingProfile(formData: FormData) {
   if (!user) redirect("/sign-in?next=/app/onboarding/profile");
 
   const displayName = String(formData.get("displayName") ?? "").trim();
-  if (!displayName) {
+  const university = String(formData.get("university") ?? "").trim();
+  const educationSummary = String(formData.get("educationSummary") ?? "").trim();
+  if (!displayName || !university || !educationSummary) {
     redirect("/app/onboarding/profile?error=required");
   }
 
   const { data: existing } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
   const preferences = mergeWorkspacePreferences((existing?.preferences as Record<string, unknown> | null) ?? {}, {
-    university: String(formData.get("university") ?? "").trim(),
-    educationSummary: String(formData.get("educationSummary") ?? "").trim(),
+    university,
+    educationSummary,
   });
 
   const { error } = await supabase

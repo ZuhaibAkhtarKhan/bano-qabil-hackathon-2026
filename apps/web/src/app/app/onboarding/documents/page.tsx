@@ -33,7 +33,7 @@ export default async function OnboardingDocumentsPage({
     <OnboardingShell
       eyebrow="Onboarding"
       title="Your kit"
-      body="Upload once: resume, CNIC, and B-form. 1-Apply reuses them on later postings. You can skip files you do not have yet."
+      body="Upload once: resume, CNIC, and B-form. 1-Apply reuses them on later postings. Skip only if you do not have a file yet — we will ask again the next time you sign in."
       step="documents"
     >
       {noticeMessage ? (
@@ -99,7 +99,7 @@ export default async function OnboardingDocumentsPage({
         </form>
         <form action={skipOnboardingDocuments}>
           <Button type="submit" variant="ghost">
-            Skip for now
+            Skip for now — remind me next sign-in
           </Button>
         </form>
       </div>

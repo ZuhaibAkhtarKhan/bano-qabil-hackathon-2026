@@ -138,4 +138,15 @@ describe("kit status", () => {
     expect(status.hasIdentityDocument).toBe(true);
     expect(status.missing).toEqual([]);
   });
+
+  it("lists skipped kit facts and files so login can remind the user", () => {
+    const status = kitStatus({
+      displayName: "Saadia",
+      university: "",
+      educationSummary: "",
+      documents: [{ id: "r1", type: "resume", label: "CV", currentVersionId: "v1" }],
+    });
+    expect(status.ready).toBe(true);
+    expect(status.missing).toEqual(["university", "education", "CNIC", "B-form"]);
+  });
 });

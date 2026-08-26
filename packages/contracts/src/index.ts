@@ -66,6 +66,7 @@ export {
   ONBOARDING_STEPS,
   onboardingHref,
   onboardingStepSchema,
+  postAuthHref,
   profileCompletenessSchema,
   profileRecordSchema,
   resolveOnboardingStep,

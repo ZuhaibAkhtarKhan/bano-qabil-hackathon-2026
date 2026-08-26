@@ -27,20 +27,22 @@ export default async function OnboardingProfilePage({
         <Field label="Full name" htmlFor="displayName" hint="Required to continue.">
           <Input id="displayName" name="displayName" defaultValue={profile?.display_name ?? ""} required />
         </Field>
-        <Field label="University" htmlFor="university">
+        <Field label="University" htmlFor="university" hint="Required. Used on every posting.">
           <Input
             id="university"
             name="university"
             defaultValue={parseWorkspacePreferences(state.profile.preferences).university}
             placeholder="NUST"
+            required
           />
         </Field>
-        <Field label="Education" htmlFor="educationSummary">
+        <Field label="Education" htmlFor="educationSummary" hint="Required. Degree and year, for example BS Computer Science, 2026.">
           <Input
             id="educationSummary"
             name="educationSummary"
             defaultValue={parseWorkspacePreferences(state.profile.preferences).educationSummary}
             placeholder="BS Computer Science, 2026"
+            required
           />
         </Field>
         <Field label="Headline" htmlFor="headline">
@@ -76,7 +78,7 @@ export default async function OnboardingProfilePage({
         </Field>
         {error === "required" ? (
           <p className="text-sm text-rose-700" role="alert">
-            Name is required before you can continue.
+            Name, university, and education are required before you can continue.
           </p>
         ) : error === "save" ? (
           <p className="text-sm text-rose-700" role="alert">

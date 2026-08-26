@@ -59,6 +59,8 @@ export function canFinishOnboarding(input: { hasConsent: boolean; hasIdentity: b
 export function resolveOnboardingStep(input: {
   hasConsent: boolean;
   hasIdentity: boolean;
+  hasUniversity: boolean;
+  hasEducation: boolean;
   documentCount: number;
   evidenceCount: number;
   skippedDocuments: boolean;
@@ -67,13 +69,23 @@ export function resolveOnboardingStep(input: {
 }): OnboardingStep {
   if (input.onboardingCompleted) return "done";
   if (!input.hasConsent) return "consent";
-  if (!input.hasIdentity) return "profile";
+  if (!input.hasIdentity || !input.hasUniversity || !input.hasEducation) return "profile";
   if (input.storedStep === "ready") return "ready";
   if (input.storedStep === "review") return "review";
   if (input.storedStep === "done") return "done";
   if (input.storedStep === "documents") return "documents";
   if (input.documentCount > 0 || input.evidenceCount > 0 || input.skippedDocuments) return "review";
   return "documents";
+}
+
+export function postAuthHref(input: {
+  onboardingCompleted: boolean;
+  onboardingStep: OnboardingStep;
+  kitMissing: string[];
+}): string {
+  if (!input.onboardingCompleted) return onboardingHref(input.onboardingStep);
+  if (input.kitMissing.length > 0) return "/app/memory?remind=kit";
+  return "/app";
 }
 
 export function onboardingHref(step: OnboardingStep) {
