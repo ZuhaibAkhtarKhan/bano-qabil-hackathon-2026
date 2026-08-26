@@ -15,6 +15,11 @@ describe("auth errors", () => {
   it("maps common Supabase failures to readable messages", () => {
     expect(mapAuthError({ message: "Invalid login credentials" })).toContain("incorrect");
     expect(mapAuthError({ code: "otp_expired" })).toContain("expired");
+    expect(mapAuthError({ message: "User already registered" })).toContain("already exists");
+    expect(mapAuthError({ code: "user_already_exists" })).toContain("Sign in");
+    expect(mapAuthError({ message: "A user with this email address has already been registered" })).toContain(
+      "already exists",
+    );
   });
 
   it("rejects unsafe next paths", () => {

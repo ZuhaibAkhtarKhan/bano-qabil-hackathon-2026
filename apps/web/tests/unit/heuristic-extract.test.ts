@@ -30,4 +30,16 @@ B.S. Computer Science, NED University
     expect(extracted.links?.some((link) => link.kind === "linkedin")).toBe(true);
     expect(extracted.evidence.length).toBeGreaterThan(0);
   });
+
+  it("does not use a vault label like Primary resume as the applicant name", () => {
+    const text = `
+Skills
+Python, React
+
+Experience
+Built internal tools for campus clubs.
+`;
+    const extracted = heuristicExtractDocument(text, "Primary resume");
+    expect(extracted.displayName).toBeNull();
+  });
 });

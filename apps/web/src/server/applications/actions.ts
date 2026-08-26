@@ -12,6 +12,7 @@ import {
 
 import { canTransitionTo, normalizeApplicationStatus } from "@/lib/application-workflow";
 import { recordApplicationEvent } from "@/services/platform";
+import { recordAuditEvent } from "@/server/audit";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@1apply/domain";
@@ -28,7 +29,20 @@ function applicationPath(id: string) {
 function revalidateApplication(id: string) {
   revalidatePath("/app");
   revalidatePath("/app/applications");
+  revalidatePath("/app/needs-you");
   revalidatePath(applicationPath(id));
+}
+
+function revalidateAfterApplicationDeleted(applicationId: string, opportunityId: string | null) {
+  revalidatePath("/app");
+  revalidatePath("/app/applications");
+  revalidatePath("/app/needs-you");
+  revalidatePath("/app/notifications");
+  revalidatePath("/app/opportunities");
+  revalidatePath(applicationPath(applicationId));
+  if (opportunityId) {
+    revalidatePath(`/app/opportunities/${opportunityId}`);
+  }
 }
 
 async function loadEvidence(
@@ -726,7 +740,7 @@ export async function resolveReviewItem(formData: FormData) {
 }
 
 export async function deleteApplication(formData: FormData) {
-  const { user, supabase, actor } = await requireWorkspace();
+  const { user, supabase } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   if (!applicationId) {
     redirectWith("/app/applications", { error: "required" });
@@ -734,7 +748,7 @@ export async function deleteApplication(formData: FormData) {
 
   const { data: application } = await supabase
     .from("applications")
-    .select("id")
+    .select("id, opportunity_id")
     .eq("id", applicationId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -743,9 +757,33 @@ export async function deleteApplication(formData: FormData) {
     redirectWith("/app/applications", { error: "not_found" });
   }
 
-  await recordApplicationEvent(supabase, actor, applicationId, "application.deleted", {
+  const opportunityId = (application.opportunity_id as string | null) ?? null;
+
+  // Survives the row delete (application_events cascade away with the application).
+  await recordAuditEvent(supabase, "application.deleted", {
     applicationId,
+    opportunityId,
   });
+
+  // Cancel queued/processing work tied to this application so background jobs
+  // cannot write it back or notify about a gone row. (No jobs DELETE RLS.)
+  await supabase
+    .from("jobs")
+    .update({ state: "failed", error_code: "APPLICATION_DELETED" })
+    .eq("user_id", user.id)
+    .eq("input_ref", applicationId)
+    .in("state", ["queued", "running", "processing"]);
+
+  // application_id notifications cascade with the application row. Retarget any
+  // leftover rows that only pointed at this application by URL.
+  await supabase
+    .from("notifications")
+    .update({
+      read_at: new Date().toISOString(),
+      action_url: "/app/applications",
+    })
+    .eq("user_id", user.id)
+    .eq("action_url", `/app/applications/${applicationId}`);
 
   const { error } = await supabase
     .from("applications")
@@ -757,8 +795,9 @@ export async function deleteApplication(formData: FormData) {
     redirectWith(applicationPath(applicationId), { error: "save" }, "review");
   }
 
-  revalidatePath("/app");
-  revalidatePath("/app/applications");
+  // Keep the opportunity listing, but never auto-recreate this application on
+  // dashboard load. User can re-ingest or start again from Opportunities.
+  revalidateAfterApplicationDeleted(applicationId, opportunityId);
   redirectWith("/app/applications", { notice: "deleted" });
 }
 

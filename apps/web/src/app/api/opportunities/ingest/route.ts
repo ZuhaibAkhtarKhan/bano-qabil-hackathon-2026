@@ -8,6 +8,7 @@ import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-c
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 import { ingestOpportunityPage } from "@/server/opportunities/ingest";
 import { recordAuditEvent } from "@/server/audit";
+import { revalidatePath } from "next/cache";
 
 const envelope = createApiEnvelopeSchema(
   z.object({
@@ -133,6 +134,10 @@ export async function POST(request: Request) {
       duplicate: result.duplicate,
       source: parsed.data.source,
     });
+
+    revalidatePath("/app");
+    revalidatePath("/app/applications");
+    revalidatePath("/app/opportunities");
 
     return withExtensionCors(
       request,

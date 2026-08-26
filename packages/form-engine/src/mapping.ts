@@ -1,4 +1,5 @@
 import { deriveYearOfStudy, extractYearsFromText, formatIdentityNumberForField } from "./format-value";
+import { humanQuestionLabel } from "./question-label";
 import { isProtectedControl, isSensitiveField } from "./safety";
 import type { DetectedField, FieldMapping, FieldMappingOption, MemoryValue } from "./types";
 
@@ -572,7 +573,7 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
     const value = field.options[0]?.trim() || "true";
     return {
       fieldKey: field.key,
-      label: field.label || field.name || field.key,
+      label: humanQuestionLabel(field),
       memoryPath: "Required confirmation",
       source: "Form requirement",
       confidence: 0.99,
@@ -598,7 +599,7 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
       inferred.answer === "yes" ? yesNo.yes : inferred.answer === "no" ? yesNo.no : "";
     return {
       fieldKey: field.key,
-      label: field.label || field.name || field.key,
+      label: humanQuestionLabel(field),
       memoryPath: inferred.memoryPath,
       source: "Application Memory",
       confidence: inferred.confidence,
@@ -655,7 +656,7 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
   const proposedValue = top && top.score >= 0.48 ? top.choice : "";
   return {
     fieldKey: field.key,
-    label: field.label || field.name || field.key,
+    label: humanQuestionLabel(field),
     memoryPath: top?.option.label ?? "Application Memory",
     source: top?.option.source ?? "Application Memory",
     confidence: top ? Math.round(top.score * 100) / 100 : 0.25,
@@ -676,7 +677,7 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
 function blockedMapping(field: DetectedField, reason: string, memoryPath = "Blocked"): FieldMapping {
   return {
     fieldKey: field.key,
-    label: field.label || field.name || field.key,
+    label: humanQuestionLabel(field),
     memoryPath,
     source: "Safety rule",
     confidence: 0,
@@ -715,7 +716,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
       : toOptions(catalog.filter((item) => item.path.startsWith("Documents →")));
     return {
       fieldKey: field.key,
-      label: field.label || field.name || field.key,
+      label: humanQuestionLabel(field),
       memoryPath: path,
       source: fallback[0]?.source ?? "Documents",
       confidence: bestDoc ? Math.round(bestDoc.score * 100) / 100 : 0.45,
@@ -753,7 +754,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
         : links;
       return {
         fieldKey: field.key,
-        label: field.label || field.name || field.key,
+        label: humanQuestionLabel(field),
         memoryPath: ordered[0]?.label ?? "Profile → Links",
         source: ordered[0]?.source ?? "Application Memory",
         confidence: 0.88,
@@ -782,7 +783,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
     ]);
     return {
       fieldKey: field.key,
-      label: field.label || field.name || field.key,
+      label: humanQuestionLabel(field),
       memoryPath: "Profile → Full name",
       source: options[0]?.source ?? "Application Memory",
       confidence: 0.42,
@@ -802,7 +803,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
     const options = toOptions([...fuzzy.slice(0, 4).map((item) => item.mem), ...narrativeMemories(catalog)]);
     return {
       fieldKey: field.key,
-      label: field.label || field.name || field.key,
+      label: humanQuestionLabel(field),
       memoryPath: "AI answerable",
       source: "AI draft",
       confidence: 0.4,
@@ -826,7 +827,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
       const proposedValue = formatProposedValue(top.mem.path, top.mem.value, signals);
       return {
         fieldKey: field.key,
-        label: field.label || field.name || field.key,
+        label: humanQuestionLabel(field),
         memoryPath: top.mem.path,
         source: top.mem.source,
         confidence: Math.round(top.score * 100) / 100,
@@ -847,7 +848,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
     if (!sensitive && (field.type === "text" || field.type === "textarea") && field.label.trim().length >= 12) {
       return {
         fieldKey: field.key,
-        label: field.label || field.name || field.key,
+        label: humanQuestionLabel(field),
         memoryPath: "AI answerable",
         source: "AI draft",
         confidence: 0.35,
@@ -865,7 +866,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
 
     return {
       fieldKey: field.key,
-      label: field.label || field.name || field.key,
+      label: humanQuestionLabel(field),
       memoryPath: "Unmapped",
       source: "None",
       confidence: 0,
@@ -922,7 +923,7 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
 
   return {
     fieldKey: field.key,
-    label: field.label || field.name || field.key,
+    label: humanQuestionLabel(field),
     memoryPath: best.rule.path,
     source: options[0]?.source ?? "Application Memory",
     confidence: Math.round(best.score * 100) / 100,

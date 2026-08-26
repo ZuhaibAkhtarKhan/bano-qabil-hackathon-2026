@@ -72,10 +72,29 @@ export async function persistDocumentExtraction(supabase: SupabaseClient, input:
   const { userId, documentId, versionId, documentLabel } = input;
 
   if (input.profilePatch?.displayName || input.profilePatch?.headline || input.profilePatch?.phone) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const existingName = String(profile?.display_name ?? "").trim();
+    const extractedName = String(input.profilePatch.displayName ?? "").trim();
+    const extractedLooksLikeName =
+      Boolean(extractedName) &&
+      !/resume|curriculum|\bcv\b|primary|document|upload|supporting|file/i.test(extractedName);
+    // Keep the signup/onboarding name. Only fill an empty profile name from extraction.
+    const nextDisplayName =
+      !existingName && extractedLooksLikeName
+        ? extractedName
+        : existingName && /resume|curriculum|\bcv\b|primary resume/i.test(existingName) && extractedLooksLikeName
+          ? extractedName
+          : null;
+
     await supabase
       .from("profiles")
       .update({
-        ...(input.profilePatch.displayName ? { display_name: input.profilePatch.displayName } : {}),
+        ...(nextDisplayName ? { display_name: nextDisplayName } : {}),
         ...(input.profilePatch.headline ? { headline: input.profilePatch.headline } : {}),
         ...(input.profilePatch.phone ? { phone: input.profilePatch.phone } : {}),
         ...(input.profilePatch.locationCity ? { location_city: input.profilePatch.locationCity } : {}),

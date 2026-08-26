@@ -35,6 +35,8 @@ export const FLASH = {
   version_selected: "Selected version is now the latest for this document.",
   submission_blocked: "Submission blocked. See the checklist for blocking issues.",
   duplicate_prevented: "Duplicate submission prevented. An identical snapshot already exists.",
+  continued:
+    "Saved to Application Memory. That application is continuing in the background with the new information.",
 } as const;
 
 export const ERRORS = {

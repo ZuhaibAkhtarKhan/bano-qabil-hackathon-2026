@@ -293,6 +293,72 @@ if (!root.__1APPLY_LISTENERS) {
     );
   }
 
+  function readControlValue(fieldKey: string, fieldType: string): string {
+    const el = findControl(fieldKey);
+    if (!el) return "";
+
+    if (fieldType === "radio" || (el instanceof HTMLInputElement && el.type === "radio")) {
+      const radios = Array.from(
+        document.querySelectorAll<HTMLInputElement>(`input[type="radio"][${APPLY_FIELD_ATTR}="${cssEscape(fieldKey)}"]`),
+      );
+      const checked = radios.find((item) => item.checked) ?? (el instanceof HTMLInputElement && el.checked ? el : null);
+      if (!checked) return "";
+      return (
+        checked.value ||
+        checked.getAttribute("aria-label") ||
+        checked.labels?.[0]?.textContent ||
+        ""
+      )
+        .trim()
+        .replace(/\s+/g, " ");
+    }
+
+    if (fieldType === "checkbox" || (el instanceof HTMLInputElement && el.type === "checkbox")) {
+      const boxes = Array.from(
+        document.querySelectorAll<HTMLInputElement>(`input[type="checkbox"][${APPLY_FIELD_ATTR}="${cssEscape(fieldKey)}"]`),
+      );
+      const checked = (boxes.length ? boxes : el instanceof HTMLInputElement ? [el] : []).filter((item) => item.checked);
+      return checked
+        .map((item) => (item.value && item.value !== "on" ? item.value : item.labels?.[0]?.textContent || "true"))
+        .map((value) => value.trim().replace(/\s+/g, " "))
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    if (el instanceof HTMLSelectElement) {
+      return Array.from(el.selectedOptions)
+        .map((option) => option.textContent?.trim() || option.value)
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      if (el instanceof HTMLInputElement && el.type === "file") {
+        return Array.from(el.files ?? [])
+          .map((file) => file.name)
+          .join(", ");
+      }
+      return el.value.trim();
+    }
+
+    if (el.isContentEditable || el.getAttribute("role") === "textbox") {
+      return (el.textContent ?? "").trim().replace(/\s+/g, " ");
+    }
+
+    const listbox = el.getAttribute("role") === "listbox" ? el : el.querySelector('[role="option"][aria-selected="true"]');
+    if (listbox) {
+      const selected = el.querySelectorAll('[role="option"][aria-selected="true"]');
+      if (selected.length) {
+        return Array.from(selected)
+          .map((node) => (node.textContent ?? "").trim().replace(/\s+/g, " "))
+          .filter(Boolean)
+          .join(", ");
+      }
+    }
+
+    return "";
+  }
+
   function optionText(node: Element): string {
     return (
       node.getAttribute("aria-label") ||
@@ -1135,6 +1201,26 @@ if (!root.__1APPLY_LISTENERS) {
         html: document.documentElement.outerHTML.slice(0, 20_000),
         url: location.href,
         title: document.title,
+      });
+      return false;
+    }
+
+    if (message?.type === "CAPTURE_FILLED_STATE") {
+      const fields = inventoryFromDocument(document);
+      const captured = fields.map((field) => ({
+        fieldKey: field.key,
+        label: field.label || field.name || field.key,
+        value: readControlValue(field.key, field.type),
+        required: Boolean(field.required),
+        fieldType: field.type,
+      }));
+      const pageText = (document.body?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 20_000);
+      sendResponse({
+        type: "CAPTURE_FILLED_STATE_RESULT",
+        origin: location.origin,
+        pageUrl: location.href,
+        pageText,
+        fields: captured,
       });
       return false;
     }

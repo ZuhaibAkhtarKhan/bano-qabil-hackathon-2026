@@ -149,9 +149,20 @@ export async function loadMemoryCatalog(
 
   for (const fact of sortedFacts) {
     if (fact.verification_status === "rejected") continue;
-    const value = typeof fact.value === "string" ? fact.value : JSON.stringify(fact.value);
+    const raw = fact.value;
+    const value =
+      typeof raw === "string"
+        ? raw
+        : raw && typeof raw === "object" && "text" in (raw as object)
+          ? String((raw as { text: unknown }).text ?? "")
+          : JSON.stringify(raw);
+    if (!value.trim()) continue;
     const source = fact.verification_status === "verified" ? "Verified fact" : "Unverified fact";
     const factKey = String(fact.fact_key ?? "").toLowerCase();
+    const labelHint =
+      raw && typeof raw === "object" && "label" in (raw as object)
+        ? String((raw as { label?: unknown }).label ?? "")
+        : "";
 
     if (fact.category === "education") {
       addEducationBlob(value, source);
@@ -161,11 +172,17 @@ export async function loadMemoryCatalog(
       add("Skills → Fact", value, ["skill", "skills", "technology", "tools"], source);
       continue;
     }
-    if (fact.category === "personal" || /phone|mobile|whatsapp|cnic|nic/.test(factKey)) {
+    if (fact.category === "personal" || /phone|mobile|whatsapp|cnic|nic|birth|dob/.test(factKey) || /birth|dob/i.test(labelHint)) {
       if (/cnic|nic|nadra|identity/.test(factKey) || /^\d{5}-?\d{7}-?\d$/.test(value.replace(/\s/g, ""))) {
         add("Profile → CNIC", value, ["cnic", "nic", "national identity", "identity card"], source);
       } else if (/phone|mobile|whatsapp|cell|contact/.test(factKey) || /^\+?[\d\s-]{10,}$/.test(value)) {
         add("Profile → Phone", value, ["phone", "mobile", "whatsapp", "telephone"], source);
+      } else if (
+        /birth|dob/.test(factKey) ||
+        /date of birth|birthdate|\bdob\b/i.test(labelHint) ||
+        /date of birth|birthdate|\bdob\b/i.test(value)
+      ) {
+        add("Profile → Date of birth", value, ["date of birth", "birthdate", "dob", "birthday"], source);
       }
     }
     add(`Fact → ${fact.category}`, value, [String(fact.category), "profile fact"], source);
