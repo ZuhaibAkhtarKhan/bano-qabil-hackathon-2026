@@ -1,4 +1,4 @@
-import { computeDeadlineInfo, prioritizeApplications, type DeadlineUrgency } from "@1apply/domain";
+import { computeDeadlineInfo, prioritizeApplications, type DeadlineUrgency, type PacketLane } from "@1apply/domain";
 
 import { normalizeApplicationStatus } from "@/lib/application-workflow";
 import { asOne, type ApplicationListRow } from "@/server/types";
@@ -99,4 +99,24 @@ export function applicationTitle(row: ApplicationListRow) {
 
 export function applicationHost(row: ApplicationListRow) {
   return asOne(row.opportunities)?.organization ?? "Unknown host";
+}
+
+export type PendingPacket = {
+  id: string;
+  title: string;
+  host: string;
+  deadlineAt: string | null;
+  deadlineLabel: string;
+  lane: PacketLane;
+  summary: string;
+  suggestionCount: number;
+  missingDocs: string[];
+};
+
+export function groupPackets(packets: PendingPacket[]) {
+  return {
+    needsYou: packets.filter((item) => item.lane === "needs_you"),
+    sendsAtDeadline: packets.filter((item) => item.lane === "sends_at_deadline"),
+    waitingHost: packets.filter((item) => item.lane === "waiting_host"),
+  };
 }

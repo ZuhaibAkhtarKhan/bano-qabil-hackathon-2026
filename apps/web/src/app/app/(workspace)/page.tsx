@@ -3,11 +3,11 @@ import Link from "next/link";
 
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { ButtonLink } from "@/components/ui/button";
-import { MetricCard } from "@/components/ui/card";
+import { Card, MetricCard } from "@/components/ui/card";
 import { Timeline } from "@/components/ui/data";
 import { EmptyState } from "@/components/ui/feedback";
-import { ApplicationCard, OpportunityCard } from "@/components/ui/product-cards";
-import { dashboardBuckets } from "@/lib/dashboard";
+import { ApplicationCard } from "@/components/ui/product-cards";
+import { groupPackets } from "@/lib/dashboard";
 import { loadDashboard } from "@/server/workspace/queries";
 
 function Section({
@@ -33,45 +33,67 @@ function Section({
 }
 
 export default async function DashboardPage() {
-  const { profile, completeness, verifiedEvidenceCount, documentCount, resumeCount, applications, notifications, opportunities } =
-    await loadDashboard();
-  const buckets = dashboardBuckets(applications);
-  const applicationByOpportunity = new Map(applications.map((row) => [row.opportunity_id, row.id]));
+  const { profile, kit, packets, notifications, applications, prepareAndSendIfSilent } = await loadDashboard();
+  const lanes = groupPackets(packets);
+  const submitted = applications.filter((row) => row.status === "submitted");
 
   return (
     <WorkspaceMain>
       <PageHeader
         eyebrow="Dashboard"
-        title={`Welcome${profile.display_name ? `, ${profile.display_name}` : ""}`}
-        body="Your application operating system. Counts come from private memory — this screen never invents a pipeline."
-        actions={<ButtonLink href="/app/opportunities">Add an opportunity</ButtonLink>}
+        title={kit.ready ? `Welcome${profile.display_name ? `, ${profile.display_name}` : ""}` : "Finish your kit, then watch deadlines"}
+        body="This is the home for pending packets. Add a posting only when you have a URL. Extra editors live under Your kit and Settings."
+        actions={<ButtonLink href="/app/opportunities">Add a posting</ButtonLink>}
       />
 
-      <dl className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Memory" value={`${completeness.percent}%`} hint="Identity, consent, verified evidence, documents" />
-        <MetricCard label="Active" value={buckets.active.length} hint="Saved, analyzing, ready, in progress, review required" />
-        <MetricCard label="Evidence" value={verifiedEvidenceCount} hint={`${documentCount} files · ${resumeCount} resumes`} />
-        <MetricCard label="Attention" value={buckets.attention.length + notifications.filter((item) => !item.read_at).length} hint="Reviews, missing facts, unread notices" />
+      {!kit.ready || kit.missing.length > 0 ? (
+        <Card className="mt-8 p-6">
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Your kit</p>
+          <h2 className="mt-1 font-display text-2xl">Upload once, reuse everywhere</h2>
+          <p className="mt-2 text-sm text-ink-muted">
+            Name, university, resume, CNIC, and B-form live in one place. Missing: {kit.missing.join(", ") || "nothing"}.
+          </p>
+          <div className="mt-4">
+            <ButtonLink href="/app/memory">Open your kit</ButtonLink>
+          </div>
+        </Card>
+      ) : null}
+
+      <dl className="mt-10 grid gap-4 sm:grid-cols-3">
+        <MetricCard label="Needs you" value={lanes.needsYou.length} hint="Missing facts, docs, or answers" />
+        <MetricCard
+          label="Sends at deadline"
+          value={lanes.sendsAtDeadline.length}
+          hint={prepareAndSendIfSilent ? "Silence will freeze the packet" : "Turn on in Settings to auto-freeze"}
+        />
+        <MetricCard label="Waiting on host" value={lanes.waitingHost.length} hint="CAPTCHA, signature, or payment" />
       </dl>
 
       <div className="mt-4 grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
         <div>
           <Section
-            title="Attention required"
-            count={buckets.attention.length}
+            title="Needs you"
+            count={lanes.needsYou.length}
             empty={
               <EmptyState
                 eyebrow="Clear"
                 title="Nothing needs you right now"
-                body="Unclear eligibility, unverified evidence, and review items will appear here when they exist."
+                body="Missing kit items, unanswered questions, and unmatched documents appear here."
               />
             }
           >
             <ul className="grid gap-4">
-              {buckets.attention.map((row) => (
-                <li key={row.id}>
-                  <Link href={`/app/applications/${row.id}`} className="block">
-                    <ApplicationCard row={row} />
+              {lanes.needsYou.map((packet) => (
+                <li key={packet.id}>
+                  <Link href={`/app/applications/${packet.id}`} className="block">
+                    <Card className="p-5">
+                      <p className="text-sm font-medium">{packet.title}</p>
+                      <p className="mt-1 text-xs text-ink-muted">{packet.host} · {packet.deadlineLabel}</p>
+                      <p className="mt-2 text-sm text-ink-muted">{packet.summary}</p>
+                      {packet.missingDocs.length > 0 ? (
+                        <p className="mt-2 text-xs text-coral">Missing: {packet.missingDocs.join(", ")}</p>
+                      ) : null}
+                    </Card>
                   </Link>
                 </li>
               ))}
@@ -79,17 +101,28 @@ export default async function DashboardPage() {
           </Section>
 
           <Section
-            title="Deadlines"
-            count={buckets.deadlines.length}
+            title="Sends at deadline unless you edit"
+            count={lanes.sendsAtDeadline.length}
             empty={
-              <p className="text-sm text-ink-muted">No upcoming deadlines on file.</p>
+              <p className="text-sm text-ink-muted">
+                {prepareAndSendIfSilent
+                  ? "No complete packets waiting on a deadline."
+                  : "Opt in under Settings if you want 1-Apply to freeze a packet when you stay silent."}
+              </p>
             }
           >
             <ul className="grid gap-4">
-              {buckets.deadlines.map((row) => (
-                <li key={row.id}>
-                  <Link href={`/app/applications/${row.id}`} className="block">
-                    <ApplicationCard row={row} />
+              {lanes.sendsAtDeadline.map((packet) => (
+                <li key={packet.id}>
+                  <Link href={`/app/applications/${packet.id}`} className="block">
+                    <Card className="p-5">
+                      <p className="text-sm font-medium">{packet.title}</p>
+                      <p className="mt-1 text-xs text-ink-muted">{packet.host} · {packet.deadlineLabel}</p>
+                      <p className="mt-2 text-sm">{packet.summary}</p>
+                      <p className="mt-2 text-xs text-ink-muted">
+                        Suggestions stay editable until the deadline. 1-Apply will not click host Submit.
+                      </p>
+                    </Card>
                   </Link>
                 </li>
               ))}
@@ -97,44 +130,19 @@ export default async function DashboardPage() {
           </Section>
 
           <Section
-            title="Active applications"
-            count={buckets.active.length}
-            empty={
-              <EmptyState
-                eyebrow="Empty"
-                title="No applications in progress"
-                body="Paste a public opportunity URL or create one manually. Tracking starts after that."
-                actions={<ButtonLink href="/app/opportunities">Open opportunities</ButtonLink>}
-              />
-            }
+            title="Waiting on host / CAPTCHA"
+            count={lanes.waitingHost.length}
+            empty={<p className="text-sm text-ink-muted">No packets paused on CAPTCHA, signature, or payment.</p>}
           >
             <ul className="grid gap-4">
-              {buckets.active.map((row) => (
-                <li key={row.id}>
-                  <Link href={`/app/applications/${row.id}`} className="block">
-                    <ApplicationCard row={row} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </Section>
-
-          <Section
-            title="Recent applications"
-            count={buckets.recent.length}
-            empty={
-              <EmptyState
-                eyebrow="Empty"
-                title="No application history yet"
-                body="Recent work appears here after you create an opportunity and start a workspace."
-              />
-            }
-          >
-            <ul className="grid gap-4">
-              {buckets.recent.map((row) => (
-                <li key={row.id}>
-                  <Link href={`/app/applications/${row.id}`} className="block">
-                    <ApplicationCard row={row} />
+              {lanes.waitingHost.map((packet) => (
+                <li key={packet.id}>
+                  <Link href={`/app/applications/${packet.id}`} className="block">
+                    <Card className="p-5">
+                      <p className="text-sm font-medium">{packet.title}</p>
+                      <p className="mt-1 text-xs text-ink-muted">{packet.host} · {packet.deadlineLabel}</p>
+                      <p className="mt-2 text-sm text-ink-muted">Complete the host challenge yourself. 1-Apply never bypasses it.</p>
+                    </Card>
                   </Link>
                 </li>
               ))}
@@ -144,57 +152,17 @@ export default async function DashboardPage() {
 
         <aside className="grid gap-8">
           <section>
-            <h2 className="font-display text-2xl">Submitted</h2>
-            <p className="mt-1 font-mono text-xs text-ink-muted">{buckets.submitted.length}</p>
-            {buckets.submitted.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-muted">No frozen snapshots yet.</p>
+            <h2 className="font-display text-2xl">Frozen packets</h2>
+            <p className="mt-1 font-mono text-xs text-ink-muted">{submitted.length}</p>
+            {submitted.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-muted">No snapshots yet.</p>
             ) : (
               <ul className="mt-4 grid gap-3">
-                {buckets.submitted.slice(0, 4).map((row) => (
+                {submitted.slice(0, 4).map((row) => (
                   <li key={row.id}>
                     <Link href={`/app/applications/${row.id}`} className="block">
                       <ApplicationCard row={row} />
                     </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section>
-            <h2 className="font-display text-2xl">Interviews</h2>
-            <p className="mt-1 font-mono text-xs text-ink-muted">{buckets.interviews.length}</p>
-            {buckets.interviews.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-muted">No under-review or interview stages recorded.</p>
-            ) : (
-              <ul className="mt-4 grid gap-3">
-                {buckets.interviews.map((row) => (
-                  <li key={row.id}>
-                    <Link href={`/app/applications/${row.id}`} className="block">
-                      <ApplicationCard row={row} />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section>
-            <h2 className="font-display text-2xl">Recent opportunities</h2>
-            {opportunities.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-muted">None ingested yet.</p>
-            ) : (
-              <ul className="mt-4 grid gap-3">
-                {opportunities.map((item) => (
-                  <li key={item.id}>
-                    <OpportunityCard
-                      opportunity={item}
-                      href={
-                        applicationByOpportunity.get(item.id)
-                          ? `/app/applications/${applicationByOpportunity.get(item.id)}`
-                          : "/app/opportunities"
-                      }
-                    />
                   </li>
                 ))}
               </ul>
@@ -204,7 +172,7 @@ export default async function DashboardPage() {
           <section>
             <h2 className="font-display text-2xl">Activity</h2>
             {notifications.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-muted">No notices yet. This list stays empty until something actually happens.</p>
+              <p className="mt-3 text-sm text-ink-muted">No notices yet.</p>
             ) : (
               <div className="mt-4">
                 <Timeline

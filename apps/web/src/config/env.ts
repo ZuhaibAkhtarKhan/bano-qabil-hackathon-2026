@@ -86,6 +86,8 @@ export const STORAGE_PREFIX: Record<string, string> = {
   certificate: "certificates",
   portfolio: "portfolios",
   supporting_document: "supporting",
+  identity_document: "identity",
+  family_document: "family",
   other: "supporting",
 };
 

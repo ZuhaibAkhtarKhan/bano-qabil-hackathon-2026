@@ -11,7 +11,7 @@ export default function SignUpPage() {
     <>
       <h1 className="font-display text-4xl">Create your memory</h1>
       <p className="mt-2 text-sm text-ink-muted">
-        You will confirm how 1-Apply may use your documents before any extraction runs.
+        You will confirm how 1-Apply may use your documents, then fill name, university, education, resume, CNIC, and B-form. Skip a file only if you do not have it yet — we remind you the next time you sign in.
       </p>
       <div className="mt-8">
         <Suspense>

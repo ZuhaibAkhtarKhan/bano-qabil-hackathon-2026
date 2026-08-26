@@ -23,10 +23,10 @@ export const SEMANTIC_STATUS: Record<
     description: "Confirmed by you. Eligible for generation.",
   },
   ai_generated: {
-    label: "AI generated",
+    label: "Suggestion",
     tone: "violet",
     pattern: "dashed",
-    description: "Model draft. Not the same as verified evidence.",
+    description: "Suggested from your kit. Keep, edit, or ignore it.",
   },
   user_edited: {
     label: "User edited",

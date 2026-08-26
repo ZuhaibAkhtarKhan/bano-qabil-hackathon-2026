@@ -1,6 +1,7 @@
 export {
   APPLICATION_LIFECYCLE,
   applicationStatusSchema,
+  DOCUMENT_TYPE_LABELS,
   documentTypeSchema,
   documentVersionStatusSchema,
   eligibilityStateSchema,
@@ -65,6 +66,7 @@ export {
   ONBOARDING_STEPS,
   onboardingHref,
   onboardingStepSchema,
+  postAuthHref,
   profileCompletenessSchema,
   profileRecordSchema,
   resolveOnboardingStep,

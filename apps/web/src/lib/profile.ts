@@ -9,6 +9,7 @@ import {
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 import { hasConsent, onboardingComplete, skippedDocuments } from "@/lib/profile-state";
+import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import type { ProfileDetails, EvidenceRow } from "@/server/types";
 
 export type ProfileRow = {
@@ -98,7 +99,7 @@ export async function loadOnboardingState() {
   }
 
   const supabase = await createServerSupabaseClient();
-  const [{ count: documentCount }, { count: evidenceCount }, { count: verifiedEvidenceCount }, { data: evidence }] =
+  const [{ count: documentCount }, { count: evidenceCount }, { count: verifiedEvidenceCount }, { data: evidence }, { data: documents }] =
     await Promise.all([
       supabase.from("documents").select("id", { count: "exact", head: true }),
       supabase.from("evidence_items").select("id", { count: "exact", head: true }),
@@ -114,14 +115,18 @@ export async function loadOnboardingState() {
         )
         .order("created_at", { ascending: false })
         .limit(40),
+      supabase.from("documents").select("id, type, label").order("created_at", { ascending: false }),
     ]);
 
+  const prefs = parseWorkspacePreferences(profile.preferences);
   const hasIdentity = Boolean(profile.display_name?.trim());
   const consent = hasConsent(profile);
   const skipped = skippedDocuments(profile);
   const step = resolveOnboardingStep({
     hasConsent: consent,
     hasIdentity,
+    hasUniversity: Boolean(prefs.university),
+    hasEducation: Boolean(prefs.educationSummary) || Boolean(prefs.university),
     documentCount: documentCount ?? 0,
     evidenceCount: evidenceCount ?? 0,
     skippedDocuments: skipped,
@@ -137,6 +142,7 @@ export async function loadOnboardingState() {
     evidenceCount: evidenceCount ?? 0,
     verifiedEvidenceCount: verifiedEvidenceCount ?? 0,
     evidence: (evidence ?? []) as EvidenceRow[],
+    documents: (documents ?? []) as Array<{ id: string; type: string; label: string }>,
     canFinish: canFinishOnboarding({ hasConsent: consent, hasIdentity }),
     consentUpdateFields,
   };

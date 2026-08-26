@@ -3,6 +3,7 @@ import {
   evaluateSubmissionGuard,
   assessOperatingLoop,
   PERSONA_PRESETS,
+  requiredDocumentCovered,
   type SubmissionInput,
 } from "@1apply/domain";
 import { applicationStatusSchema } from "@1apply/contracts";
@@ -101,9 +102,11 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
   const requiredDocumentLabels = (data.requiredDocuments ?? [])
     .filter((item) => Boolean(item.required))
     .map((item) => String(item.label));
-  const attachedDocumentLabels = attached
-    .map((item) => documents.find((document) => document.id === item.document_id)?.label ?? null)
-    .filter((item): item is string => Boolean(item));
+  const attachedVault = attached
+    .map((item) => documents.find((document) => document.id === item.document_id))
+    .filter((item): item is (typeof documents)[number] => Boolean(item))
+    .map((document) => ({ type: String(document.type), label: String(document.label) }));
+  const attachedDocumentLabels = requiredDocumentLabels.filter((label) => requiredDocumentCovered(label, attachedVault));
   const recommendedResume = data.resumeMatches.find((item) => item.recommended) ?? data.resumeMatches[0] ?? null;
   const recommendedResumeAttached = recommendedResume
     ? attached.some(
@@ -348,10 +351,11 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           {requiredDocumentLabels.length > 0 ? (
             <div className="mt-4 flex flex-wrap gap-2">
               {requiredDocumentLabels.map((label) => {
-                const complete = attachedDocumentLabels.some((item) => item.toLowerCase() === label.toLowerCase());
+                const complete = requiredDocumentCovered(label, attachedVault);
                 return (
                   <StatusPill key={label} tone={complete ? "mint" : "sand"}>
                     {label}
+                    {complete ? " · from kit" : ""}
                   </StatusPill>
                 );
               })}
@@ -359,8 +363,8 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           ) : null}
         {documents.length === 0 ? (
           <p className="mt-4 text-sm text-ink-muted">
-            <Link className="underline" href="/app/documents">
-              Upload a document
+            <Link className="underline" href="/app/memory">
+              Upload in your kit
             </Link>{" "}
             first.
           </p>
@@ -413,9 +417,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
       <section id="answers" className="mt-8 scroll-mt-8">
         <div className="mb-4 flex items-baseline justify-between">
           <div>
-            <h2 className="font-display text-2xl">Questions and answers</h2>
+            <h2 className="font-display text-2xl">Questions and suggestions</h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Extracted questions, grounded drafts, evidence traces, and explicit approval states.
+              Generated answers are suggestions. Keep, edit, or ignore them. Silence-send uses the current packet text, not invented facts.
             </p>
           </div>
           <StatusPill tone={approvedAnswers >= questions.filter((item) => item.required).length ? "mint" : "sand"}>

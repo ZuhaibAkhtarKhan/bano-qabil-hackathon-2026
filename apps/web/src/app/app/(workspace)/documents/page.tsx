@@ -1,4 +1,4 @@
-import { documentTypeSchema } from "@1apply/contracts";
+import { documentTypeSchema, DOCUMENT_TYPE_LABELS } from "@1apply/contracts";
 
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
@@ -11,17 +11,6 @@ import { formatDocumentType } from "@/lib/documents/versioning";
 import { uploadDocument } from "@/server/documents/actions";
 import { loadDocumentsWorkspace } from "@/server/workspace/queries";
 
-const TYPE_LABELS: Record<string, string> = {
-  resume: "Resume",
-  resume_variant: "Resume variant",
-  cover_letter: "Cover letter",
-  transcript: "Transcript",
-  certificate: "Certificate",
-  portfolio: "Portfolio",
-  supporting_document: "Supporting document",
-  other: "Other application document",
-};
-
 export default async function DocumentsPage({
   searchParams,
 }: {
@@ -33,9 +22,9 @@ export default async function DocumentsPage({
   return (
     <WorkspaceMain>
       <PageHeader
-        eyebrow="Documents"
-        title="Private vault with version history"
-        body="Every upload creates a version. Attach an explicit version to applications; frozen snapshots preserve what you submitted."
+        eyebrow="Vault"
+        title="Version history for kit files"
+        body="Your kit is the front door. This page keeps versions. CNIC and B-form types auto-attach when a posting asks for them."
       />
       <FlashBanner notice={notice} error={error} />
 
@@ -48,7 +37,7 @@ export default async function DocumentsPage({
             <Select id="document-type" name="type" defaultValue="resume">
               {documentTypeSchema.options.map((type) => (
                 <option key={type} value={type}>
-                  {TYPE_LABELS[type] ?? formatDocumentType(type)}
+                  {DOCUMENT_TYPE_LABELS[type] ?? formatDocumentType(type)}
                 </option>
               ))}
             </Select>

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { documentTypeSchema } from "@1apply/contracts";
 import { freezeSubmissionManifest } from "@1apply/domain";
+import { persistKitDocumentType } from "@/server/documents/service";
 
 const migration = readFileSync(
   path.resolve(__dirname, "../../../../supabase/migrations/20260818050000_documents_evidence.sql"),
@@ -14,6 +15,15 @@ describe("Phase 6 document types", () => {
   it("includes resume variants and supporting documents", () => {
     expect(documentTypeSchema.options).toContain("resume_variant");
     expect(documentTypeSchema.options).toContain("supporting_document");
+    expect(documentTypeSchema.options).toContain("identity_document");
+    expect(documentTypeSchema.options).toContain("family_document");
+  });
+
+  it("stores CNIC and B-form as other until hosted document_type includes them", () => {
+    expect(persistKitDocumentType("identity_document", "22P02")).toBe("other");
+    expect(persistKitDocumentType("family_document", "22P02")).toBe("other");
+    expect(persistKitDocumentType("identity_document", undefined)).toBe("identity_document");
+    expect(persistKitDocumentType("resume", "22P02")).toBe("resume");
   });
 });
 

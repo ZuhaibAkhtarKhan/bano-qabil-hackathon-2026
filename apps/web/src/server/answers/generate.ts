@@ -6,6 +6,7 @@ import {
   finalizeGroundedDraft,
   groundingScore,
   lengthWarnings,
+  packetAnswerText,
   parsePersona,
   rankEvidenceForAnswer,
   suggestPreviousAnswers,
@@ -347,4 +348,56 @@ export async function generateAnswer(
     groundingScore: gScore,
     state,
   };
+}
+
+export async function draftSuggestedAnswersForApplication(
+  supabase: SupabaseClient,
+  actor: Actor,
+  applicationId: string,
+  opportunityId: string,
+) {
+  const { isAiConfigured } = await import("@/infra/ai/openai");
+  if (!isAiConfigured()) return 0;
+
+  const [{ data: questions }, { data: answers }] = await Promise.all([
+    supabase
+      .from("opportunity_questions")
+      .select("id")
+      .eq("opportunity_id", opportunityId)
+      .order("sort_order", { ascending: true })
+      .limit(8),
+    supabase.from("application_answers").select("question_id, original_ai_text, user_edited_text, approved_text").eq("application_id", applicationId),
+  ]);
+
+  const answered = new Set(
+    (answers ?? [])
+      .filter((row) =>
+        Boolean(
+          packetAnswerText({
+            approvedText: (row.approved_text as string | null) ?? null,
+            userEditedText: (row.user_edited_text as string | null) ?? null,
+            originalAiText: (row.original_ai_text as string | null) ?? null,
+          }),
+        ),
+      )
+      .map((row) => String(row.question_id)),
+  );
+
+  let drafted = 0;
+  for (const question of questions ?? []) {
+    const questionId = String(question.id);
+    if (answered.has(questionId)) continue;
+    try {
+      await generateAnswer(supabase, actor, {
+        applicationId,
+        questionId,
+        intent: "draft",
+        tone: "formal",
+      });
+      drafted += 1;
+    } catch {
+      continue;
+    }
+  }
+  return drafted;
 }
