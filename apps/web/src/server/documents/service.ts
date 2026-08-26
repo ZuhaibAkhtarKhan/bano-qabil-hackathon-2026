@@ -16,6 +16,24 @@ import { indexDocumentVersionEmbeddings } from "@/services/embeddings";
 
 type UploadPayload = Awaited<ReturnType<typeof readValidatedUpload>>;
 
+export function persistKitDocumentType(type: DocumentType, pgCode: string | undefined): DocumentType {
+  if (pgCode === "22P02" && (type === "identity_document" || type === "family_document")) {
+    return "other";
+  }
+  return type;
+}
+
+export async function insertOwnedDocument(
+  supabase: SupabaseClient,
+  row: { id: string; user_id: string; type: DocumentType; label: string },
+) {
+  const first = await supabase.from("documents").insert(row);
+  if (!first.error) return first;
+  const fallbackType = persistKitDocumentType(row.type, first.error.code);
+  if (fallbackType === row.type) return first;
+  return supabase.from("documents").insert({ ...row, type: fallbackType });
+}
+
 export async function assertOwnedDocument(
   supabase: SupabaseClient,
   actor: Actor,
@@ -90,7 +108,7 @@ export async function createDocumentWithVersion(input: {
     .upload(storagePath, input.upload.buffer, { contentType: input.upload.mimeType, upsert: false });
   if (uploadError) throw new Error("STORAGE_UPLOAD_FAILED");
 
-  const { error: documentError } = await input.supabase.from("documents").insert({
+  const { error: documentError } = await insertOwnedDocument(input.supabase, {
     id: documentId,
     user_id: input.userId,
     type: input.type,

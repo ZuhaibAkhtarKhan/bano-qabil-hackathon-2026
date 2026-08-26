@@ -10,7 +10,7 @@ import { loadAppConfig } from "@/config/env";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
 import { runOwnedJob } from "@/infra/jobs/runner";
-import { processDocumentVersion } from "@/server/documents/service";
+import { insertOwnedDocument, processDocumentVersion } from "@/server/documents/service";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { recordAuditEvent } from "@/server/audit";
 import { extractDocumentText } from "@/lib/documents/extract-text";
@@ -367,12 +367,16 @@ export async function uploadMemoryDocument(formData: FormData) {
       .upload(storagePath, upload.buffer, { contentType: upload.mimeType, upsert: false });
     if (uploadError) redirectWith(sectionReturn(formData), { error: "upload" });
 
-    await supabase.from("documents").insert({
+    const documentInsert = await insertOwnedDocument(supabase, {
       id: documentId,
       user_id: user.id,
       type,
       label,
     });
+    if (documentInsert.error) {
+      await supabase.storage.from(bucket).remove([storagePath]);
+      redirectWith(sectionReturn(formData), { error: "upload" });
+    }
     await supabase.from("document_versions").insert({
       id: versionId,
       document_id: documentId,
