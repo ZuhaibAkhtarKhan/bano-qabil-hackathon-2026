@@ -139,6 +139,7 @@ export const memoryCategorySchema = z.enum([
   "research",
   "links",
   "supporting",
+  "answers",
 ]);
 
 export const extractionStatusSchema = z.enum(["manual", "extracted", "user_edited"]);

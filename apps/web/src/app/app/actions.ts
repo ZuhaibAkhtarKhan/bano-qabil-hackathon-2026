@@ -9,7 +9,6 @@ import { logError, logInfo } from "@/lib/log";
 import { KIT_REMINDED_COOKIE } from "@/lib/post-auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { safeOnboardingReturn } from "@/lib/auth-errors";
-import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { revokeToken } from "@/server/integrations/google-oauth";
 import { unwrapTokenRow } from "@/server/integrations/token-crypto";
 import { recordAuditEvent } from "@/server/audit";
@@ -127,15 +126,8 @@ export async function finishOnboarding() {
     .eq("id", user.id)
     .maybeSingle();
 
-  const prefs = parseWorkspacePreferences((profile?.preferences as Record<string, unknown> | null) ?? {});
-  if (
-    !profile?.terms_accepted_at ||
-    !profile.ai_processing_accepted_at ||
-    !profile.display_name?.trim() ||
-    !prefs.university ||
-    !prefs.educationSummary
-  ) {
-    redirect("/app/onboarding/profile?error=required");
+  if (!profile?.terms_accepted_at || !profile.ai_processing_accepted_at) {
+    redirect("/app/onboarding/consent?error=required");
   }
 
   const now = new Date().toISOString();

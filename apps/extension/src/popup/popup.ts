@@ -196,6 +196,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       applicationId,
       origin: inventory.origin || new URL(inventory.url).origin,
       fields: inventory.fields,
+      hazards: inventory.hazards,
     });
 
     const result = await send<{

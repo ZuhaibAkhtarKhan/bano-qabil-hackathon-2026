@@ -5,6 +5,8 @@ export {
   evaluateRequirement,
   rankEvidenceForQuestion,
   rankResumes,
+  isWeakResumeFit,
+  RESUME_FIT_WEAK_THRESHOLD,
   tokenize,
   overlapScore,
   classifyRequirementKind,

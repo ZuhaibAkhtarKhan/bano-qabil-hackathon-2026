@@ -85,13 +85,16 @@ export async function loadMemoryCatalog(
 
   add("Profile → Full name", profile?.display_name, ["name", "full name"]);
   add("Profile → Email", profile?.email, ["email"]);
-  add("Profile → Phone", profile?.phone, ["phone", "mobile", "whatsapp", "telephone"]);
+  add("Profile → Phone", profile?.phone, ["phone", "mobile", "whatsapp", "telephone", "contact", "contact number", "contact no"]);
   add("Profile → Location", [profile?.location_city, profile?.location_country].filter(Boolean).join(", "), [
     "location",
     "city",
     "state",
     "delhi ncr",
     "country",
+    "place",
+    "residence",
+    "address",
   ]);
   add("Profile → GitHub", profile?.github_url, ["github", "link", "url", "portfolio"]);
   add("Profile → LinkedIn", profile?.linkedin_url, ["linkedin", "link", "url", "sample", "writing sample"]);
@@ -200,6 +203,11 @@ export async function loadMemoryCatalog(
     }
     if (fact.category === "skills") {
       add("Skills → Fact", value, ["skill", "skills", "technology", "tools"], source);
+      continue;
+    }
+    if (fact.category === "answers") {
+      const prompt = labelHint.trim() || "Saved answer";
+      add(`Saved answer → ${prompt.slice(0, 48)}`, value, [prompt.toLowerCase().slice(0, 80), "motivation", "why", "essay", "cover letter"], source);
       continue;
     }
     if (fact.category === "personal" || /phone|mobile|whatsapp|cnic|nic|birth|dob/.test(factKey) || /birth|dob/i.test(labelHint)) {

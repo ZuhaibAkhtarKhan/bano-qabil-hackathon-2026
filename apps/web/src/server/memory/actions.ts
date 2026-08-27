@@ -331,13 +331,125 @@ export async function verifyProfileFact(formData: FormData) {
 }
 
 export async function deleteProfileFact(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const id = String(formData.get("factId") ?? "");
   if (!id) redirectWith(sectionReturn(formData), { error: "required" });
   await supabase.from("profile_facts").delete().eq("id", id).eq("user_id", user.id);
   await syncMemoryConflicts(supabase, user.id);
-  revalidatePath(MEMORY);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
   redirectWith(sectionReturn(formData), { notice: "deleted" });
+}
+
+export async function addSavedAnswer(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const label = String(formData.get("label") ?? "").trim();
+  const text = String(formData.get("text") ?? "").trim();
+  if (!label || !text) redirectWith(sectionReturn(formData) || `${MEMORY}?section=answers`, { error: "required" });
+
+  const factKey = memoryFactKey({
+    category: "answers",
+    title: label.slice(0, 80),
+    field: "saved_answer",
+  });
+
+  const { error } = await supabase.from("profile_facts").insert({
+    user_id: user.id,
+    category: "answers",
+    fact_type: "saved_answer",
+    fact_key: factKey,
+    value: { text, label },
+    source: "manual",
+    extraction_status: "manual",
+    verification_status: "verified",
+    excerpt: label.slice(0, 240),
+  });
+  if (error) redirectWith(`${MEMORY}?section=answers`, { error: "save" });
+
+  await syncMemoryConflicts(supabase, user.id);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
+  redirectWith(`${MEMORY}?section=answers`, { notice: "saved" });
+}
+
+export async function updateSavedAnswer(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const id = String(formData.get("factId") ?? "").trim();
+  const label = String(formData.get("label") ?? "").trim();
+  const text = String(formData.get("text") ?? "").trim();
+  if (!id || !label || !text) redirectWith(`${MEMORY}?section=answers`, { error: "required" });
+
+  const factKey = memoryFactKey({
+    category: "answers",
+    title: label.slice(0, 80),
+    field: "saved_answer",
+  });
+
+  const { error } = await supabase
+    .from("profile_facts")
+    .update({
+      fact_key: factKey,
+      value: { text, label },
+      excerpt: label.slice(0, 240),
+      extraction_status: "user_edited",
+      verification_status: "verified",
+    })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) redirectWith(`${MEMORY}?section=answers`, { error: "save" });
+
+  await syncMemoryConflicts(supabase, user.id);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
+  redirectWith(`${MEMORY}?section=answers`, { notice: "saved" });
+}
+
+export async function generateSavedAnswerDraftAction(formData: FormData): Promise<{
+  error: string | null;
+  draft: string | null;
+}> {
+  const { supabase, actor } = await requireWorkspace();
+  const label = String(formData.get("label") ?? "").trim();
+  const toneRaw = String(formData.get("tone") ?? "formal").trim();
+  const tone =
+    toneRaw === "enthusiastic" || toneRaw === "concise" || toneRaw === "detailed" ? toneRaw : "formal";
+
+  if (!label) return { error: "required", draft: null };
+
+  const { data: recentApp } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("user_id", actor.userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  try {
+    const { generateGroundedAiDraft } = await import("@/server/extension/enrich-ai-answers");
+    const guidance =
+      tone === "enthusiastic"
+        ? "Tone: enthusiastic but still grounded."
+        : tone === "concise"
+          ? "Tone: concise."
+          : tone === "detailed"
+            ? "Tone: detailed and specific."
+            : "Tone: formal and professional.";
+    const result = await generateGroundedAiDraft({
+      supabase,
+      actor,
+      applicationId: recentApp?.id ?? null,
+      question: label,
+      guidance,
+    });
+    const draft = String(result.draft ?? "").trim();
+    if (!draft) return { error: "empty", draft: null };
+    return { error: null, draft };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    if (message === "AI_UNAVAILABLE") return { error: "ai_unavailable", draft: null };
+    if (message === "INSUFFICIENT_EVIDENCE") return { error: "no_evidence", draft: null };
+    return { error: "generate_failed", draft: null };
+  }
 }
 
 export async function resolveMemoryConflictAction(formData: FormData) {

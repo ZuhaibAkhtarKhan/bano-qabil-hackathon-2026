@@ -5,6 +5,7 @@ import { MEMORY_SECTIONS, CNIC_PHARM_B_LABEL, kitStatus } from "@1apply/domain";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
 import { KitDocumentUploadForm, UploadSubmitButton } from "@/components/app/kit-document-upload-form";
+import { UseInKitField } from "@/components/app/use-in-kit-field";
 import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
@@ -20,6 +21,7 @@ import {
   updateIdentity,
   uploadMemoryDocument,
 } from "@/server/memory/actions";
+import { SavedAnswersPanel } from "@/components/app/saved-answers-panel";
 import type { loadMemoryWorkspace } from "@/server/memory/queries";
 
 type MemoryData = Awaited<ReturnType<typeof loadMemoryWorkspace>>;
@@ -357,11 +359,28 @@ export function MemoryWorkspace({
     </div>
   );
 
+  const answersPanel = (
+    <SavedAnswersPanel
+      facts={data.facts
+        .filter((fact) => fact.category === "answers")
+        .map((fact) => {
+          const value = fact.value as { text?: string; label?: string };
+          return {
+            id: fact.id,
+            label: String(value.label ?? fact.excerpt ?? "Saved question").trim() || "Saved question",
+            text: String(value.text ?? "").trim(),
+            source: fact.source,
+          };
+        })}
+    />
+  );
+
   let panel: ReactNode;
   if (section === "personal") panel = personalPanel;
   else if (section === "skills") panel = skillsPanel;
   else if (section === "links") panel = linksPanel;
   else if (section === "supporting") panel = supportingPanel;
+  else if (section === "answers") panel = answersPanel;
   else if (evidenceSections.includes(section)) panel = evidencePanel(section);
   else panel = personalPanel;
 
@@ -387,7 +406,12 @@ export function MemoryWorkspace({
             />
           </div>
         </div>
-        <KitDocumentUploadForm action={uploadMemoryDocument} className="rounded-xl border border-sand/50 p-3" compactUseInKit>
+        <KitDocumentUploadForm
+          action={uploadMemoryDocument}
+          className="rounded-xl border border-sand/50 p-3"
+          compactUseInKit
+          showUseInKit={false}
+        >
           {hiddenSection}
           <p className="text-sm font-medium">{CNIC_PHARM_B_LABEL}</p>
           <Field label="Document type" htmlFor="kit-id-doc-type">
@@ -398,12 +422,14 @@ export function MemoryWorkspace({
           </Field>
           <input type="hidden" name="label" value={CNIC_PHARM_B_LABEL} />
           <Input id="kit-id-doc-file" name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
+          <UseInKitField defaultChecked compact />
           <UploadSubmitButton>Upload</UploadSubmitButton>
         </KitDocumentUploadForm>
         <KitDocumentUploadForm
           action={uploadMemoryDocument}
           className="grid gap-2 rounded-xl border border-sand/50 p-3 md:col-span-2 lg:col-span-1"
           compactUseInKit
+          showUseInKit={false}
         >
           {hiddenSection}
           <input type="hidden" name="type" value="other" />
@@ -418,6 +444,7 @@ export function MemoryWorkspace({
             />
           </Field>
           <Input id="kit-other-file" name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
+          <UseInKitField defaultChecked compact />
           <UploadSubmitButton>Upload</UploadSubmitButton>
         </KitDocumentUploadForm>
       </div>

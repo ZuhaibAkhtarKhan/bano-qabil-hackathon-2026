@@ -1,4 +1,9 @@
-import { buildAutoResumeSelection, computeDeadlineInfo, type CategorizedResume } from "@1apply/domain";
+import {
+  buildAutoResumeSelection,
+  computeDeadlineInfo,
+  isWeakResumeFit,
+  type CategorizedResume,
+} from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
@@ -12,6 +17,7 @@ export type EnsureResumeSelectionResult = {
   strategy: string | null;
   documentId: string | null;
   notified: boolean;
+  weakFit: boolean;
 };
 
 async function attachResume(
@@ -42,10 +48,21 @@ async function attachResume(
   });
 }
 
+function deadlineForcesAttach(deadlineAt: string | null, timezone: string | null): boolean {
+  const deadline = computeDeadlineInfo(deadlineAt, timezone);
+  return (
+    deadline.urgency === "imminent" ||
+    deadline.urgency === "soon" ||
+    deadline.urgency === "overdue"
+  );
+}
+
 /**
  * Ensures resume_matches has a recommendation and optionally attaches the latest
- * category version to the application. Runs automatically on workspace load and
- * before deadlines when the user has not chosen a resume manually.
+ * category version to the application.
+ *
+ * Strong fits attach immediately. Weak fits stay for Need You approval unless a
+ * deadline is approaching (or deadlineAuto is set by the automation sweep).
  */
 export async function ensureApplicationResumeSelection(
   supabase: SupabaseClient,
@@ -69,17 +86,21 @@ export async function ensureApplicationResumeSelection(
     .maybeSingle();
 
   if (!application?.opportunity_id) {
-    return { ran: false, attached: false, strategy: null, documentId: null, notified: false };
+    return { ran: false, attached: false, strategy: null, documentId: null, notified: false, weakFit: false };
   }
 
   if (["submitted", "rejected", "withdrawn", "archived", "offer", "accepted"].includes(String(application.status))) {
-    return { ran: false, attached: false, strategy: null, documentId: null, notified: false };
+    return { ran: false, attached: false, strategy: null, documentId: null, notified: false, weakFit: false };
   }
+
+  const deadlineAt = (application.deadline_at as string | null) ?? null;
+  const deadlineTz = (application.deadline_timezone as string | null) ?? null;
+  const forceByDeadline = deadlineAuto || deadlineForcesAttach(deadlineAt, deadlineTz);
 
   const [{ data: existingMatches }, { data: attached }] = await Promise.all([
     supabase
       .from("resume_matches")
-      .select("document_id, document_version_id, recommended")
+      .select("document_id, document_version_id, recommended, score, suggestion")
       .eq("application_id", applicationId),
     supabase
       .from("application_documents")
@@ -96,6 +117,8 @@ export async function ensureApplicationResumeSelection(
   if (recommended && !forceRefresh) {
     const docId = String(recommended.document_id);
     const versionId = String(recommended.document_version_id);
+    const score = typeof recommended.score === "number" ? recommended.score : Number(recommended.score ?? NaN);
+    const weakFit = isWeakResumeFit(score) || Boolean(recommended.suggestion);
     const alreadyAttached = (attached ?? []).some(
       (row) => String(row.document_id) === docId && String(row.document_version_id) === versionId,
     );
@@ -106,10 +129,21 @@ export async function ensureApplicationResumeSelection(
         strategy: "existing",
         documentId: docId,
         notified: false,
+        weakFit,
+      };
+    }
+    if (weakFit && !forceByDeadline) {
+      return {
+        ran: false,
+        attached: false,
+        strategy: "existing_weak",
+        documentId: docId,
+        notified: false,
+        weakFit: true,
       };
     }
     await attachResume(supabase, actor, applicationId, docId, versionId, "resume_recommendation_existing");
-    return { ran: false, attached: true, strategy: "existing", documentId: docId, notified: false };
+    return { ran: false, attached: true, strategy: "existing", documentId: docId, notified: false, weakFit };
   }
 
   const [{ data: opportunity }, { data: requirements }] = await Promise.all([
@@ -130,7 +164,7 @@ export async function ensureApplicationResumeSelection(
 
   const loaded = await loadIntelligenceContext(supabase, actor, opportunity, requirementRows);
   if (loaded.resumes.length === 0) {
-    return { ran: true, attached: false, strategy: null, documentId: null, notified: false };
+    return { ran: true, attached: false, strategy: null, documentId: null, notified: false, weakFit: false };
   }
 
   const highlights = loaded.evidence
@@ -161,7 +195,7 @@ export async function ensureApplicationResumeSelection(
   });
 
   if (selection.ranked.length === 0) {
-    return { ran: true, attached: false, strategy: null, documentId: null, notified: false };
+    return { ran: true, attached: false, strategy: null, documentId: null, notified: false, weakFit: false };
   }
 
   await persistResumeMatches(supabase, {
@@ -171,17 +205,22 @@ export async function ensureApplicationResumeSelection(
   });
 
   const pick = selection.ranked.find((item) => item.recommended) ?? selection.ranked[0]!;
+  const weakFit =
+    isWeakResumeFit(pick.score) ||
+    Boolean(pick.suggestion) ||
+    (selection.strategy === "ai_rank" && isWeakResumeFit(pick.score));
+  const strongFit =
+    selection.strategy === "category_match" ||
+    selection.strategy === "only_available" ||
+    !weakFit;
+
   let attachedNow = hasResumeAttached;
 
-  const deadline = computeDeadlineInfo(
-    (application.deadline_at as string | null) ?? null,
-    (application.deadline_timezone as string | null) ?? null,
-  );
   const shouldAutoAttach =
     autoAttach &&
     pick.documentId &&
     pick.documentVersionId &&
-    (deadlineAuto || deadline.urgency === "imminent" || deadline.urgency === "soon" || deadline.urgency === "overdue" || !hasResumeAttached);
+    (forceByDeadline || (strongFit && !hasResumeAttached));
 
   if (shouldAutoAttach) {
     await attachResume(
@@ -224,5 +263,24 @@ export async function ensureApplicationResumeSelection(
     strategy: selection.strategy,
     documentId: pick.documentId,
     notified,
+    weakFit,
   };
+}
+
+/** Rank / attach resumes for every open application (Need You + kit refresh). */
+export async function ensureOpenApplicationsResumeSelection(
+  supabase: SupabaseClient,
+  actor: Actor,
+  applicationIds: string[],
+): Promise<void> {
+  for (const applicationId of applicationIds) {
+    try {
+      await ensureApplicationResumeSelection(supabase, actor, applicationId, {
+        autoAttach: true,
+        notifyOnAiPick: true,
+      });
+    } catch {
+      // Non-blocking — Need You still loads if one app fails.
+    }
+  }
 }

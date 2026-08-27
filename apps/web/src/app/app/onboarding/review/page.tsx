@@ -44,11 +44,6 @@ export default async function OnboardingReviewPage({
             eyebrow="Nothing extracted yet"
             title="Add evidence manually or upload a text resume"
             body="You can verify items later from Application Memory. Continue when you are ready to start applying."
-            actions={
-              <form action={continueOnboardingReady}>
-                <SubmitButton>Continue</SubmitButton>
-              </form>
-            }
           />
         }
         actions={(item) =>

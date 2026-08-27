@@ -10,7 +10,7 @@ type Rule = {
 };
 
 const RULES: Rule[] = [
-  { path: "Education → Institution", aliases: ["university", "college", "school", "institution", "campus", "uni"], minConfidence: 0.75 },
+  { path: "Education → Institution", aliases: ["university", "college", "school", "institution", "campus", "uni", "varsity"], minConfidence: 0.7 },
   { path: "Education → Degree", aliases: ["degree", "qualification"], minConfidence: 0.8 },
   {
     path: "Education → Course",
@@ -66,7 +66,18 @@ const RULES: Rule[] = [
   { path: "Profile → Email", aliases: ["email", "e-mail"], minConfidence: 0.95 },
   {
     path: "Profile → Phone",
-    aliases: ["phone", "mobile", "telephone", "whatsapp", "whats app", "cell", "contact number", "contact no"],
+    aliases: [
+      "phone",
+      "mobile",
+      "telephone",
+      "whatsapp",
+      "whats app",
+      "cell",
+      "contact number",
+      "contact no",
+      "contact no.",
+      "contact",
+    ],
     minConfidence: 0.75,
   },
   {
@@ -76,7 +87,20 @@ const RULES: Rule[] = [
   },
   {
     path: "Profile → Location",
-    aliases: ["city", "location", "address", "country", "state", "state/ut", "delhi-ncr", "delhi ncr", "province", "region"],
+    aliases: [
+      "city",
+      "location",
+      "address",
+      "country",
+      "state",
+      "state/ut",
+      "delhi-ncr",
+      "delhi ncr",
+      "province",
+      "region",
+      "place",
+      "residence",
+    ],
     minConfidence: 0.6,
   },
   {
@@ -253,6 +277,8 @@ function choiceScore(choice: string, memoryValue: string): number {
   const a = normalize(choice);
   const b = normalize(memoryValue);
   if (!a || !b) return 0;
+  // Never treat bare Yes/No tokens as reusable kit answers — they contaminate every radio.
+  if (/^(yes|y|no|n)$/.test(a) || /^(yes|y|no|n)$/.test(b)) return 0;
   if (a === b) return 1;
   // Tiny tokens ("2", "3") must not match inside years like "2024".
   if (Math.min(a.length, b.length) <= 2) return 0;
@@ -381,6 +407,10 @@ function locationChoiceBoost(choice: string, memoryValue: string): number {
   const c = normalize(choice);
   const m = normalize(memoryValue);
   if (!c || !m) return 0;
+  // Never let bare Yes/No leak through location substring boost
+  // ("no" inside "technology" / "innovation" was auto-filling radios at 0.9).
+  if (/^(yes|y|no|n)$/.test(c) || /^(yes|y|no|n)$/.test(m)) return 0;
+  if (c.length <= 2 || m.length <= 2) return 0;
   if (c.includes("delhi") && m.includes("delhi")) return 0.96;
   if ((c.includes("delhi ncr") || c === "delhi") && (m.includes("delhi") || m.includes("ncr"))) return 0.98;
   if (c.includes(m) || m.includes(c)) return 0.9;
@@ -425,10 +455,26 @@ function isYesNoField(field: DetectedField): boolean {
   return hasYes && hasNo;
 }
 
+/** Degree / years eligibility — may be inferred from kit education & experience. */
 function isEligibilityStyleQuestion(text: string): boolean {
-  return /\b(do you (have|possess|hold)|have you|are you|bachelor|master|degree|years?.{0,40}experience|qualified|eligible|minimum|related field|or equivalent)\b/i.test(
+  return /\b(do you (have|possess|hold)|have you|bachelor|master|degree|years?.{0,40}experience|qualified|eligible|minimum|related field|or equivalent)\b/i.test(
     text,
   );
+}
+
+/**
+ * Commitment / availability / current-status Yes/No — must not be filled by lexical
+ * kit matches or weak "No" heuristics. LLM may decide only with clear evidence.
+ */
+export function isJudgmentYesNoQuestion(text: string): boolean {
+  return /\b(can you|will you|would you|are you able|are you currently|are you a|are you an|commit|committed|available|availability|part[- ]?time|full[- ]?time|hours?\s+(a|per)\s+day|willing to|currently (a |an )?(university )?student|enrolled|consistently)\b/i.test(
+    text,
+  );
+}
+
+/** True when a form label is a Yes/No judgment question (commitment / status), not a profile fact. */
+export function shouldDeferYesNoToUserOrLlm(text: string): boolean {
+  return isJudgmentYesNoQuestion(text);
 }
 
 function findYesNoLabels(field: DetectedField): { yes: string; no: string } | null {
@@ -593,27 +639,60 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
 
   const question = `${field.label} ${field.nearbyText} ${field.ariaLabel}`.trim();
   const yesNo = findYesNoLabels(field);
-  if (yesNo && isYesNoField(field) && isEligibilityStyleQuestion(question) && !sensitive) {
-    const inferred = inferYesNoFromMemory(question, catalog);
-    const proposed =
-      inferred.answer === "yes" ? yesNo.yes : inferred.answer === "no" ? yesNo.no : "";
+
+  // Yes/No radios must never fall through to generic option↔kit string matching
+  // (any prior kit value "No" would otherwise auto-fill every Yes/No at ~100%).
+  if (yesNo && isYesNoField(field) && !sensitive) {
+    const judgment = isJudgmentYesNoQuestion(question);
+    const eligibility = isEligibilityStyleQuestion(question) && !judgment;
+
+    if (eligibility) {
+      const inferred = inferYesNoFromMemory(question, catalog);
+      // Only auto-fill confident Yes. Weak/absent evidence → Need You (never guess No).
+      const autoYes = inferred.answer === "yes" && inferred.confidence >= 0.75;
+      const proposed = autoYes ? yesNo.yes : "";
+      return {
+        fieldKey: field.key,
+        label: humanQuestionLabel(field),
+        memoryPath: inferred.memoryPath,
+        source: "Application Memory",
+        confidence: inferred.confidence,
+        proposedValue: proposed,
+        options: [
+          { value: yesNo.yes, label: "Yes", source: "Form choice" },
+          { value: yesNo.no, label: "No", source: "Form choice" },
+        ],
+        approvalState: "pending",
+        sensitive: false,
+        excludedByDefault: !proposed,
+        reason: proposed
+          ? inferred.reason
+          : `${inferred.reason} Left for Need You until memory clearly supports Yes, or you choose.`,
+        fieldType: field.type,
+        aiAnswerable: true,
+        showChip: true,
+      };
+    }
+
     return {
       fieldKey: field.key,
       label: humanQuestionLabel(field),
-      memoryPath: inferred.memoryPath,
+      memoryPath: "Needs You",
       source: "Application Memory",
-      confidence: inferred.confidence,
-      proposedValue: proposed,
+      confidence: 0.2,
+      proposedValue: "",
       options: [
         { value: yesNo.yes, label: "Yes", source: "Form choice" },
         { value: yesNo.no, label: "No", source: "Form choice" },
       ],
       approvalState: "pending",
       sensitive: false,
-      excludedByDefault: !proposed,
-      reason: inferred.reason,
+      excludedByDefault: true,
+      reason: judgment
+        ? "Commitment / status Yes/No — AI may answer only from clear kit evidence; otherwise Needs You."
+        : "Yes/No question — not auto-filled from unrelated kit Yes/No answers. Needs You or AI with evidence.",
       fieldType: field.type,
-      aiAnswerable: false,
+      aiAnswerable: true,
       showChip: true,
     };
   }

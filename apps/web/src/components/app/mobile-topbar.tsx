@@ -14,7 +14,13 @@ import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
 
-export function MobileTopbar({ email }: { email: string }) {
+export function MobileTopbar({
+  email,
+  needsYouApplicationCount = 0,
+}: {
+  email: string;
+  needsYouApplicationCount?: number;
+}) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const { unreadCount } = useRealtime();
@@ -37,9 +43,9 @@ export function MobileTopbar({ email }: { email: string }) {
         >
           <Menu className="h-4 w-4" aria-hidden="true" />
           Menu
-          {unreadCount > 0 && (
+          {(unreadCount > 0 || needsYouApplicationCount > 0) && (
             <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-sand px-1 font-mono text-[9px] font-bold text-ink-base">
-              {unreadCount > 9 ? "9+" : unreadCount}
+              {unreadCount > 0 ? (unreadCount > 9 ? "9+" : unreadCount) : needsYouApplicationCount > 9 ? "9+" : needsYouApplicationCount}
             </span>
           )}
         </Button>
@@ -54,6 +60,7 @@ export function MobileTopbar({ email }: { email: string }) {
                 {section.items.map((item) => {
                   const active = isNavActive(pathname, item.href);
                   const isNotifications = item.href === "/app/notifications";
+                  const isNeedsYou = item.href === "/app/needs-you";
                   return (
                     <li key={item.href}>
                       <Link
@@ -66,6 +73,19 @@ export function MobileTopbar({ email }: { email: string }) {
                         onClick={() => setOpen(false)}
                       >
                         <span>{item.label}</span>
+                        {isNeedsYou ? (
+                          <span
+                            className={cn(
+                              "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold",
+                              needsYouApplicationCount > 0
+                                ? "bg-coral-soft text-coral-text"
+                                : "bg-canvas text-ink-muted",
+                            )}
+                            aria-label={`${needsYouApplicationCount} applications need input`}
+                          >
+                            {needsYouApplicationCount > 99 ? "99+" : needsYouApplicationCount}
+                          </span>
+                        ) : null}
                         {isNotifications && unreadCount > 0 && (
                           <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sand px-1.5 font-mono text-[10px] font-bold text-ink-base">
                             {unreadCount}

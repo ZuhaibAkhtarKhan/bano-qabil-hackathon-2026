@@ -85,7 +85,7 @@ export type FieldMapping = {
   attachment?: FieldAttachment | null;
 };
 
-export type FillAction = "setValue" | "submit" | "clickSubmit" | "bypassCaptcha" | "createAccount";
+export type FillAction = "setValue" | "submit" | "clickSubmit" | "clickNext" | "bypassCaptcha" | "createAccount";
 
 export function fieldSignals(field: Pick<DetectedField, "name" | "id" | "label" | "placeholder" | "ariaLabel" | "nearbyText" | "type" | "autocomplete">): string {
   return [field.label, field.name, field.id, field.placeholder, field.ariaLabel, field.nearbyText, field.type, field.autocomplete]

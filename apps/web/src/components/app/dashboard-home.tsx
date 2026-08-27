@@ -5,6 +5,10 @@ import Link from "next/link";
 import { Bell, HelpCircle, Search } from "lucide-react";
 import { currentGuideStep, type GuideStep } from "@1apply/domain";
 
+import {
+  ApplicationsTrackerTable,
+  type ApplicationsTrackerRow,
+} from "@/components/app/applications-tracker-table";
 import { useRealtime } from "@/components/app/realtime-provider";
 import { skipWorkspaceGuide } from "@/server/memory/actions";
 import { ButtonLink, SubmitButton } from "@/components/ui/button";
@@ -21,19 +25,8 @@ export type DashboardMatch = {
   sourceLabel: string | null;
 };
 
-export type DashboardApplicationRow = {
-  id: string;
-  href: string;
-  company: string;
-  role: string;
-  resume: string;
-  cover: string;
-  statusLabel: string;
-  statusTone: "mint" | "teal" | "coral" | "sand" | "muted";
+export type DashboardApplicationRow = ApplicationsTrackerRow & {
   filter: "all" | "in_flight" | "needs_you" | "failed" | "skipped";
-  appliedLabel: string;
-  initial: string;
-  sourceLabel: string | null;
 };
 
 export type DashboardKitProps = {
@@ -67,14 +60,6 @@ const CARD_TONES = {
   mint: "border-emerald-200/80 bg-[#eef8f1]",
   violet: "border-violet-200/80 bg-[#f3f0fb]",
   coral: "border-rose-200/80 bg-[#fbf0f0]",
-} as const;
-
-const STATUS_DOT = {
-  mint: "bg-emerald-500",
-  teal: "bg-cyan-500",
-  coral: "bg-rose-500",
-  sand: "bg-amber-500",
-  muted: "bg-zinc-400",
 } as const;
 
 const FILTERS = [
@@ -158,7 +143,11 @@ export function DashboardHome({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return applications.filter((row) => {
-      if (filter !== "all" && row.filter !== filter) return false;
+      if (filter === "needs_you") {
+        if (!(row.needsYouCount > 0 || row.filter === "needs_you")) return false;
+      } else if (filter !== "all" && row.filter !== filter) {
+        return false;
+      }
       if (!q) return true;
       return `${row.company} ${row.role} ${row.statusLabel} ${row.sourceLabel ?? ""}`.toLowerCase().includes(q);
     });
@@ -409,73 +398,8 @@ export function DashboardHome({
               />
             </div>
           ) : (
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-line">
-              <table className="w-full min-w-[720px] table-fixed text-left text-sm">
-                <thead className="border-b border-line bg-[#fafbf8] text-[11px] uppercase tracking-wider text-ink-muted">
-                  <tr>
-                    <th className="w-[36%] px-4 py-3 font-medium">Position</th>
-                    <th className="w-[11%] px-4 py-3 font-medium">Resume</th>
-                    <th className="w-[13%] px-4 py-3 font-medium">Cover letter</th>
-                    <th className="w-[22%] px-4 py-3 font-medium">Status</th>
-                    <th className="w-[18%] px-4 py-3 font-medium">Applied</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row) => (
-                    <tr key={row.id} className="border-b border-line last:border-b-0 hover:bg-[#fafbf8]/60">
-                      <td className="px-4 py-3.5">
-                        <Link href={row.href} className="flex items-center gap-3">
-                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white text-xs font-semibold text-ink">
-                            {row.initial}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-medium leading-tight text-ink">{row.company}</span>
-                              {row.sourceLabel ? (
-                                <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                                  {row.sourceLabel}
-                                </span>
-                              ) : null}
-                            </span>
-                            <span className="block truncate text-xs text-ink-muted">{row.role}</span>
-                          </span>
-                        </Link>
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-3.5 text-xs",
-                          row.resume === "Ready"
-                            ? "text-emerald-700"
-                            : row.resume === "Missing"
-                              ? "text-rose-700"
-                              : "text-ink-muted",
-                        )}
-                      >
-                        {row.resume}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-3.5 text-xs",
-                          row.cover === "Ready"
-                            ? "text-emerald-700"
-                            : row.cover === "Missing"
-                              ? "text-rose-700"
-                              : "text-ink-muted",
-                        )}
-                      >
-                        {row.cover}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink">
-                          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[row.statusTone])} aria-hidden="true" />
-                          <span className="truncate">{row.statusLabel}</span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs text-ink-muted">{row.appliedLabel}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-4">
+              <ApplicationsTrackerTable rows={filtered} />
             </div>
           )}
         </section>

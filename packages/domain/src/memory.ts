@@ -10,6 +10,7 @@ export const MEMORY_SECTIONS: Array<{ id: MemoryCategory; label: string }> = [
   { id: "certifications", label: "Certifications" },
   { id: "leadership", label: "Leadership" },
   { id: "research", label: "Research" },
+  { id: "answers", label: "Saved answers" },
   { id: "links", label: "Links" },
   { id: "supporting", label: "Supporting Evidence" },
 ];

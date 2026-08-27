@@ -2,7 +2,6 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
-import Link from "next/link";
 
 import { SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
@@ -53,26 +52,23 @@ export function ForgotPasswordForm() {
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           autoComplete="email"
+          placeholder="you@example.com"
         />
       </Field>
       {error ? (
-        <p className="text-sm text-rose-700" role="alert">
+        <p className="rounded-xl border border-rose-200 bg-coral-soft px-3 py-2.5 text-sm text-coral-text" role="alert">
           {error}
         </p>
       ) : null}
       {message ? (
-        <p className="text-sm text-emerald-800" role="status">
+        <p className="rounded-xl border border-emerald-200 bg-mint-soft px-3 py-2.5 text-sm text-mint-text" role="status">
           {message}
         </p>
       ) : null}
       <SubmitButton className="w-full" disabled={pending} pending={pending} pendingText="Sending reset link…">
         Send reset link
+        <span aria-hidden="true">→</span>
       </SubmitButton>
-      <p className="text-sm text-ink-muted">
-        <Link href="/sign-in" className="underline">
-          Back to sign in
-        </Link>
-      </p>
     </form>
   );
 }

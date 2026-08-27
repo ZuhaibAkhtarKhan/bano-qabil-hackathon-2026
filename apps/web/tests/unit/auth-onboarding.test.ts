@@ -64,6 +64,23 @@ describe("onboarding routing", () => {
     ).toBe("profile");
   });
 
+  it("lets users skip profile and continue to kit upload", () => {
+    expect(
+      resolveOnboardingStep({
+        hasConsent: true,
+        hasIdentity: false,
+        hasUniversity: false,
+        hasEducation: false,
+        documentCount: 0,
+        evidenceCount: 0,
+        skippedDocuments: false,
+        skippedProfile: true,
+        onboardingCompleted: false,
+        storedStep: "documents",
+      }),
+    ).toBe("documents");
+  });
+
   it("stays on kit upload until the user continues", () => {
     expect(
       resolveOnboardingStep({

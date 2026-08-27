@@ -588,7 +588,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           <Card className="border-coral/20 p-6">
             <h2 className="font-display text-2xl text-coral">Danger Zone</h2>
             <p className="mt-2 text-sm text-ink-muted">
-              Permanently delete this application and its prepared answers, mappings, and evaluations.
+              Permanently delete this application, its prepared answers, mappings, evaluations, and the linked saved posting.
             </p>
             <form action={deleteApplication} className="mt-4">
               <input type="hidden" name="applicationId" value={application.id} />

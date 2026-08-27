@@ -141,6 +141,7 @@ export function createFillPlan(input: {
   applicationId: string;
   origin: string;
   fields: unknown[];
+  hazards?: unknown;
 }) {
   return request<{
     fillSessionId: string;
@@ -171,7 +172,11 @@ export function createFillPlan(input: {
     }>;
   }>(`/api/applications/${input.applicationId}/fill-plan`, {
     method: "POST",
-    body: JSON.stringify({ origin: input.origin, fields: input.fields }),
+    body: JSON.stringify({
+      origin: input.origin,
+      fields: input.fields,
+      hazards: input.hazards ?? {},
+    }),
   });
 }
 

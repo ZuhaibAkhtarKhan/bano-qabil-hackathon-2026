@@ -1,29 +1,41 @@
-import { fieldSignals, mapField, type DetectedField } from "@1apply/form-engine";
+import { fieldSignals, isJudgmentYesNoQuestion, mapField, type DetectedField, type MemoryValue } from "@1apply/form-engine";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { logError, logInfo } from "@/lib/log";
+import { detectProfileMemoryField, isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import {
+  resolveKitValuesWithAi,
+  type KitResolvedValue,
+} from "@/server/applications/resolve-kit-value-ai";
 import { loadMemoryCatalog } from "@/server/extension/memory-catalog";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 
 const CLOSED = new Set(["submitted", "rejected", "withdrawn", "archived", "offer", "accepted"]);
 const FILL_CONFIDENCE = 0.75;
 
-function mappingToDetectedField(row: {
-  field_key: string;
-  label: string | null;
-}): DetectedField {
-  const label = String(row.label ?? "").trim() || String(row.field_key);
-  const key = String(row.field_key);
+const PROFILE_CATALOG_PATH: Record<string, string> = {
+  display_name: "Profile → Full name",
+  phone: "Profile → Phone",
+  location_city: "Profile → Location",
+  location_country: "Profile → Location",
+  work_authorization: "Profile → Work authorization",
+  linkedin_url: "Profile → LinkedIn",
+  github_url: "Profile → GitHub",
+  portfolio_url: "Profile → Portfolio",
+};
+
+function labelToDetectedField(label: string, key = "needs-you"): DetectedField {
+  const trimmed = label.trim() || key;
   const field: Omit<DetectedField, "signals"> & { signals?: string } = {
     key,
     name: key,
     id: key,
-    label,
+    label: trimmed,
     placeholder: "",
-    ariaLabel: label,
-    nearbyText: label,
+    ariaLabel: trimmed,
+    nearbyText: trimmed,
     type: "text",
     inputType: "text",
     options: [],
@@ -36,13 +48,83 @@ function mappingToDetectedField(row: {
   };
 }
 
+function mappingToDetectedField(row: {
+  field_key: string;
+  label: string | null;
+}): DetectedField {
+  return labelToDetectedField(String(row.label ?? "").trim() || String(row.field_key), String(row.field_key));
+}
+
+function catalogValueForProfileField(catalog: MemoryValue[], field: string): string {
+  const path = PROFILE_CATALOG_PATH[field];
+  if (!path) return "";
+  const exact = catalog.find((item) => item.path === path && item.value.trim());
+  if (exact) return exact.value.trim();
+  if (field === "location_city" || field === "location_country") {
+    const loc = catalog.find((item) => item.path === "Profile → Location" && item.value.trim());
+    return loc?.value.trim() ?? "";
+  }
+  return "";
+}
+
+function educationFromCatalog(catalog: MemoryValue[]): string {
+  const preferredPaths = ["Education → Institution", "Education → Detail", "Education → Course"];
+  for (const path of preferredPaths) {
+    const hit = catalog.find((item) => item.path === path && item.value.trim());
+    if (hit) return hit.value.trim();
+  }
+  return "";
+}
+
+/** Deterministic resolve (aliases / profile heuristics / mapField). */
+export function resolveKitValueForLabel(label: string, catalog: MemoryValue[]): KitResolvedValue | null {
+  const text = label.trim();
+  if (!text || isNeedsYouSystemNoise(text)) return null;
+
+  // Commitment / status Yes/No must never be filled by fuzzy kit / university heuristics.
+  if (isJudgmentYesNoQuestion(text)) return null;
+
+  // Asking "are you a university student?" is not asking for the school name.
+  const asksInstitutionName =
+    /\b(uni|university|college|campus|school|institute)\b/i.test(text) &&
+    !/\b(are you|student|enrolled|attend|attending|currently)\b/i.test(text);
+  if (asksInstitutionName) {
+    const education = educationFromCatalog(catalog);
+    if (education) return { value: education, confidence: 0.9, source: "Your kit" };
+  }
+
+  const profileField = detectProfileMemoryField(text);
+  if (profileField && profileField !== "date_of_birth") {
+    const fromProfile = catalogValueForProfileField(catalog, profileField);
+    if (fromProfile) {
+      return { value: fromProfile, confidence: 0.95, source: "Your kit" };
+    }
+  }
+
+  const mapped = mapField(labelToDetectedField(text), catalog);
+  const proposed = String(mapped.proposedValue ?? "").trim();
+  if (!proposed) return null;
+  if (mapped.sensitive) return null;
+  if (mapped.confidence < FILL_CONFIDENCE) return null;
+  if (mapped.excludedByDefault && !/^(Profile|Education|Skills) →/.test(mapped.memoryPath)) {
+    return null;
+  }
+  // Never accept bare Yes/No from text-field mapping fallthrough.
+  if (/^(yes|y|no|n)$/i.test(proposed)) return null;
+  return {
+    value: proposed,
+    confidence: mapped.confidence,
+    source: mapped.source || "Your kit",
+  };
+}
+
 /**
  * When Your kit changes, rematch open applications:
  * - attach matching documents
  * - fill empty / low-confidence field_mappings from the updated memory catalog
- * - always re-run Fit Index so Needs You Fit gaps (education/projects/skills) clear
- * Does not call revalidatePath — callers revalidate in the server action, and the
- * UI soft-refreshes via realtime on field_mappings / fit_evaluations.
+ * - fill / clear Needs You answer gaps (missing_facts + short profile questions)
+ * - LLM semantic fallback when wording differs (Contact No ≈ phone, Uni ≈ university)
+ * - always re-run Fit Index so Fit gaps stay in sync
  */
 export async function refreshOpenApplicationsFromKit(
   supabase: SupabaseClient,
@@ -71,25 +153,60 @@ export async function refreshOpenApplicationsFromKit(
       appsToEvaluate.push({ applicationId, opportunityId });
     }
 
+    const catalog = await loadMemoryCatalog(supabase, actor, applicationId);
+    if (catalog.length === 0) continue;
+
+    let filledHere = 0;
+    const aiQueue: Array<{ id: string; label: string }> = [];
+    const aiSeen = new Set<string>();
+    const queueAi = (id: string, label: string) => {
+      const text = label.trim();
+      if (!text || isNeedsYouSystemNoise(text) || aiSeen.has(id)) return;
+      aiSeen.add(id);
+      aiQueue.push({ id, label: text });
+    };
+
     const { data: mappings } = await supabase
       .from("field_mappings")
-      .select("id, field_key, label, value, confidence, excluded_by_default")
+      .select("id, field_key, label, value, confidence, excluded_by_default, source")
       .eq("user_id", actor.userId)
       .eq("application_id", applicationId)
       .order("created_at", { ascending: false })
       .limit(120);
+
+    // Clear unsafe Yes/No autofills (e.g. "No" from "Technology" substring match).
+    for (const row of mappings ?? []) {
+      const label = String(row.label ?? "").trim();
+      const value = String(row.value ?? "").trim();
+      if (!label || !value) continue;
+      if (!isJudgmentYesNoQuestion(label)) continue;
+      if (!/^(yes|y|no|n)$/i.test(value)) continue;
+      await supabase
+        .from("field_mappings")
+        .update({
+          value: "",
+          confidence: 0.2,
+          excluded_by_default: true,
+          source: "Needs You",
+        })
+        .eq("id", row.id)
+        .eq("user_id", actor.userId);
+      row.value = "";
+      row.confidence = 0.2;
+      row.excluded_by_default = true;
+    }
 
     const pending = (mappings ?? []).filter((row) => {
       const value = String(row.value ?? "").trim();
       return !value || Number(row.confidence ?? 0) < FILL_CONFIDENCE || Boolean(row.excluded_by_default);
     });
 
-    if (pending.length === 0) continue;
-
-    const catalog = await loadMemoryCatalog(supabase, actor, applicationId);
-    if (catalog.length === 0) continue;
-
-    let filledHere = 0;
+    type MappingPlan = {
+      row: (typeof pending)[number];
+      label: string;
+      resolved: KitResolvedValue | null;
+    };
+    const mappingPlans: MappingPlan[] = [];
     const seenKeys = new Set<string>();
 
     for (const row of pending) {
@@ -97,31 +214,130 @@ export async function refreshOpenApplicationsFromKit(
       if (seenKeys.has(fieldKey)) continue;
       seenKeys.add(fieldKey);
 
-      const mapped = mapField(mappingToDetectedField(row), catalog);
-      const proposed = String(mapped.proposedValue ?? "").trim();
-      if (!proposed) continue;
-      if (mapped.excludedByDefault) continue;
-      if (mapped.confidence < FILL_CONFIDENCE) continue;
-      // Don't overwrite a user-confirmed value with a weaker rematch.
-      const existing = String(row.value ?? "").trim();
-      if (existing && Number(row.confidence ?? 0) >= mapped.confidence) continue;
+      const label = String(row.label ?? "").trim() || fieldKey;
+      // Judgment Yes/No stays empty for Need You (fill-plan LLM may answer with evidence).
+      if (isJudgmentYesNoQuestion(label)) {
+        mappingPlans.push({ row, label, resolved: null });
+        continue;
+      }
+
+      let resolved = resolveKitValueForLabel(label, catalog);
+      if (!resolved) {
+        const mapped = mapField(mappingToDetectedField(row), catalog);
+        const proposed = String(mapped.proposedValue ?? "").trim();
+        if (
+          proposed &&
+          !/^(yes|y|no|n)$/i.test(proposed) &&
+          mapped.confidence >= FILL_CONFIDENCE &&
+          (!mapped.excludedByDefault || /^(Profile|Education|Skills) →/.test(mapped.memoryPath))
+        ) {
+          resolved = { value: proposed, confidence: mapped.confidence, source: mapped.source };
+        }
+      }
+      if (!resolved) queueAi(`mapping:${row.id}`, label);
+      mappingPlans.push({ row, label, resolved });
+    }
+
+    const [{ data: answers }, { data: questions }] = await Promise.all([
+      supabase
+        .from("application_answers")
+        .select("id, question_id, state, missing_facts, approved_text, user_edited_text")
+        .eq("user_id", actor.userId)
+        .eq("application_id", applicationId),
+      supabase
+        .from("opportunity_questions")
+        .select("id, prompt")
+        .eq("opportunity_id", opportunityId)
+        .eq("user_id", actor.userId),
+    ]);
+
+    const answerByQuestionId = new Map(
+      (answers ?? []).map((answer) => [String(answer.question_id), answer] as const),
+    );
+
+    type AnswerPlan = {
+      answer: NonNullable<typeof answers>[number] | null;
+      questionId: string;
+      prompt: string;
+      missing: string[];
+      resolved: KitResolvedValue | null;
+      isNew: boolean;
+    };
+    const answerPlans: AnswerPlan[] = [];
+
+    for (const question of questions ?? []) {
+      const questionId = String(question.id);
+      const prompt = String(question.prompt ?? "").trim();
+      if (!prompt || isNeedsYouSystemNoise(prompt)) continue;
+
+      const answer = answerByQuestionId.get(questionId) ?? null;
+      const missing = answer && Array.isArray(answer.missing_facts)
+        ? (answer.missing_facts as string[]).filter(Boolean)
+        : [];
+      const existingText = answer
+        ? String(answer.approved_text || answer.user_edited_text || "").trim()
+        : "";
+      const state = answer ? String(answer.state ?? "") : "";
+      const needsFill =
+        !answer ||
+        !existingText ||
+        ["needs_review", "rejected", "ai_generated"].includes(state) ||
+        missing.length > 0;
+      if (!needsFill) continue;
+
+      const resolvedFromPrompt = resolveKitValueForLabel(prompt, catalog);
+      const resolvedFromMissing = missing
+        .map((fact) => resolveKitValueForLabel(fact, catalog))
+        .find((item) => item?.value);
+      const resolved = resolvedFromPrompt ?? resolvedFromMissing ?? null;
+
+      // Structured contact fields: only queue AI when kit miss; essays always try AI fallback.
+      if (!resolved) {
+        if (!isStructuredFormFieldPrompt(prompt) || missing.length > 0) {
+          queueAi(`answer:${questionId}:prompt`, prompt);
+        }
+        for (const fact of missing) {
+          if (!resolveKitValueForLabel(fact, catalog) && !isNeedsYouSystemNoise(fact)) {
+            queueAi(`answer:${questionId}:fact:${fact.slice(0, 80)}`, fact);
+          }
+        }
+      }
+
+      answerPlans.push({
+        answer,
+        questionId,
+        prompt,
+        missing,
+        resolved,
+        isNew: !answer,
+      });
+    }
+
+    const aiMatches = await resolveKitValuesWithAi(aiQueue, catalog);
+
+    for (const plan of mappingPlans) {
+      const resolved = plan.resolved ?? aiMatches.get(`mapping:${plan.row.id}`) ?? null;
+      if (!resolved) continue;
+
+      const existing = String(plan.row.value ?? "").trim();
+      if (existing && Number(plan.row.confidence ?? 0) >= resolved.confidence) continue;
 
       const { error } = await supabase
         .from("field_mappings")
         .update({
-          value: proposed.slice(0, 4000),
-          source: `Your kit refresh · ${mapped.source}`.slice(0, 120),
-          confidence: mapped.confidence,
+          value: resolved.value.slice(0, 4000),
+          source: `Your kit refresh · ${resolved.source}`.slice(0, 120),
+          confidence: resolved.confidence,
           excluded_by_default: false,
-          label: (mapped.label || row.label || fieldKey).slice(0, 180),
+          label: plan.label.slice(0, 180),
         })
-        .eq("id", row.id)
+        .eq("id", plan.row.id)
         .eq("user_id", actor.userId);
 
       if (error) {
         logError("needs_you.kit_refresh_mapping_failed", {
           applicationId,
-          fieldKey,
+          fieldKey: plan.row.field_key,
           message: error.message,
         });
         continue;
@@ -129,34 +345,90 @@ export async function refreshOpenApplicationsFromKit(
       filledHere += 1;
     }
 
-    // Clear answer missing_facts that the catalog can now satisfy.
-    const { data: answers } = await supabase
-      .from("application_answers")
-      .select("id, missing_facts")
-      .eq("user_id", actor.userId)
-      .eq("application_id", applicationId);
+    for (const plan of answerPlans) {
+      const fromAiPrompt = aiMatches.get(`answer:${plan.questionId}:prompt`) ?? null;
+      const fromAiFact = plan.missing
+        .map((fact) => aiMatches.get(`answer:${plan.questionId}:fact:${fact.slice(0, 80)}`))
+        .find((item) => item?.value);
+      const resolved = plan.resolved ?? fromAiPrompt ?? fromAiFact ?? null;
 
-    const catalogBlob = catalog
-      .map((item) => `${item.path} ${item.value} ${item.aliases.join(" ")}`.toLowerCase())
-      .join("\n");
-
-    for (const answer of answers ?? []) {
-      const missing = Array.isArray(answer.missing_facts)
-        ? (answer.missing_facts as string[]).filter(Boolean)
-        : [];
-      if (missing.length === 0) continue;
-      const remaining = missing.filter((fact) => {
-        const token = fact.trim().toLowerCase();
-        if (!token) return false;
-        return !catalogBlob.includes(token) && !token.split(/\s+/).some((part) => part.length > 3 && catalogBlob.includes(part));
+      const remaining = plan.missing.filter((fact) => {
+        if (isNeedsYouSystemNoise(fact)) return false;
+        if (resolveKitValueForLabel(fact, catalog)?.value) return false;
+        const aiHit = aiMatches.get(`answer:${plan.questionId}:fact:${fact.slice(0, 80)}`);
+        return !aiHit?.value;
       });
-      if (remaining.length === missing.length) continue;
-      await supabase
+
+      const canAutoApprove = Boolean(resolved?.value) && remaining.length === 0;
+      if (!canAutoApprove || !resolved) {
+        if (plan.answer && remaining.length !== plan.missing.length) {
+          const { error } = await supabase
+            .from("application_answers")
+            .update({ missing_facts: remaining })
+            .eq("id", plan.answer.id)
+            .eq("user_id", actor.userId);
+          if (error) {
+            logError("needs_you.kit_refresh_missing_facts_failed", {
+              applicationId,
+              answerId: plan.answer.id,
+              message: error.message,
+            });
+            continue;
+          }
+          filledHere += plan.missing.length - remaining.length;
+        }
+        continue;
+      }
+
+      if (plan.isNew || !plan.answer) {
+        const { error } = await supabase.from("application_answers").insert({
+          user_id: actor.userId,
+          application_id: applicationId,
+          question_id: plan.questionId,
+          approved_text: resolved.value.slice(0, 8000),
+          user_edited_text: resolved.value.slice(0, 8000),
+          original_ai_text: resolved.value.slice(0, 8000),
+          state: "approved",
+          missing_facts: [],
+          warnings: [],
+          evidence_ids: [],
+          claim_flags: [],
+          grounding_score: resolved.confidence,
+          generation_count: 0,
+          model: "kit-refresh",
+        });
+        if (error) {
+          logError("needs_you.kit_refresh_answer_insert_failed", {
+            applicationId,
+            questionId: plan.questionId,
+            message: error.message,
+          });
+          continue;
+        }
+        filledHere += 1;
+        continue;
+      }
+
+      const { error } = await supabase
         .from("application_answers")
-        .update({ missing_facts: remaining })
-        .eq("id", answer.id)
+        .update({
+          approved_text: resolved.value.slice(0, 8000),
+          user_edited_text: resolved.value.slice(0, 8000),
+          state: "approved",
+          missing_facts: [],
+          warnings: [],
+        })
+        .eq("id", plan.answer.id)
         .eq("user_id", actor.userId);
-      filledHere += missing.length - remaining.length;
+      if (error) {
+        logError("needs_you.kit_refresh_answer_failed", {
+          applicationId,
+          answerId: plan.answer.id,
+          message: error.message,
+        });
+        continue;
+      }
+      filledHere += 1;
     }
 
     if (filledHere > 0) {

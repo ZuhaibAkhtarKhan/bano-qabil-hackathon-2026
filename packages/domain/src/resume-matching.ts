@@ -77,6 +77,14 @@ function focusAlignment(resumeFocus: ResumeFocusId, opportunityFocus: ResumeFocu
   return 6;
 }
 
+/** Below this score, Need You shows “resume not best fit” instead of silent attach. */
+export const RESUME_FIT_WEAK_THRESHOLD = 55;
+
+export function isWeakResumeFit(score: number | null | undefined): boolean {
+  if (score == null || Number.isNaN(Number(score))) return false;
+  return Number(score) < RESUME_FIT_WEAK_THRESHOLD;
+}
+
 function suggestedFocusLabel(opportunityFocus: (typeof RESUME_FOCUSES)[number]): string {
   if (opportunityFocus.id === "general") return "a more targeted resume";
   return `a ${opportunityFocus.label} resume`;
@@ -140,7 +148,7 @@ export function rankResumes(
 
   return ranked.map((resume, index) => {
     const recommended = index === 0 && ranked.length > 0;
-    const weak = recommended && resume.score < 55;
+    const weak = recommended && isWeakResumeFit(resume.score);
     const suggestion = weak
       ? `Current resumes are a weak lexical match. Consider ${suggestedFocusLabel(opportunityFocus)} that ${highlightPhrase} — do not invent new ones.`
       : null;

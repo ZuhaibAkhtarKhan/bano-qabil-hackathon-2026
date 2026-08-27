@@ -10,13 +10,22 @@ export const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   "text/x-markdown",
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
 ]);
+
+export const IMAGE_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".txt": "text/plain",
   ".md": "text/markdown",
   ".pdf": "application/pdf",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
 };
 
 export class UploadValidationError extends Error {
@@ -69,6 +78,29 @@ export function assertUploadMagicBytes(buffer: Buffer, mimeType: string): void {
   if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
       throw new UploadValidationError("upload", "File contents do not match the DOCX type");
+    }
+    return;
+  }
+  if (mimeType === "image/jpeg") {
+    if (buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+      throw new UploadValidationError("upload", "File contents do not match the JPEG type");
+    }
+    return;
+  }
+  if (mimeType === "image/png") {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    if (!buffer.subarray(0, 8).equals(png)) {
+      throw new UploadValidationError("upload", "File contents do not match the PNG type");
+    }
+    return;
+  }
+  if (mimeType === "image/webp") {
+    if (
+      buffer.length < 12 ||
+      buffer.subarray(0, 4).toString("ascii") !== "RIFF" ||
+      buffer.subarray(8, 12).toString("ascii") !== "WEBP"
+    ) {
+      throw new UploadValidationError("upload", "File contents do not match the WebP type");
     }
     return;
   }

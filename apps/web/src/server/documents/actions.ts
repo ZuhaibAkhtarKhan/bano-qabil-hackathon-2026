@@ -15,6 +15,7 @@ import {
   assertOwnedVersion,
   createDocumentWithVersion,
   deleteOwnedDocument,
+  deleteOwnedDocumentVersion,
   setCurrentDocumentVersion,
 } from "@/server/documents/service";
 import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
@@ -235,6 +236,51 @@ export async function deleteDocument(formData: FormData) {
   revalidatePath("/app/applications");
   revalidatePath("/app/needs-you");
   redirectWith(returnTo, { notice: "document_deleted" });
+}
+
+export async function deleteDocumentVersion(formData: FormData) {
+  const { supabase, actor } = await requireWorkspace();
+  const versionId = String(formData.get("versionId") ?? "").trim();
+  const returnToRaw = String(formData.get("returnTo") ?? DOCUMENTS).trim();
+  const returnTo =
+    returnToRaw.startsWith("/app/documents") || returnToRaw.startsWith("/app/resumes") || returnToRaw.startsWith("/app/memory")
+      ? returnToRaw
+      : DOCUMENTS;
+
+  if (!versionId) redirectWith(returnTo, { error: "required" });
+
+  let documentId = "";
+  let documentDeleted = false;
+  try {
+    const result = await deleteOwnedDocumentVersion(supabase, actor, versionId);
+    documentId = result.documentId;
+    documentDeleted = result.documentDeleted;
+    await recordAuditEvent(supabase, documentDeleted ? "document.deleted" : "document.version_deleted", {
+      documentId,
+      versionId,
+    });
+  } catch (error) {
+    logError("documents.version_delete_failed", { versionId, error: String(error) });
+    redirectWith(returnTo, { error: "save" });
+  }
+
+  revalidatePath("/app");
+  revalidatePath(DOCUMENTS);
+  revalidatePath("/app/resumes");
+  revalidatePath("/app/memory");
+  revalidatePath("/app/applications");
+  revalidatePath("/app/needs-you");
+  if (documentId) revalidatePath(documentPath(documentId));
+
+  if (documentDeleted) {
+    const listReturn =
+      returnTo.startsWith("/app/resumes") || returnTo.startsWith("/app/memory") || returnTo === DOCUMENTS
+        ? returnTo
+        : DOCUMENTS;
+    redirectWith(listReturn, { notice: "document_deleted" });
+  }
+
+  redirectWith(returnTo, { notice: "version_deleted" });
 }
 
 export async function downloadDocumentVersion(formData: FormData) {

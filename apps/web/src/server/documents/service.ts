@@ -315,6 +315,64 @@ export async function deleteOwnedDocument(
   }
 }
 
+/**
+ * Remove one version from a vault document. If it is the only version, the whole
+ * document is deleted. Application attachments for that version are detached;
+ * frozen submission snapshots keep their JSON history.
+ */
+export async function deleteOwnedDocumentVersion(
+  supabase: SupabaseClient,
+  actor: Actor,
+  versionId: string,
+): Promise<{ documentId: string; documentDeleted: boolean }> {
+  const version = await assertOwnedVersion(supabase, actor, versionId);
+  const documentId = version.document_id;
+
+  const { data: siblings } = await supabase
+    .from("document_versions")
+    .select("id, created_at")
+    .eq("document_id", documentId)
+    .eq("user_id", actor.userId)
+    .order("created_at", { ascending: false });
+
+  const remaining = (siblings ?? []).filter((row) => String(row.id) !== versionId);
+  if (remaining.length === 0) {
+    await deleteOwnedDocument(supabase, actor, documentId);
+    return { documentId, documentDeleted: true };
+  }
+
+  const document = await assertOwnedDocument(supabase, actor, documentId);
+  const wasCurrent = document.current_version_id === versionId;
+
+  if (wasCurrent) {
+    await supabase
+      .from("documents")
+      .update({ current_version_id: String(remaining[0]!.id) })
+      .eq("id", documentId)
+      .eq("user_id", actor.userId);
+  }
+
+  await supabase
+    .from("application_documents")
+    .delete()
+    .eq("user_id", actor.userId)
+    .eq("document_version_id", versionId);
+
+  const { error } = await supabase
+    .from("document_versions")
+    .delete()
+    .eq("id", versionId)
+    .eq("user_id", actor.userId);
+  if (error) throw new Error("VERSION_DELETE_FAILED");
+
+  if (version.storage_path) {
+    const bucket = loadAppConfig().storageBucket;
+    await supabase.storage.from(bucket).remove([version.storage_path]);
+  }
+
+  return { documentId, documentDeleted: false };
+}
+
 export async function processDocumentVersion(input: {
   supabase: SupabaseClient;
   userId: string;

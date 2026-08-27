@@ -3,14 +3,14 @@ import { currentGuideStep, nextGuideSteps } from "@1apply/domain";
 import { asOne } from "@/server/types";
 import { DashboardHome, type DashboardApplicationRow, type DashboardMatch } from "@/components/app/dashboard-home";
 import {
-  applicationTableMeta,
   companyFromOpportunity,
-  dashboardDocumentStatuses,
-  relativeTimeLabel,
   sourceLabelFromOpportunity,
+  toApplicationsTrackerRow,
+  withNeedsYouFieldCount,
 } from "@/lib/dashboard-display";
 import { groupPackets } from "@/lib/dashboard";
 import { loadDashboard } from "@/server/workspace/queries";
+import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -26,15 +26,18 @@ function fitScore(row: { fit_evaluations: { score: number } | { score: number }[
  * Full Saadia-only layout remains at `@/components/app/dashboard-packets`.
  */
 export default async function DashboardPage() {
-  const {
-    profile,
-    applications,
-    opportunities,
-    kit,
-    packets,
-    prepareAndSendIfSilent,
-    guideDismissed,
-  } = await loadDashboard();
+  const [
+    {
+      profile,
+      applications,
+      opportunities,
+      kit,
+      packets,
+      prepareAndSendIfSilent,
+      guideDismissed,
+    },
+    needsYouCounts,
+  ] = await Promise.all([loadDashboard(), loadNeedsYouFieldCounts()]);
 
   const lanes = groupPackets(packets);
   const guideSteps = nextGuideSteps({
@@ -70,29 +73,12 @@ export default async function DashboardPage() {
     } satisfies DashboardMatch;
   });
 
-  const tableRows: DashboardApplicationRow[] = applications.map((row) => {
-    const opportunity = asOne(row.opportunities);
-    const company = companyFromOpportunity(opportunity);
-    const meta = applicationTableMeta(row.status, row.next_action);
-    const docs = dashboardDocumentStatuses({
-      requiredLabels: row.requiredDocumentLabels ?? [],
-      attachedLabels: row.attachedDocumentLabels ?? [],
-    });
-    return {
-      id: row.id,
-      href: `/app/applications/${row.id}`,
-      company,
-      role: opportunity?.title ?? "Untitled opportunity",
-      resume: docs.resume,
-      cover: docs.cover,
-      statusLabel: meta.statusLabel,
-      statusTone: meta.statusTone,
-      filter: meta.filter,
-      appliedLabel: relativeTimeLabel(row.submitted_at, row.updated_at),
-      initial: company.slice(0, 2).toUpperCase(),
-      sourceLabel: sourceLabelFromOpportunity(opportunity),
-    };
-  });
+  const tableRows: DashboardApplicationRow[] = applications.map((row) =>
+    withNeedsYouFieldCount(
+      toApplicationsTrackerRow(row),
+      needsYouCounts.fieldCountByApplicationId[row.id] ?? 0,
+    ),
+  );
 
   return (
     <main id="main">

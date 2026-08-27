@@ -752,8 +752,13 @@ export async function resolveReviewItem(formData: FormData) {
 export async function deleteApplication(formData: FormData) {
   const { user, supabase } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
+  const nextRaw = String(formData.get("next") ?? "").trim();
+  const next =
+    nextRaw === "/app/needs-you" || nextRaw.startsWith("/app/applications")
+      ? nextRaw
+      : "/app/applications";
   if (!applicationId) {
-    redirectWith("/app/applications", { error: "required" });
+    redirectWith(next, { error: "required" });
   }
 
   const { data: application } = await supabase
@@ -764,7 +769,7 @@ export async function deleteApplication(formData: FormData) {
     .maybeSingle();
 
   if (!application) {
-    redirectWith("/app/applications", { error: "not_found" });
+    redirectWith(next, { error: "not_found" });
   }
 
   const opportunityId = (application.opportunity_id as string | null) ?? null;
@@ -805,9 +810,12 @@ export async function deleteApplication(formData: FormData) {
     redirectWith(applicationPath(applicationId), { error: "save" }, "review");
   }
 
-  // Keep the opportunity listing, but never auto-recreate this application on
-  // dashboard load. User can re-ingest or start again from Opportunities.
+  // Remove the linked saved posting so Opportunities stays in sync with Applications.
+  if (opportunityId) {
+    await supabase.from("opportunities").delete().eq("id", opportunityId).eq("user_id", user.id);
+  }
+
   revalidateAfterApplicationDeleted(applicationId, opportunityId);
-  redirectWith("/app/applications", { notice: "deleted" });
+  redirectWith(next, { notice: "application_deleted" });
 }
 

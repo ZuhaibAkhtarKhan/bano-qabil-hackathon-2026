@@ -30,17 +30,20 @@ export function KitDocumentUploadForm({
   className,
   defaultUseInKit = true,
   compactUseInKit = false,
+  showUseInKit = true,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   children: ReactNode;
   className?: string;
   defaultUseInKit?: boolean;
   compactUseInKit?: boolean;
+  /** When false, render UseInKitField yourself (e.g. just above the submit button). */
+  showUseInKit?: boolean;
 }) {
   return (
     <form action={action} className={cn("grid gap-2", className)}>
-      <UseInKitField defaultChecked={defaultUseInKit} compact={compactUseInKit} />
       {children}
+      {showUseInKit ? <UseInKitField defaultChecked={defaultUseInKit} compact={compactUseInKit} /> : null}
     </form>
   );
 }

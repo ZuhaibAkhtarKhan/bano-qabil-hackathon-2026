@@ -2,7 +2,6 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { SubmitButton } from "@/components/ui/button";
@@ -62,6 +61,7 @@ export function ResetPasswordForm() {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           autoComplete="new-password"
+          placeholder="••••••••"
         />
       </Field>
       <Field label="Confirm password" htmlFor="confirm-password">
@@ -73,21 +73,18 @@ export function ResetPasswordForm() {
           value={confirm}
           onChange={(event) => setConfirm(event.target.value)}
           autoComplete="new-password"
+          placeholder="••••••••"
         />
       </Field>
       {error ? (
-        <p className="text-sm text-rose-700" role="alert">
+        <p className="rounded-xl border border-rose-200 bg-coral-soft px-3 py-2.5 text-sm text-coral-text" role="alert">
           {error}
         </p>
       ) : null}
       <SubmitButton className="w-full" disabled={pending} pending={pending} pendingText="Updating password…">
         Update password
+        <span aria-hidden="true">→</span>
       </SubmitButton>
-      <p className="text-sm text-ink-muted">
-        <Link href="/sign-in" className="underline">
-          Back to sign in
-        </Link>
-      </p>
     </form>
   );
 }

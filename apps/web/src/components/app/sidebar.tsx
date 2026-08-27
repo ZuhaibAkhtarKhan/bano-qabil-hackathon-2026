@@ -11,7 +11,15 @@ import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
 
-export function AppSidebar({ email, displayName }: { email: string; displayName: string | null }) {
+export function AppSidebar({
+  email,
+  displayName,
+  needsYouApplicationCount = 0,
+}: {
+  email: string;
+  displayName: string | null;
+  needsYouApplicationCount?: number;
+}) {
   const pathname = usePathname();
   const { unreadCount } = useRealtime();
 
@@ -31,6 +39,7 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
               {section.items.map(({ href, label, icon: Icon }) => {
                 const active = isNavActive(pathname, href);
                 const isNotifications = href === "/app/notifications";
+                const isNeedsYou = href === "/app/needs-you";
                 return (
                   <li key={href}>
                     <Link
@@ -45,6 +54,19 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
                         <Icon className="h-4 w-4" aria-hidden="true" />
                         {label}
                       </div>
+                      {isNeedsYou ? (
+                        <span
+                          className={cn(
+                            "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold",
+                            needsYouApplicationCount > 0
+                              ? "bg-coral-soft text-coral-text"
+                              : "bg-canvas text-ink-muted",
+                          )}
+                          aria-label={`${needsYouApplicationCount} applications need input`}
+                        >
+                          {needsYouApplicationCount > 99 ? "99+" : needsYouApplicationCount}
+                        </span>
+                      ) : null}
                       {isNotifications && unreadCount > 0 && (
                         <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sand px-1.5 font-mono text-[10px] font-bold text-ink-base transition-all animate-in zoom-in-50">
                           {unreadCount > 99 ? "99+" : unreadCount}

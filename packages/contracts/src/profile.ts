@@ -64,12 +64,14 @@ export function resolveOnboardingStep(input: {
   documentCount: number;
   evidenceCount: number;
   skippedDocuments: boolean;
+  skippedProfile?: boolean;
   onboardingCompleted: boolean;
   storedStep?: OnboardingStep | null;
 }): OnboardingStep {
   if (input.onboardingCompleted) return "done";
   if (!input.hasConsent) return "consent";
-  if (!input.hasIdentity || !input.hasUniversity || !input.hasEducation) return "profile";
+  const profileComplete = input.hasIdentity && input.hasUniversity && input.hasEducation;
+  if (!profileComplete && !input.skippedProfile) return "profile";
   if (input.storedStep === "ready") return "ready";
   if (input.storedStep === "review") return "review";
   if (input.storedStep === "done") return "done";
