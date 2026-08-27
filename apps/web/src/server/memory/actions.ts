@@ -19,9 +19,17 @@ import { parseUseInKit, uploadQueuedNotice } from "@/lib/document-upload-options
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { mergeWorkspacePreferences } from "@/lib/workspace-preferences";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
 
 const MEMORY = "/app/memory";
+
+function revalidateKitSurfaces() {
+  revalidatePath("/app");
+  revalidatePath(MEMORY);
+  revalidatePath("/app/needs-you");
+  revalidatePath("/app/applications");
+}
 
 function sectionReturn(formData: FormData) {
   const section = String(formData.get("section") ?? "").trim();
@@ -42,7 +50,7 @@ function parseDate(value: FormDataEntryValue | null): string | null {
 }
 
 export async function updateIdentity(formData: FormData) {
-  const { profile, supabase } = await requireWorkspace();
+  const { profile, supabase, actor } = await requireWorkspace();
   const displayName = String(formData.get("displayName") ?? "").trim();
   if (!displayName) redirectWith(sectionReturn(formData), { error: "required" });
 
@@ -72,8 +80,8 @@ export async function updateIdentity(formData: FormData) {
 
   if (error) redirectWith(sectionReturn(formData), { error: "save" });
 
-  revalidatePath("/app");
-  revalidatePath(MEMORY);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
   redirectWith(sectionReturn(formData), { notice: "saved" });
 }
 
@@ -108,7 +116,7 @@ export async function skipWorkspaceGuide() {
 }
 
 export async function addMemoryEvidence(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const title = String(formData.get("title") ?? "").trim();
   const kindParsed = experienceKindSchema.safeParse(String(formData.get("kind") ?? "project"));
   if (!title || !kindParsed.success) redirectWith(sectionReturn(formData), { error: "required" });
@@ -137,18 +145,19 @@ export async function addMemoryEvidence(formData: FormData) {
     source: "manual",
     fact_key: factKey,
     extraction_status: "manual",
-    verification_status: "unverified",
+    verification_status: "verified",
     excluded_from_ai: false,
   });
 
   if (error) redirectWith(sectionReturn(formData), { error: "save" });
   await syncMemoryConflicts(supabase, user.id);
-  revalidatePath(MEMORY);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
   redirectWith(sectionReturn(formData), { notice: "evidence_added" });
 }
 
 export async function updateMemoryEvidence(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const id = String(formData.get("evidenceId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const kindParsed = experienceKindSchema.safeParse(String(formData.get("kind") ?? "project"));
@@ -175,14 +184,15 @@ export async function updateMemoryEvidence(formData: FormData) {
         field: parseDate(formData.get("endDate")) ? "end_year" : "title",
       }),
       extraction_status: "user_edited",
-      verification_status: "unverified",
+      verification_status: "verified",
     })
     .eq("id", id)
     .eq("user_id", user.id);
 
   if (error) redirectWith(sectionReturn(formData), { error: "save" });
   await syncMemoryConflicts(supabase, user.id);
-  revalidatePath(MEMORY);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
   redirectWith(sectionReturn(formData), { notice: "saved" });
 }
 
@@ -202,7 +212,7 @@ export async function deleteMemoryEvidence(formData: FormData) {
 }
 
 export async function addMemorySkill(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const name = String(formData.get("name") ?? "").trim();
   if (!name) redirectWith(sectionReturn(formData), { error: "required" });
 
@@ -219,10 +229,11 @@ export async function addMemorySkill(formData: FormData) {
     value: { text: name },
     source: "manual",
     extraction_status: "manual",
-    verification_status: "unverified",
+    verification_status: "verified",
   });
 
-  revalidatePath(MEMORY);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
   redirectWith(sectionReturn(formData), { notice: "evidence_added" });
 }
 
@@ -236,7 +247,7 @@ export async function deleteMemorySkill(formData: FormData) {
 }
 
 export async function addMemoryLink(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const url = String(formData.get("url") ?? "").trim();
   const kind = String(formData.get("kind") ?? "other");
   if (!url) redirectWith(sectionReturn(formData), { error: "required" });
@@ -251,7 +262,8 @@ export async function addMemoryLink(formData: FormData) {
     { onConflict: "user_id,kind,url" },
   );
   if (error) redirectWith(sectionReturn(formData), { error: "save" });
-  revalidatePath(MEMORY);
+  scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  revalidateKitSurfaces();
   redirectWith(sectionReturn(formData), { notice: "saved" });
 }
 
@@ -460,7 +472,7 @@ export async function uploadMemoryDocument(formData: FormData) {
   if (!useInKit) {
     await autoAttachKitAcrossOpenApplications(supabase, actor);
   }
-  revalidatePath(MEMORY);
+  revalidateKitSurfaces();
   revalidatePath("/app/documents");
   redirectWith(sectionReturn(formData), { notice });
 }

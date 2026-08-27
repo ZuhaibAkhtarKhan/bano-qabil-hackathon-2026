@@ -20,6 +20,7 @@ import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-p
 import { redirectWith } from "@/server/http/flash";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
+import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
@@ -406,6 +407,10 @@ export async function resolveNeedsYouValue(formData: FormData) {
     })
     .eq("id", applicationId)
     .eq("user_id", user.id);
+
+  if (scope === "memory") {
+    scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  }
 
   revalidateNeedsYou(applicationId);
   redirectWith(NEEDS_YOU, { notice: "continued" });

@@ -214,6 +214,10 @@ class OpenAiCompatibleProvider implements AiProvider {
   }
 
   async embed(request: EmbeddingRequest): Promise<number[][]> {
+    return this.embedWithRetry(request, 0);
+  }
+
+  private async embedWithRetry(request: EmbeddingRequest, attempt: number): Promise<number[][]> {
     const config = loadAppConfig();
     if (!config.openaiConfigured) return [];
     const response = await fetch(`${config.openaiBaseUrl}/embeddings`, {
@@ -224,14 +228,21 @@ class OpenAiCompatibleProvider implements AiProvider {
       },
       body: JSON.stringify({
         model: config.embeddingModel,
-        input: request.texts.slice(0, 32),
+        input: request.texts.slice(0, 16),
         // Keep Gemini (and OpenAI) vectors aligned with pgvector(1536).
         dimensions: EMBEDDING_DIMENSIONS,
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(60_000),
     });
     if (!response.ok) {
-      logError("ai.embed_failed", { status: response.status });
+      const detail = (await response.text().catch(() => "")).slice(0, 400);
+      if (response.status === 429 && attempt < 5) {
+        const waitMs = parseRateLimitWaitMs(detail, attempt);
+        logError("ai.embed_rate_limited", { attempt, waitMs, detail });
+        await sleep(waitMs);
+        return this.embedWithRetry(request, attempt + 1);
+      }
+      logError("ai.embed_failed", { status: response.status, detail });
       throw new Error("AI_HTTP_FAILED");
     }
     const json = (await response.json()) as { data?: Array<{ embedding: number[] }> };

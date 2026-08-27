@@ -46,31 +46,42 @@ export async function loadMemoryCatalog(
   actor: Actor,
   applicationId: string,
 ): Promise<MemoryValue[]> {
-  const [{ data: profile }, { data: facts }, { data: answers }, { data: questions }, { data: evidence }] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("display_name, email, phone, headline, location_city, location_country, linkedin_url, github_url, portfolio_url")
-      .eq("id", actor.userId)
-      .maybeSingle(),
-    supabase.from("profile_facts").select("category, value, verification_status, fact_key").eq("user_id", actor.userId),
-    supabase
-      .from("application_answers")
-      .select("question_id, approved_text, original_ai_text, user_edited_text")
-      .eq("application_id", applicationId)
-      .eq("user_id", actor.userId),
-    supabase.from("applications").select("opportunity_id").eq("id", applicationId).eq("user_id", actor.userId).maybeSingle(),
-    supabase
-      .from("evidence_items")
-      .select("title, organization, outcome, situation, action, skills, kind, verification_status, excluded_from_ai, start_date, end_date")
-      .eq("user_id", actor.userId)
-      .limit(40),
-  ]);
+  const [{ data: profile }, { data: facts }, { data: answers }, { data: questions }, { data: evidence }, { data: skills }] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select(
+          "display_name, email, phone, headline, location_city, location_country, linkedin_url, github_url, portfolio_url, availability, work_authorization, preferences",
+        )
+        .eq("id", actor.userId)
+        .maybeSingle(),
+      supabase.from("profile_facts").select("category, value, verification_status, fact_key").eq("user_id", actor.userId),
+      supabase
+        .from("application_answers")
+        .select("question_id, approved_text, original_ai_text, user_edited_text")
+        .eq("application_id", applicationId)
+        .eq("user_id", actor.userId),
+      supabase.from("applications").select("opportunity_id").eq("id", applicationId).eq("user_id", actor.userId).maybeSingle(),
+      supabase
+        .from("evidence_items")
+        .select("title, organization, outcome, situation, action, skills, kind, verification_status, excluded_from_ai, start_date, end_date")
+        .eq("user_id", actor.userId)
+        .limit(40),
+      supabase.from("skills").select("name").eq("user_id", actor.userId).limit(80),
+    ]);
 
   const catalog: MemoryValue[] = [];
   const add = (path: string, value: string | null | undefined, aliases: string[], source = "Application Memory") => {
     if (!value?.trim()) return;
     catalog.push({ path, source, value: value.trim(), aliases });
   };
+
+  const preferences =
+    profile?.preferences && typeof profile.preferences === "object"
+      ? (profile.preferences as Record<string, unknown>)
+      : {};
+  const university = typeof preferences.university === "string" ? preferences.university : "";
+  const educationSummary = typeof preferences.educationSummary === "string" ? preferences.educationSummary : "";
 
   add("Profile → Full name", profile?.display_name, ["name", "full name"]);
   add("Profile → Email", profile?.email, ["email"]);
@@ -86,6 +97,18 @@ export async function loadMemoryCatalog(
   add("Profile → LinkedIn", profile?.linkedin_url, ["linkedin", "link", "url", "sample", "writing sample"]);
   add("Profile → Portfolio", profile?.portfolio_url, ["portfolio", "website", "link", "url", "writing sample", "work sample"]);
   add("Profile → Headline", profile?.headline, ["headline", "about", "summary"], "Profile");
+  add(
+    "Profile → Availability",
+    profile?.availability,
+    ["availability", "available", "start date", "when can you start"],
+    "Profile",
+  );
+  add(
+    "Profile → Work authorization",
+    profile?.work_authorization,
+    ["work authorization", "visa", "eligible to work", "right to work", "sponsorship"],
+    "Profile",
+  );
 
   const display = profile?.display_name?.trim() ?? "";
   const [first, ...rest] = display.split(/\s+/);
@@ -140,6 +163,13 @@ export async function loadMemoryCatalog(
       add("Education → Graduation year", String(latest), ["graduation", "grad year", "class of", "expected graduation"], source);
     }
   };
+
+  if (university.trim()) {
+    addEducationBlob(university, "Your kit");
+  }
+  if (educationSummary.trim()) {
+    addEducationBlob(educationSummary, "Your kit");
+  }
 
   const sortedFacts = [...(facts ?? [])].sort((a, b) => {
     const av = a.verification_status === "verified" ? 0 : 1;
@@ -241,6 +271,12 @@ export async function loadMemoryCatalog(
         }
       }
     }
+  }
+
+  for (const skill of skills ?? []) {
+    const name = typeof skill.name === "string" ? skill.name.trim() : "";
+    if (!name) continue;
+    add("Skills → Kit", name, ["skill", "skills", "technology", "tools"], "Your kit");
   }
 
   return catalog;

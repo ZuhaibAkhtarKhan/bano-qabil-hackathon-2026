@@ -147,12 +147,69 @@ export function MemoryWorkspace({
   ];
 
   const evidencePanel = (category: MemoryCategory) => {
-    const items = data.evidence.filter(
-      (item) => item.category === category && item.verification_status !== "rejected",
-    );
+    const items = data.evidence.filter((item) => item.category === category);
     const defaultKind = SECTION_KIND[category] ?? "project";
+    const entryList =
+      items.length > 0 ? (
+        <ul className="grid gap-4">
+          {items.map((item) => (
+            <li key={item.id}>
+              <Card as="article" className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-medium">{item.title}</h3>
+                    {item.organization ? (
+                      <p className="mt-1 text-sm text-ink-muted">{item.organization}</p>
+                    ) : null}
+                    {(item.start_date || item.end_date) && (
+                      <p className="mt-1 text-xs text-ink-muted">
+                        {[item.start_date, item.end_date].filter(Boolean).join(" – ")}
+                      </p>
+                    )}
+                    {item.situation ? (
+                      <p className="mt-2 text-sm text-ink-muted">{item.situation}</p>
+                    ) : null}
+                    {item.action ? (
+                      <p className="mt-1 text-sm text-ink-muted">{item.action}</p>
+                    ) : null}
+                    {item.outcome ? (
+                      <p className="mt-1 text-sm text-ink-muted">{item.outcome}</p>
+                    ) : null}
+                    {sourceLabel(item, data.documentById) ? (
+                      <p className="mt-2 text-xs text-ink-muted">
+                        Source: {sourceLabel(item, data.documentById)}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <form action={deleteMemoryEvidence}>
+                    {hiddenSection}
+                    <input type="hidden" name="evidenceId" value={item.id} />
+                    <SubmitButton variant="ghost" size="sm">
+                      Delete
+                    </SubmitButton>
+                  </form>
+                </div>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="rounded-xl border border-dashed border-sand/60 px-4 py-3 text-sm text-ink-muted">
+          No entries in this section yet. Upload a resume with “Update Your kit” checked, or add one manually below.
+        </p>
+      );
+
     return (
       <div className="grid gap-6">
+        <div className="grid gap-3">
+          <p className="text-sm font-medium">
+            {items.length} {items.length === 1 ? "entry" : "entries"} in {MEMORY_SECTIONS.find((s) => s.id === category)?.label ?? category}
+          </p>
+          {entryList}
+        </div>
+
         <form action={addMemoryEvidence} className="grid gap-4 rounded-xl border border-sand/50 p-4">
           {hiddenSection}
           <p className="text-sm font-medium">Add entry manually</p>
@@ -183,54 +240,8 @@ export function MemoryWorkspace({
           <Field label="Skills (comma separated)" htmlFor={`${category}-skills`}>
             <Input id={`${category}-skills`} name="skills" />
           </Field>
-          <SubmitButton variant="secondary">
-            Add entry
-          </SubmitButton>
+          <SubmitButton variant="secondary">Add entry</SubmitButton>
         </form>
-
-        {items.length > 0 ? (
-          <ul className="grid gap-4">
-            {items.map((item) => (
-              <li key={item.id}>
-                <Card as="article" className="p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-base font-medium">{item.title}</h3>
-                      {item.organization ? (
-                        <p className="mt-1 text-sm text-ink-muted">{item.organization}</p>
-                      ) : null}
-                      {(item.start_date || item.end_date) && (
-                        <p className="mt-1 text-xs text-ink-muted">
-                          {[item.start_date, item.end_date].filter(Boolean).join(" – ")}
-                        </p>
-                      )}
-                      {item.outcome ? (
-                        <p className="mt-2 text-sm text-ink-muted">{item.outcome}</p>
-                      ) : null}
-                      {item.action ? (
-                        <p className="mt-1 text-sm text-ink-muted">{item.action}</p>
-                      ) : null}
-                      {sourceLabel(item, data.documentById) ? (
-                        <p className="mt-2 text-xs text-ink-muted">
-                          Source: {sourceLabel(item, data.documentById)}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <form action={deleteMemoryEvidence}>
-                      {hiddenSection}
-                      <input type="hidden" name="evidenceId" value={item.id} />
-                      <SubmitButton variant="ghost" size="sm">
-                        Delete
-                      </SubmitButton>
-                    </form>
-                  </div>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        ) : null}
       </div>
     );
   };
@@ -320,6 +331,7 @@ export function MemoryWorkspace({
 
   const supportingPanel = (
     <div className="grid gap-8">
+      {evidencePanel("supporting")}
       <div className="grid gap-4 rounded-xl border border-sand/50 p-4">
         <p className="text-sm font-medium">Upload resumes and supporting documents</p>
         <ResumeAwareUploadForm
@@ -420,6 +432,12 @@ export function MemoryWorkspace({
         <h2 className="text-lg font-medium">{activeLabel}</h2>
         <p className="mt-1 text-sm text-ink-muted">
           Upload once — resume, {CNIC_PHARM_B_LABEL}, named documents, and supporting files auto-fill every kit section from extracted text.
+        </p>
+        <p className="mt-2 text-xs text-ink-muted">
+          Kit loaded: {data.evidence.length} entries · {data.skills.length} skills
+          {data.evidence.length === 0
+            ? " — if you just uploaded, wait for processing then refresh."
+            : null}
         </p>
         <div className="mt-6">{panel}</div>
       </Card>

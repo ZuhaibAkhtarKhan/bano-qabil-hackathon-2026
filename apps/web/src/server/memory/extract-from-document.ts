@@ -23,7 +23,7 @@ export async function extractFromDocumentText(input: {
   const persist = async (extracted: ExtractedDocument) => {
     const plan = planDocumentExtraction(extracted, existing);
     const existingKeys = new Set(existing.map((row) => row.factKey));
-    const newEvidence = plan.evidence.filter((item) => !existingKeys.has(item.factKey));
+    const newEvidence = plan.evidence.filter((item) => !existingKeys.has(item.identityKey));
     const hasSignal =
       newEvidence.length > 0 || plan.facts.length > 0 || plan.skills.length > 0 || plan.links.length > 0;
     if (!hasSignal) return { extracted: false as const, fieldsWritten: 0 };

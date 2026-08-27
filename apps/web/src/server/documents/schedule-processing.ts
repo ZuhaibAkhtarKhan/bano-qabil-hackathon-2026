@@ -8,6 +8,7 @@ import { runOwnedJob } from "@/infra/jobs/runner";
 import { uploadProcessingNotice } from "@/lib/document-upload-options";
 import { logError } from "@/lib/log";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import { refreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { FLASH } from "@/server/http/flash";
 import { reindexUserRetrievalCorpus } from "@/services/embeddings";
 
@@ -115,7 +116,12 @@ export function scheduleDocumentVersionProcessing(input: {
       );
 
       await notifyDocumentProcessingComplete(input.supabase, input.userId, input.versionId, processResult);
-      await autoAttachKitAcrossOpenApplications(input.supabase, input.actor);
+      // Kit may have new facts — rematch Needs You / open applications from Your kit.
+      if (processResult.fieldsWritten > 0 || processResult.kitFilled) {
+        await refreshOpenApplicationsFromKit(input.supabase, input.actor);
+      } else {
+        await autoAttachKitAcrossOpenApplications(input.supabase, input.actor);
+      }
       await input.postProcess?.();
     } catch (error) {
       logError("documents.background_process_failed", {

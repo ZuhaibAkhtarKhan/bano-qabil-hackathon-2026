@@ -69,10 +69,15 @@ export function isNeedsYouSystemNoise(text: string): boolean {
   return [
     /no explicit requirements were extracted/i,
     /add them before treating this as a fit check/i,
-    /not enough verified experience to decide/i,
+    /not enough verified (experience|education|evidence)/i,
     /this is not an official eligibility decision/i,
     /requirement:\s*no explicit requirements/i,
     /^kind:\s*eligibility$/i,
+    // Fit Index / eligibility empty-corpus diagnostics — shown on Fit panel, not as Needs You forms.
+    /no verified .+ in application memory/i,
+    /limited verified /i,
+    /no verified .+ (are|is) available/i,
+    /no verified evidence (found|is available|was available|matched)/i,
   ].some((pattern) => pattern.test(value));
 }
 

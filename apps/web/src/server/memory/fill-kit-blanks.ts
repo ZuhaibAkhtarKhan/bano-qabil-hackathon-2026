@@ -13,6 +13,7 @@ import {
   loadConflictCandidates,
   persistDocumentExtraction,
   syncMemoryConflicts,
+  dedupeExistingEvidence,
 } from "@/server/memory/persist-extraction";
 
 const EVIDENCE_SECTIONS: MemoryCategory[] = [
@@ -196,10 +197,14 @@ function buildFillInstruction(blanks: KitBlankDescriptor[]): string {
     "- Skills section plus tools and languages mentioned in jobs and projects → skills array",
     "- URLs and handles → links (linkedin, github, portfolio)",
     "",
-    "Evidence kinds and kit sections (you choose the best fit per entry):",
-    "- education → Education; employment → Experience; project → Projects",
-    "- achievement → Achievements; certification → Certifications",
-    "- leadership → Leadership; research → Research; volunteering → Supporting Evidence",
+    "Evidence kinds and kit sections (you choose the best fit per entry — be precise):",
+    "- University/college degrees → kind education (Education section)",
+    "- Jobs/internships → kind employment (Experience section)",
+    "- Personal/side apps and products → kind project (Projects section)",
+    "- Awards/hackathons/contests → kind achievement (Achievements section)",
+    "- Online courses/certificates (Udemy, Coursera, edX) → kind certification",
+    "- Club/ambassador leadership → kind leadership",
+    "- Papers/labs → kind research; volunteering → kind volunteering",
     "",
     "For each evidence item: title = role/degree/project name; organization = employer or school;",
     "situation/action/outcome from resume bullets; startDate/endDate as YYYY-MM-DD when possible",
@@ -319,7 +324,7 @@ async function applyKitFillResult(input: {
     (substantiveEvidence.length > 0 || (input.data.skills?.length ?? 0) > 0 || (input.data.links?.length ?? 0) > 0)
   ) {
     const existing = await loadConflictCandidates(input.supabase, input.userId);
-    const existingKeys = new Set(existing.map((row) => row.factKey));
+    const existingIdentityKeys = new Set(existing.map((row) => row.factKey));
     const plan = planDocumentExtraction(
       {
         displayName: p.displayName ?? null,
@@ -334,8 +339,29 @@ async function applyKitFillResult(input: {
       existing,
     );
 
-    const newEvidence = plan.evidence.filter((item) => !existingKeys.has(item.factKey));
-    if (newEvidence.length > 0 || plan.skills.length > 0 || plan.links.length > 0) {
+    const newEvidence = plan.evidence.filter((item) => !existingIdentityKeys.has(item.identityKey));
+
+    const { data: existingSkills } = await input.supabase
+      .from("skills")
+      .select("normalized_name")
+      .eq("user_id", input.userId);
+    const existingSkillNames = new Set(
+      (existingSkills ?? []).map((row) => String(row.normalized_name ?? "").toLowerCase()),
+    );
+    const newSkills = plan.skills.filter((name) => !existingSkillNames.has(name.trim().toLowerCase()));
+
+    const { data: existingLinks } = await input.supabase
+      .from("profile_links")
+      .select("kind, url")
+      .eq("user_id", input.userId);
+    const existingLinkKeys = new Set(
+      (existingLinks ?? []).map((row) => `${String(row.kind)}:${String(row.url).toLowerCase()}`),
+    );
+    const newLinks = plan.links.filter(
+      (link) => !existingLinkKeys.has(`${link.kind}:${link.url.trim().toLowerCase()}`),
+    );
+
+    if (newEvidence.length > 0 || newSkills.length > 0 || newLinks.length > 0) {
       const persisted = await persistDocumentExtraction(input.supabase, {
         userId: input.userId,
         documentId: input.sourceDocumentId,
@@ -343,11 +369,22 @@ async function applyKitFillResult(input: {
         documentLabel: "Kit auto-fill",
         evidence: newEvidence,
         facts: [],
-        skills: plan.skills,
-        links: plan.links,
+        skills: newSkills,
+        links: newLinks,
       });
-      fieldsWritten +=
-        persisted.insertedEvidenceIds.length + plan.skills.length + plan.links.length;
+      fieldsWritten += persisted.insertedEvidenceIds.length + newSkills.length + newLinks.length;
+      logInfo("memory.kit_fill_persisted", {
+        userId: input.userId,
+        evidenceInserted: persisted.insertedEvidenceIds.length,
+        evidenceSkippedDuplicates: plan.evidence.length - newEvidence.length,
+        newSkills: newSkills.length,
+        newLinks: newLinks.length,
+      });
+    } else if (plan.evidence.length > 0) {
+      logInfo("memory.kit_fill_all_duplicates", {
+        userId: input.userId,
+        evidenceProposed: plan.evidence.length,
+      });
     }
   }
 
@@ -556,6 +593,9 @@ export async function extractAndFillKitFromDocument(input: {
     versionId: input.versionId,
     textChars: input.extractedText.trim().length,
   });
+
+  // Collapse near-duplicates from earlier fill passes before writing more.
+  await dedupeExistingEvidence(input.supabase, input.userId);
 
   // Pass 1: always scan every kit category from this document's full text.
   const primary = await fillKitBlanksFromUploadedDocument({

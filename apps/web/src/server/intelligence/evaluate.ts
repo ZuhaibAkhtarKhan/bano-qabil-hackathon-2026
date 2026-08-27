@@ -61,7 +61,7 @@ export async function loadIntelligenceContext(
       .eq("user_id", actor.userId),
     supabase
       .from("profiles")
-      .select("location_city, location_country, availability, work_authorization")
+      .select("location_city, location_country, availability, work_authorization, preferences")
       .eq("id", actor.userId)
       .maybeSingle(),
     supabase
@@ -78,6 +78,31 @@ export async function loadIntelligenceContext(
   ]);
 
   const evidence = ((evidenceRows ?? []) as EvidenceRow[]).map(mapEvidence);
+  const preferences =
+    profile?.preferences && typeof profile.preferences === "object"
+      ? (profile.preferences as Record<string, unknown>)
+      : {};
+  const preferenceFacts: EligibilityContext["facts"] = [];
+  const university = typeof preferences.university === "string" ? preferences.university.trim() : "";
+  const educationSummary =
+    typeof preferences.educationSummary === "string" ? preferences.educationSummary.trim() : "";
+  if (university) {
+    preferenceFacts.push({
+      id: "kit-pref-university",
+      category: "education",
+      value: university,
+      verificationStatus: "verified",
+    });
+  }
+  if (educationSummary) {
+    preferenceFacts.push({
+      id: "kit-pref-education-summary",
+      category: "education",
+      value: educationSummary,
+      verificationStatus: "verified",
+    });
+  }
+
   const versionIds = (documents ?? [])
     .map((item) => item.current_version_id as string | null)
     .filter((id): id is string => Boolean(id));
@@ -123,12 +148,15 @@ export async function loadIntelligenceContext(
       availability: profile?.availability ?? null,
       workAuthorization: profile?.work_authorization ?? null,
       opportunityLocation: opportunity?.location ?? null,
-      facts: (facts ?? []).map((item) => ({
-        id: item.id as string,
-        category: String(item.category ?? "personal"),
-        value: factValue(item.value),
-        verificationStatus: item.verification_status as "unverified" | "verified" | "rejected",
-      })),
+      facts: [
+        ...preferenceFacts,
+        ...(facts ?? []).map((item) => ({
+          id: item.id as string,
+          category: String(item.category ?? "personal"),
+          value: factValue(item.value),
+          verificationStatus: item.verification_status as "unverified" | "verified" | "rejected",
+        })),
+      ],
       documents: (documents ?? []).map((item) => ({
         type: item.type as string,
         label: item.label as string,

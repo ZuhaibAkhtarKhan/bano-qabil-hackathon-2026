@@ -1,10 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MemoryCategory } from "@1apply/contracts";
-import { categoryFromKind, detectMemoryConflicts, memoryFactKey, type ConflictCandidate } from "@1apply/domain";
+import {
+  categoryFromKind,
+  detectMemoryConflicts,
+  evidenceIdentityKey,
+  memoryFactKey,
+  type ConflictCandidate,
+} from "@1apply/domain";
 
 import type { PlannedEvidence, PlannedScalarFact } from "@/server/memory/plan-extraction";
 import { mapExtractedEvidenceKind, uniqueSkillNames } from "@/lib/extraction";
-import { logError } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 
 type PersistInput = {
   userId: string;
@@ -24,11 +30,33 @@ type PersistInput = {
   };
 };
 
+function evidenceRowRichness(row: {
+  organization?: string | null;
+  situation?: string | null;
+  action?: string | null;
+  outcome?: string | null;
+  skills?: string[] | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  source_location?: string | null;
+}): number {
+  let score = 0;
+  if (row.organization?.trim()) score += 2;
+  if (row.situation?.trim()) score += 2;
+  if (row.action?.trim()) score += 2;
+  if (row.outcome?.trim()) score += 2;
+  if (row.start_date) score += 1;
+  if (row.end_date) score += 1;
+  if (row.source_location?.trim()) score += 1;
+  score += Math.min(row.skills?.length ?? 0, 4);
+  return score;
+}
+
 export async function loadConflictCandidates(supabase: SupabaseClient, userId: string): Promise<ConflictCandidate[]> {
   const [{ data: evidence }, { data: facts }] = await Promise.all([
     supabase
       .from("evidence_items")
-      .select("id, user_id, fact_key, kind, title, outcome, end_date, verification_status")
+      .select("id, user_id, fact_key, kind, title, organization, outcome, end_date, verification_status")
       .eq("user_id", userId),
     supabase
       .from("profile_facts")
@@ -38,15 +66,11 @@ export async function loadConflictCandidates(supabase: SupabaseClient, userId: s
 
   const rows: ConflictCandidate[] = [];
   for (const item of evidence ?? []) {
-    const category = categoryFromKind(String(item.kind));
-    const factKey =
-      (item.fact_key as string | null) ??
-      memoryFactKey({
-        category,
-        organization: null,
-        title: item.title as string,
-        field: item.end_date ? "end_year" : "title",
-      });
+    const kind = String(item.kind ?? "project");
+    const title = String(item.title ?? "");
+    const organization = (item.organization as string | null) ?? null;
+    const category = categoryFromKind(kind);
+    const factKey = evidenceIdentityKey({ kind, title, organization });
     rows.push({
       id: item.id as string,
       userId: item.user_id as string,
@@ -69,6 +93,70 @@ export async function loadConflictCandidates(supabase: SupabaseClient, userId: s
   return rows;
 }
 
+/** Collapse near-duplicate evidence rows; keep the richest copy. */
+export async function dedupeExistingEvidence(supabase: SupabaseClient, userId: string): Promise<number> {
+  const { data: rows } = await supabase
+    .from("evidence_items")
+    .select(
+      "id, kind, title, organization, situation, action, outcome, skills, start_date, end_date, source_location, verification_status, updated_at",
+    )
+    .eq("user_id", userId)
+    .neq("verification_status", "rejected")
+    .order("updated_at", { ascending: false });
+
+  if (!rows?.length) return 0;
+
+  const keepIds = new Set<string>();
+  const deleteIds: string[] = [];
+  const bestByKey = new Map<string, (typeof rows)[number]>();
+
+  for (const row of rows) {
+    const key = evidenceIdentityKey({
+      kind: String(row.kind ?? "project"),
+      title: String(row.title ?? ""),
+      organization: (row.organization as string | null) ?? null,
+    });
+    const prev = bestByKey.get(key);
+    if (!prev) {
+      bestByKey.set(key, row);
+      keepIds.add(row.id as string);
+      continue;
+    }
+    const keepPrev = evidenceRowRichness(prev) >= evidenceRowRichness(row);
+    if (keepPrev) {
+      deleteIds.push(row.id as string);
+    } else {
+      deleteIds.push(prev.id as string);
+      keepIds.delete(prev.id as string);
+      bestByKey.set(key, row);
+      keepIds.add(row.id as string);
+    }
+  }
+
+  if (deleteIds.length === 0) return 0;
+
+  await supabase.from("evidence_sources").delete().eq("user_id", userId).in("evidence_id", deleteIds);
+  await supabase.from("evidence_skills").delete().eq("user_id", userId).in("evidence_id", deleteIds);
+  await supabase.from("evidence_items").delete().eq("user_id", userId).in("id", deleteIds);
+
+  for (const row of bestByKey.values()) {
+    const kind = String(row.kind ?? "project");
+    const title = String(row.title ?? "");
+    const organization = (row.organization as string | null) ?? null;
+    const category = categoryFromKind(kind);
+    const factKey = memoryFactKey({
+      category,
+      organization,
+      title,
+      field: "title",
+    });
+    await supabase.from("evidence_items").update({ fact_key: factKey }).eq("id", row.id).eq("user_id", userId);
+  }
+
+  logInfo("memory.evidence_deduped", { userId, removed: deleteIds.length, kept: keepIds.size });
+  return deleteIds.length;
+}
+
 export async function persistDocumentExtraction(supabase: SupabaseClient, input: PersistInput) {
   const { userId, documentId, versionId, documentLabel } = input;
 
@@ -84,7 +172,6 @@ export async function persistDocumentExtraction(supabase: SupabaseClient, input:
     const extractedLooksLikeName =
       Boolean(extractedName) &&
       !/resume|curriculum|\bcv\b|primary|document|upload|supporting|file/i.test(extractedName);
-    // Keep the signup/onboarding name. Only fill an empty profile name from extraction.
     const nextDisplayName =
       !existingName && extractedLooksLikeName
         ? extractedName
@@ -104,73 +191,110 @@ export async function persistDocumentExtraction(supabase: SupabaseClient, input:
       .eq("id", userId);
   }
 
+  const { data: existingEvidence } = await supabase
+    .from("evidence_items")
+    .select("id, kind, title, organization, fact_key")
+    .eq("user_id", userId)
+    .neq("verification_status", "rejected");
+
+  const existingIdentityKeys = new Set(
+    (existingEvidence ?? []).map((row) =>
+      evidenceIdentityKey({
+        kind: String(row.kind ?? "project"),
+        title: String(row.title ?? ""),
+        organization: (row.organization as string | null) ?? null,
+      }),
+    ),
+  );
+
   const insertedEvidenceIds: string[] = [];
-  if (input.evidence.length > 0) {
-    for (const item of input.evidence) {
-      const row = {
-        user_id: userId,
-        title: item.title,
+  const seenInBatch = new Set<string>();
+
+  for (const item of input.evidence) {
+    const identityKey =
+      item.identityKey ||
+      evidenceIdentityKey({
         kind: item.kind,
+        title: item.title,
         organization: item.organization,
-        situation: item.situation,
-        action: item.action,
-        outcome: item.outcome,
-        skills: item.skills,
-        start_date: item.startDate,
-        end_date: item.endDate,
-        source: `document:${documentId}`,
-        source_document_id: documentId,
-        source_version_id: versionId,
-        source_location: item.excerpt,
-        fact_key: item.factKey,
-        extraction_status: item.extractionStatus,
-        verification_status: item.verificationStatus,
-        excluded_from_ai: false,
-      };
-      const { data: inserted, error: evidenceError } = await supabase
-        .from("evidence_items")
-        .insert(row)
-        .select("id, skills, fact_key")
-        .maybeSingle();
-      if (evidenceError || !inserted) {
-        logError("memory.persist_evidence_failed", {
-          message: evidenceError?.message ?? "no row",
-          code: evidenceError?.code,
-          title: item.title,
-          startDate: item.startDate,
-          endDate: item.endDate,
-        });
-        continue;
-      }
-      insertedEvidenceIds.push(inserted.id as string);
-      await supabase.from("evidence_sources").insert({
-        user_id: userId,
-        evidence_id: inserted.id,
-        source_kind: "document_version",
-        source_ref: versionId,
-        excerpt: item.excerpt ?? null,
       });
-      await syncSkills(supabase, userId, [
-        { id: inserted.id as string, skills: inserted.skills as string[] | null },
-      ]);
+    if (existingIdentityKeys.has(identityKey) || seenInBatch.has(identityKey)) {
+      continue;
     }
+    seenInBatch.add(identityKey);
+
+    const row = {
+      user_id: userId,
+      title: item.title,
+      kind: item.kind,
+      organization: item.organization,
+      situation: item.situation,
+      action: item.action,
+      outcome: item.outcome,
+      skills: item.skills,
+      start_date: item.startDate,
+      end_date: item.endDate,
+      source: `document:${documentId}`,
+      source_document_id: documentId,
+      source_version_id: versionId,
+      source_location: item.excerpt,
+      fact_key: item.factKey,
+      extraction_status: item.extractionStatus,
+      verification_status: item.verificationStatus,
+      excluded_from_ai: false,
+    };
+    const { data: inserted, error: evidenceError } = await supabase
+      .from("evidence_items")
+      .insert(row)
+      .select("id, skills, fact_key")
+      .maybeSingle();
+    if (evidenceError || !inserted) {
+      logError("memory.persist_evidence_failed", {
+        message: evidenceError?.message ?? "no row",
+        code: evidenceError?.code,
+        title: item.title,
+        startDate: item.startDate,
+        endDate: item.endDate,
+      });
+      continue;
+    }
+    existingIdentityKeys.add(identityKey);
+    insertedEvidenceIds.push(inserted.id as string);
+    await supabase.from("evidence_sources").insert({
+      user_id: userId,
+      evidence_id: inserted.id,
+      source_kind: "document_version",
+      source_ref: versionId,
+      excerpt: item.excerpt ?? null,
+    });
+    await syncSkills(supabase, userId, [
+      { id: inserted.id as string, skills: inserted.skills as string[] | null },
+    ]);
   }
 
   if (input.facts.length > 0) {
-    await supabase.from("profile_facts").insert(
-      input.facts.map((fact) => ({
-        user_id: userId,
-        category: fact.category,
-        fact_type: fact.factKey.split(":").pop() ?? "value",
-        fact_key: fact.factKey,
-        value: { text: fact.value },
-        source: `document:${documentId}`,
-        source_document_id: documentId,
-        source_version_id: versionId,
-        extraction_status: fact.extractionStatus,
-        verification_status: fact.verificationStatus,
-      })),
-    );
+    const { data: existingFacts } = await supabase
+      .from("profile_facts")
+      .select("fact_key")
+      .eq("user_id", userId);
+    const existingFactKeys = new Set((existingFacts ?? []).map((row) => String(row.fact_key ?? "")));
+    const newFacts = input.facts.filter((fact) => !existingFactKeys.has(fact.factKey));
+    if (newFacts.length > 0) {
+      await supabase.from("profile_facts").insert(
+        newFacts.map((fact) => ({
+          user_id: userId,
+          category: fact.category,
+          fact_type: fact.factKey.split(":").pop() ?? "value",
+          fact_key: fact.factKey,
+          value: { text: fact.value },
+          source: `document:${documentId}`,
+          source_document_id: documentId,
+          source_version_id: versionId,
+          extraction_status: fact.extractionStatus,
+          verification_status: fact.verificationStatus,
+        })),
+      );
+    }
   }
 
   for (const link of input.links) {
@@ -186,8 +310,9 @@ export async function persistDocumentExtraction(supabase: SupabaseClient, input:
   }
 
   if (input.skills.length > 0) {
+    const names = uniqueSkillNames(input.skills);
     await supabase.from("skills").upsert(
-      input.skills.map((name) => ({
+      names.map((name) => ({
         user_id: userId,
         name,
         normalized_name: name.toLowerCase(),
