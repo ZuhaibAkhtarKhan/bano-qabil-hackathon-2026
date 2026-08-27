@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { DeleteDocumentButton } from "@/components/app/delete-document-button";
-import { FlashBanner } from "@/components/app/flash-banner";
+import { UploadFeedback } from "@/components/app/upload-feedback";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
 import { ButtonLink } from "@/components/ui/button";
@@ -26,7 +26,7 @@ export default async function ResumesPage({
         body="Categories help you remember which resume is which. Job fit scores every resume with AI — category is never used as a filter. Versions are assigned by upload time."
         actions={<ButtonLink href="/app/memory?section=personal">Open your kit</ButtonLink>}
       />
-      <FlashBanner notice={notice} error={error} />
+      <UploadFeedback notice={notice} error={error} />
 
       <Card className="mt-8 max-w-xl p-6">
         <h2 className="text-sm font-semibold tracking-tight text-ink">Upload resume</h2>

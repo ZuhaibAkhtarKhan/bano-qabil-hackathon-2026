@@ -3,7 +3,7 @@ import { continueOnboardingReady } from "@/server/onboarding/actions";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { EvidenceReviewList } from "@/components/onboarding/evidence-review-list";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { Notice } from "@/components/ui/feedback";
 import { ERRORS, FLASH } from "@/server/http/flash";
@@ -46,7 +46,7 @@ export default async function OnboardingReviewPage({
             body="You can verify items later from Application Memory. Continue when you are ready to start applying."
             actions={
               <form action={continueOnboardingReady}>
-                <Button type="submit">Continue</Button>
+                <SubmitButton>Continue</SubmitButton>
               </form>
             }
           />
@@ -56,9 +56,9 @@ export default async function OnboardingReviewPage({
             <form action={verifyOnboardingEvidence}>
               <input type="hidden" name="evidenceId" value={item.id} />
               <input type="hidden" name="returnTo" value="/app/onboarding/review" />
-              <Button type="submit" variant="secondary">
+              <SubmitButton variant="secondary">
                 Verify this item
-              </Button>
+              </SubmitButton>
             </form>
           ) : null
         }
@@ -68,13 +68,13 @@ export default async function OnboardingReviewPage({
         {unverified.length > 0 ? (
           <form action={verifyAllExtractedEvidence}>
             <input type="hidden" name="returnTo" value="/app/onboarding/review" />
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Verify all extracted items
-            </Button>
+            </SubmitButton>
           </form>
         ) : null}
         <form action={continueOnboardingReady}>
-          <Button type="submit">Continue</Button>
+          <SubmitButton>Continue</SubmitButton>
         </form>
         <ButtonLink href="/app/memory" variant="ghost">
           Application Memory

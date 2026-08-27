@@ -1,7 +1,7 @@
 import { eligibilityLabel } from "@1apply/domain";
 import Link from "next/link";
 
-import { Button, SubmitButton } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress, ScoreIndicator } from "@/components/ui/data";
 import { EmptyState } from "@/components/ui/feedback";
@@ -210,9 +210,9 @@ export function EligibilityPanel({ data }: { data: Workspace }) {
             <input type="checkbox" name="hard" />
             Hard
           </label>
-          <Button type="submit" variant="secondary">
+          <SubmitButton variant="secondary">
             Add
-          </Button>
+          </SubmitButton>
         </form>
       </Card>
     </section>

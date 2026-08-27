@@ -15,8 +15,8 @@ export default async function NeedsYouPage({
     <WorkspaceMain>
       <PageHeader
         eyebrow="Need You"
-        title="Fill what Application Memory is missing"
-        body="Questions, choices, documents, dates of birth, and other fields the platform cannot answer yet — grouped by the application that needs them. What you enter is stored in Application Memory, then that application continues in the background."
+        title="Answer what this application still needs"
+        body="For each question, save the answer into Application Memory for every future packet, or fill it only for this application."
       />
       <FlashBanner notice={notice} error={error} />
       <NeedsYouWorkspace data={data} />

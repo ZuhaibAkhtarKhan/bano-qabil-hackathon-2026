@@ -1,5 +1,5 @@
 import { DeleteDocumentButton } from "@/components/app/delete-document-button";
-import { FlashBanner } from "@/components/app/flash-banner";
+import { UploadFeedback } from "@/components/app/upload-feedback";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
 import { Card } from "@/components/ui/card";
@@ -23,7 +23,7 @@ export default async function DocumentsPage({
         title="Version history for kit files"
         body="Resumes use categories for your remembrance. Re-uploading the same category creates the next version by time. Deleting a file also removes extracted memory from that file."
       />
-      <FlashBanner notice={notice} error={error} />
+      <UploadFeedback notice={notice} error={error} />
 
       <Card className="mt-8 max-w-xl p-6">
         <ResumeAwareUploadForm action={uploadDocument} mode="documents" submitLabel="Upload" />

@@ -39,7 +39,7 @@ export type PlannedEvidence = {
   excerpt: string | null;
   factKey: string;
   extractionStatus: "extracted";
-  verificationStatus: "unverified";
+  verificationStatus: "verified";
 };
 
 export type PlannedScalarFact = {
@@ -47,14 +47,39 @@ export type PlannedScalarFact = {
   factKey: string;
   value: string;
   extractionStatus: "extracted";
-  verificationStatus: "unverified";
+  verificationStatus: "verified";
 };
+
+export function isSubstantiveExtractedEvidence(item: {
+  title: string;
+  organization?: string | null;
+  situation?: string | null;
+  action?: string | null;
+  outcome?: string | null;
+}): boolean {
+  const title = item.title.trim();
+  if (!title) return false;
+  if (
+    /^(education|experience|employment|skills|projects|certifications|achievements|leadership|research|work experience|professional experience|technical skills|contact|summary|profile)$/i.test(
+      title,
+    )
+  ) {
+    return false;
+  }
+  const org = String(item.organization ?? "").trim();
+  if (org) return true;
+  if (item.situation?.trim() || item.action?.trim() || item.outcome?.trim()) return true;
+  return title.length > 12;
+}
 
 export function planDocumentExtraction(
   extracted: ExtractedDocument,
   existingFacts: ConflictCandidate[],
 ) {
-  const evidence: PlannedEvidence[] = extracted.evidence.slice(0, 20).map((item) => {
+  const evidence: PlannedEvidence[] = extracted.evidence
+    .filter((item) => isSubstantiveExtractedEvidence(item))
+    .slice(0, 48)
+    .map((item) => {
     const kind = mapExtractedEvidenceKind(item.kind);
     const category = categoryFromKind(kind);
     return {
@@ -76,7 +101,7 @@ export function planDocumentExtraction(
         field: item.endDate ? "end_year" : "title",
       }),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     };
   });
 
@@ -87,7 +112,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "display_name", title: "identity" }),
       value: extracted.displayName.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
   if (extracted.headline?.trim()) {
@@ -96,7 +121,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "headline", title: "identity" }),
       value: extracted.headline.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
   if (extracted.phone?.trim()) {
@@ -105,7 +130,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "phone", title: "identity" }),
       value: extracted.phone.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
 
@@ -121,7 +146,7 @@ export function planDocumentExtraction(
       }),
       value: item.endDate,
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
 

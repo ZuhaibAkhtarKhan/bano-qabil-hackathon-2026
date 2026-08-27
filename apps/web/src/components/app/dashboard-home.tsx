@@ -7,7 +7,7 @@ import { currentGuideStep, type GuideStep } from "@1apply/domain";
 
 import { useRealtime } from "@/components/app/realtime-provider";
 import { skipWorkspaceGuide } from "@/server/memory/actions";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { cn } from "@/lib/cn";
 
@@ -223,9 +223,9 @@ export function DashboardHome({
                 {guideNext.cta}
               </ButtonLink>
               <form action={skipWorkspaceGuide}>
-                <Button type="submit" variant="ghost" size="sm">
+                <SubmitButton variant="ghost" size="sm">
                   Skip tutorial
-                </Button>
+                </SubmitButton>
               </form>
             </div>
             {guideLater.length > 0 ? (

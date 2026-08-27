@@ -4,7 +4,7 @@ import { opportunityCategorySchema } from "@1apply/contracts";
 import { DiscoveryPanel } from "@/components/app/discovery-panel";
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
@@ -60,7 +60,7 @@ export default async function OpportunitiesPage({
             <Field label="Opportunity URL" htmlFor="opportunity-url">
               <Input id="opportunity-url" name="url" type="url" required placeholder="https://" />
             </Field>
-            <Button type="submit">Fetch and analyze</Button>
+            <SubmitButton pendingText="Fetching & analyzing…">Fetch and analyze</SubmitButton>
           </form>
         </Card>
 
@@ -101,9 +101,9 @@ export default async function OpportunitiesPage({
             <Field label="Notes / pasted text" htmlFor="opportunity-notes">
               <Textarea id="opportunity-notes" name="notes" rows={2} />
             </Field>
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Save opportunity
-            </Button>
+            </SubmitButton>
           </form>
         </Card>
       </div>
@@ -125,9 +125,9 @@ export default async function OpportunitiesPage({
               <Textarea id="paste-text" name="pastedText" rows={6} required placeholder="Paste the full posting here…" />
             </Field>
           </div>
-          <Button type="submit" variant="secondary">
+          <SubmitButton variant="secondary">
             Analyze pasted content
-          </Button>
+          </SubmitButton>
         </form>
       </Card>
 

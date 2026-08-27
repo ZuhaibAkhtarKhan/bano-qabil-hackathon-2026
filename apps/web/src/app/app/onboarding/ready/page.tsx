@@ -3,7 +3,7 @@ import Link from "next/link";
 import { finishOnboarding } from "@/app/app/actions";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { MetricCard } from "@/components/ui/card";
 import { Notice } from "@/components/ui/feedback";
 import { ERRORS } from "@/server/http/flash";
@@ -38,9 +38,9 @@ export default async function OnboardingReadyPage({
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <form action={finishOnboarding}>
-          <Button type="submit" className="w-full">
+          <SubmitButton className="w-full">
             Enter dashboard
-          </Button>
+          </SubmitButton>
         </form>
         <ButtonLink href="/app/opportunities" variant="secondary" className="w-full">
           Add a posting

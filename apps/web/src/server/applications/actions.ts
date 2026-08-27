@@ -11,6 +11,7 @@ import {
 } from "@1apply/domain";
 
 import { canTransitionTo, normalizeApplicationStatus } from "@/lib/application-workflow";
+import { isNeedsYouSystemNoise } from "@/lib/needs-you";
 import { recordApplicationEvent } from "@/services/platform";
 import { recordAuditEvent } from "@/server/audit";
 import { emitDomainEvent } from "@/server/notifications/service";
@@ -242,7 +243,16 @@ export async function analyzeApplication(formData: FormData) {
 
       await supabase.from("review_items").delete().eq("application_id", applicationId).eq("resolved", false);
       const review = eligibility
-        .filter((item) => item.state === "unclear" || item.state === "not_met" || item.state === "not_evaluated" || item.state === "partial")
+        .filter(
+          (item) =>
+            item.requirementId !== "none" &&
+            !isNeedsYouSystemNoise(String(item.explanation ?? "")) &&
+            !isNeedsYouSystemNoise(String(item.requirementText ?? "")) &&
+            (item.state === "unclear" ||
+              item.state === "not_met" ||
+              item.state === "not_evaluated" ||
+              item.state === "partial"),
+        )
         .map((item) => ({
           user_id: user.id,
           application_id: applicationId,

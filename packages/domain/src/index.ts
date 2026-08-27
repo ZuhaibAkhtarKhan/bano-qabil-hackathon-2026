@@ -36,6 +36,14 @@ export {
   type CandidateProfile,
 } from "./matching";
 
+export {
+  buildAutoResumeSelection,
+  inferOpportunityCategoryKeys,
+  type AutoResumeSelection,
+  type AutoResumeStrategy,
+  type CategorizedResume,
+} from "./resume-auto-select";
+
 export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
 
 export {
@@ -105,6 +113,7 @@ export {
   classifyPendingPacket,
   classifyRequiredDocumentLabel,
   classifyVaultDocument,
+  CNIC_PHARM_B_LABEL,
   kitStatus,
   matchVaultDocument,
   packetAnswerText,

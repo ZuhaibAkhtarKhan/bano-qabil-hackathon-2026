@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Window } from "happy-dom";
 
-import { inventoryFromDocument, humanQuestionLabel, isNoiseFormField, mapFields } from "../src/index";
+import {
+  inventoryFromDocument,
+  humanQuestionLabel,
+  isNoiseFormField,
+  mapFields,
+  stripFormSyntaxDecorators,
+} from "../src/index";
 
 function documentFrom(html: string) {
   const window = new Window();
@@ -37,6 +43,29 @@ describe("human question labels", () => {
         inputType: "text",
       }),
     ).toBe(true);
+  });
+
+  it("strips Swedish Obligatoriskt and other required chrome from labels", () => {
+    expect(stripFormSyntaxDecorators("How long is your notice period?***Obligatoriskt***")).toBe(
+      "How long is your notice period?",
+    );
+    expect(
+      stripFormSyntaxDecorators("What is your current salary level & benefits?***Obligatoriskt***"),
+    ).toBe("What is your current salary level & benefits?");
+    expect(stripFormSyntaxDecorators("What's your monthly salary expectation?***Obligatoriskt***")).toBe(
+      "What's your monthly salary expectation?",
+    );
+    expect(humanQuestionLabel({
+      label: "How long is your notice period?***Obligatoriskt***",
+      nearbyText: "",
+      ariaLabel: "",
+      placeholder: "",
+      name: "notice",
+      id: "notice",
+      key: "notice",
+    })).toBe("How long is your notice period?");
+    expect(stripFormSyntaxDecorators("Email address *Required*")).toBe("Email address");
+    expect(stripFormSyntaxDecorators("Phone (mandatory)")).toBe("Phone");
   });
 
   it("reads question text from a preceding sibling, not the input name", () => {

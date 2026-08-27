@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { signOut } from "@/app/app/actions";
 import { Wordmark } from "@/components/brand/wordmark";
+import { SubmitButton } from "@/components/ui/button";
 import { Progress } from "@/components/ui/data";
 import { cn } from "@/lib/cn";
 
@@ -58,9 +59,9 @@ export function OnboardingShell({
       <div className="mb-8 flex items-center justify-between gap-4">
         <Wordmark size="sm" />
         <form action={signOut}>
-          <button type="submit" className="text-sm text-ink-muted hover:text-ink">
+          <SubmitButton variant="ghost" size="sm" className="px-0 text-ink-muted hover:text-ink" pendingText="Signing out…">
             Sign out
-          </button>
+          </SubmitButton>
         </form>
       </div>
       <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">{eyebrow}</p>

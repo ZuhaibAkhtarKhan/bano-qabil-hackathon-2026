@@ -1,12 +1,16 @@
+import { humanQuestionLabel, humanizeFieldToken, isMachineFieldToken } from "@1apply/form-engine";
+
 import { normalizeApplicationStatus } from "@/lib/application-workflow";
 import {
   detectProfileMemoryField,
+  isNeedsYouApplicantQuestion,
+  isNeedsYouSystemNoise,
   needsYouInputType,
   type NeedsYouItem,
 } from "@/lib/needs-you";
 import { requireWorkspace } from "@/server/auth/require-workspace";
+import { polishFormQuestionLabels } from "@/server/needs-you/polish-labels";
 import { asOne } from "@/server/types";
-import { humanQuestionLabel, humanizeFieldToken, isMachineFieldToken } from "@1apply/form-engine";
 
 const ACTIVE_STATUSES = new Set([
   "saved",
@@ -88,21 +92,13 @@ export async function loadNeedsYouQueue(): Promise<NeedsYouQueue> {
   const appById = new Map(active.map((row) => [String(row.id), row]));
 
   const [
-    { data: reviewItems },
     { data: answers },
     { data: questions },
     { data: requiredDocuments },
     { data: attached },
-    { data: eligibility },
     { data: fieldMappings },
     { data: fitRows },
   ] = await Promise.all([
-    supabase
-      .from("review_items")
-      .select("id, application_id, kind, prompt, resolved")
-      .eq("user_id", user.id)
-      .in("application_id", appIds)
-      .eq("resolved", false),
     supabase
       .from("application_answers")
       .select(
@@ -124,13 +120,6 @@ export async function loadNeedsYouQueue(): Promise<NeedsYouQueue> {
     supabase
       .from("application_documents")
       .select("id, application_id, document_id")
-      .eq("user_id", user.id)
-      .in("application_id", appIds),
-    supabase
-      .from("eligibility_results")
-      .select(
-        "id, application_id, state, explanation, requirement_text, needs_confirmation, display_state",
-      )
       .eq("user_id", user.id)
       .in("application_id", appIds),
     supabase
@@ -200,46 +189,7 @@ export async function loadNeedsYouQueue(): Promise<NeedsYouQueue> {
       role,
     };
 
-    for (const item of (reviewItems ?? []).filter((row) => String(row.application_id) === applicationId)) {
-      const title = String(item.prompt ?? "Resolve this review item");
-      pushItem({
-        ...base,
-        id: `review:${item.id}`,
-        kind: "review",
-        title,
-        detail: item.kind ? `Kind: ${item.kind}` : null,
-        inputLabel: "What should Application Memory store?",
-        inputType: needsYouInputType(title, "review"),
-        payload: {
-          reviewItemId: String(item.id),
-          factKey: detectProfileMemoryField(title) ?? undefined,
-          profileField: detectProfileMemoryField(title),
-        },
-      });
-    }
-
-    for (const row of (eligibility ?? []).filter((item) => String(item.application_id) === applicationId)) {
-      const needs =
-        Boolean(row.needs_confirmation) ||
-        ["unclear", "not_met", "not_evaluated", "partial", "needs_confirmation"].includes(
-          String(row.state),
-        );
-      if (!needs) continue;
-      const title = String(row.requirement_text || row.explanation || "Confirm eligibility");
-      pushItem({
-        ...base,
-        id: `eligibility:${row.id}`,
-        kind: "eligibility",
-        title,
-        detail: String(row.explanation ?? ""),
-        inputLabel: "Add the missing fact or clarification",
-        inputType: needsYouInputType(title, "eligibility"),
-        payload: {
-          eligibilityId: String(row.id),
-          profileField: detectProfileMemoryField(`${title} ${row.explanation ?? ""}`),
-        },
-      });
-    }
+    // Need You is for host form questions only — not review_items or eligibility analysis rows.
 
     const appQuestions = questionsByOpp.get(opportunityId) ?? [];
     for (const question of appQuestions) {
@@ -367,6 +317,7 @@ export async function loadNeedsYouQueue(): Promise<NeedsYouQueue> {
     const fit = (fitRows ?? []).find((row) => String(row.application_id) === applicationId);
     const missing = Array.isArray(fit?.missing) ? (fit?.missing as string[]) : [];
     for (const gap of missing.slice(0, 8)) {
+      if (isNeedsYouSystemNoise(gap)) continue;
       pushItem({
         ...base,
         id: `fit:${applicationId}:${gap}`,
@@ -384,10 +335,23 @@ export async function loadNeedsYouQueue(): Promise<NeedsYouQueue> {
   const deduped: NeedsYouItem[] = [];
   const seen = new Set<string>();
   for (const item of items) {
+    if (!isNeedsYouApplicantQuestion(item.kind)) continue;
     const key = `${item.applicationId}:${item.kind}:${item.title.toLowerCase().slice(0, 160)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(item);
+  }
+
+  // Strip ATS required-chrome from titles (***Obligatoriskt***, *Required*, etc.); AI only for leftovers.
+  const polishTargets = deduped.filter(
+    (item) => item.kind === "field_mapping" || item.kind === "answer" || item.kind === "missing_fact",
+  );
+  const polished = await polishFormQuestionLabels(
+    polishTargets.map((item) => ({ id: item.id, title: item.title })),
+  );
+  for (const item of deduped) {
+    const clean = polished.get(item.id);
+    if (clean) item.title = clean;
   }
 
   const byKind: Record<string, number> = {};

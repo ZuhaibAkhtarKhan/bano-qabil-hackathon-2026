@@ -1,4 +1,5 @@
 import {
+  buildAutoResumeSelection,
   computeFitIndex,
   evaluateEligibility,
   rankResumes,
@@ -41,6 +42,8 @@ export async function loadIntelligenceContext(
     label: string;
     type: string;
     text: string;
+    categoryKey?: string | null;
+    categoryLabel?: string | null;
   }>;
 }> {
   const [
@@ -48,6 +51,7 @@ export async function loadIntelligenceContext(
     { data: profile },
     { data: facts },
     { data: documents },
+    { data: resumeMeta },
   ] = await Promise.all([
     supabase
       .from("evidence_items")
@@ -70,6 +74,7 @@ export async function loadIntelligenceContext(
       .eq("user_id", actor.userId)
       // Score every resume/variant — category is remembrance-only and must not filter matching.
       .in("type", ["resume", "resume_variant"]),
+    supabase.from("resumes").select("document_id, category_key, category_label").eq("user_id", actor.userId),
   ]);
 
   const evidence = ((evidenceRows ?? []) as EvidenceRow[]).map(mapEvidence);
@@ -103,6 +108,13 @@ export async function loadIntelligenceContext(
     .filter(Boolean)
     .join(" ");
 
+  const metaByDoc = new Map(
+    (resumeMeta ?? []).map((row) => [
+      String(row.document_id),
+      { categoryKey: row.category_key as string | null, categoryLabel: row.category_label as string | null },
+    ]),
+  );
+
   return {
     evidence,
     context: {
@@ -131,8 +143,39 @@ export async function loadIntelligenceContext(
         label: item.label as string,
         type: item.type as string,
         text: (textByVersion.get(item.current_version_id as string) ?? []).join("\n"),
+        categoryKey: metaByDoc.get(item.id as string)?.categoryKey ?? null,
+        categoryLabel: metaByDoc.get(item.id as string)?.categoryLabel ?? (item.label as string),
       })),
   };
+}
+
+export async function persistResumeMatches(
+  supabase: SupabaseClient,
+  input: {
+    userId: string;
+    applicationId: string;
+    resumes: ReturnType<typeof rankResumes>;
+  },
+) {
+  const { userId, applicationId, resumes } = input;
+  await supabase.from("resume_matches").delete().eq("application_id", applicationId);
+  if (resumes.length === 0) return;
+  await supabase.from("resume_matches").insert(
+    resumes.map((item) => ({
+      user_id: userId,
+      application_id: applicationId,
+      document_id: item.documentId,
+      document_version_id: item.documentVersionId,
+      score: item.score,
+      suggestion: item.suggestion,
+      label: item.label,
+      focus: item.focus,
+      explanation: item.explanation,
+      strengths: item.strengths,
+      gaps: item.gaps,
+      recommended: item.recommended,
+    })),
+  );
 }
 
 export async function persistIntelligence(
@@ -182,25 +225,7 @@ export async function persistIntelligence(
     weights: fit.weights,
   });
 
-  await supabase.from("resume_matches").delete().eq("application_id", applicationId);
-  if (resumes.length > 0) {
-    await supabase.from("resume_matches").insert(
-      resumes.map((item) => ({
-        user_id: userId,
-        application_id: applicationId,
-        document_id: item.documentId,
-        document_version_id: item.documentVersionId,
-        score: item.score,
-        suggestion: item.suggestion,
-        label: item.label,
-        focus: item.focus,
-        explanation: item.explanation,
-        strengths: item.strengths,
-        gaps: item.gaps,
-        recommended: item.recommended,
-      })),
-    );
-  }
+  await persistResumeMatches(supabase, { userId, applicationId, resumes });
 }
 
 export async function evaluateApplicationIntelligence(
@@ -237,15 +262,17 @@ export async function evaluateApplicationIntelligence(
     .filter((item) => item.verificationStatus === "verified")
     .slice(0, 4)
     .map((item) => item.title);
-  const resumes = rankResumes(loaded.opportunityText, loaded.resumes, { memoryHighlights: highlights });
+  const selection = buildAutoResumeSelection(loaded.opportunityText, loaded.resumes, {
+    memoryHighlights: highlights,
+  });
 
   await persistIntelligence(supabase, {
     userId: actor.userId,
     applicationId,
     eligibility,
     fit,
-    resumes,
+    resumes: selection.ranked,
   });
 
-  return { eligibility, fit, resumes };
+  return { eligibility, fit, resumes: selection.ranked, resumeSelection: selection };
 }

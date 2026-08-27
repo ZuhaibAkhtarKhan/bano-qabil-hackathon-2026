@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/field";
@@ -121,9 +121,9 @@ export function NotificationsInbox({ notifications }: { notifications: Notificat
                   {!item.read_at ? (
                     <form action={markNotificationReadAction}>
                       <input type="hidden" name="notificationId" value={item.id} />
-                      <button type="submit" className="underline">
+                      <SubmitButton variant="ghost" size="sm" className="h-auto px-0 py-0 underline" pendingText="Updating…">
                         Mark read
-                      </button>
+                      </SubmitButton>
                     </form>
                   ) : null}
                 </div>

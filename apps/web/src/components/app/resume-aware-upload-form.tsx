@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 import { ResumeCategoryFields } from "@/components/app/resume-category-fields";
-import { Button } from "@/components/ui/button";
+import { UseInKitField } from "@/components/app/use-in-kit-field";
+import { SubmitButton } from "@/components/ui/button";
 import { Field, FileUpload, Input, Select } from "@/components/ui/field";
 import { DOCUMENT_TYPE_LABELS, documentTypeSchema } from "@1apply/contracts";
 import { formatDocumentType } from "@/lib/documents/versioning";
@@ -13,14 +14,25 @@ type Props = {
   mode: "kit" | "documents" | "supporting";
   hiddenFields?: Record<string, string>;
   submitLabel?: string;
+  compact?: boolean;
+  showUseInKit?: boolean;
+  defaultUseInKit?: boolean;
 };
 
-export function ResumeAwareUploadForm({ action, mode, hiddenFields, submitLabel }: Props) {
+export function ResumeAwareUploadForm({
+  action,
+  mode,
+  hiddenFields,
+  submitLabel,
+  compact = false,
+  showUseInKit = true,
+  defaultUseInKit = true,
+}: Props) {
   const [type, setType] = useState(mode === "kit" ? "resume" : "resume");
   const isResume = type === "resume" || type === "resume_variant";
 
   return (
-    <form action={action} className="grid gap-4">
+    <form action={action} className={compact ? "grid gap-2" : "grid gap-4"}>
       {hiddenFields
         ? Object.entries(hiddenFields).map(([name, value]) => (
             <input key={name} type="hidden" name={name} value={value} />
@@ -51,7 +63,7 @@ export function ResumeAwareUploadForm({ action, mode, hiddenFields, submitLabel 
       ) : null}
 
       {isResume ? (
-        <ResumeCategoryFields idPrefix={`${mode}-resume`} />
+        <ResumeCategoryFields idPrefix={`${mode}-resume`} compact={compact} />
       ) : mode !== "kit" ? (
         <Field label="Label" htmlFor={`${mode}-label`}>
           <Input id={`${mode}-label`} name="label" required placeholder="Document label" />
@@ -63,12 +75,15 @@ export function ResumeAwareUploadForm({ action, mode, hiddenFields, submitLabel 
         label={isResume ? "Resume file" : "File"}
         accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
         hint={
-          isResume
-            ? "Same category on Memory, onboarding, or Documents appends the next version (v1, v2, …)."
-            : undefined
+          compact || !isResume
+            ? undefined
+            : "Same category on Memory, onboarding, or Documents appends the next version (v1, v2, …)."
         }
       />
-      <Button type="submit">{submitLabel ?? (isResume ? "Upload resume" : "Upload")}</Button>
+      {showUseInKit ? <UseInKitField defaultChecked={defaultUseInKit} compact={compact} /> : null}
+      <SubmitButton pendingText="Uploading" size={compact ? "sm" : "md"}>
+        {submitLabel ?? (isResume ? "Upload resume" : "Upload")}
+      </SubmitButton>
     </form>
   );
 }

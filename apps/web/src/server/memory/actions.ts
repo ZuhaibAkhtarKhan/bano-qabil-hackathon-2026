@@ -9,16 +9,16 @@ import { categoryFromKind, memoryFactKey } from "@1apply/domain";
 import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/infra/jobs/runner";
-import { insertOwnedDocument, processDocumentVersion } from "@/server/documents/service";
+import { redirectWith, type FlashCode } from "@/server/http/flash";
+import { insertOwnedDocument } from "@/server/documents/service";
+import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { recordAuditEvent } from "@/server/audit";
-import { extractDocumentText } from "@/lib/documents/extract-text";
+import { parseUseInKit, uploadQueuedNotice } from "@/lib/document-upload-options";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { mergeWorkspacePreferences } from "@/lib/workspace-preferences";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
-import { categoryFromFormData, ingestCategorizedResume, noticeForResumeUpload } from "@/server/resumes/upload";
+import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
 
 const MEMORY = "/app/memory";
 
@@ -347,9 +347,11 @@ export async function uploadMemoryDocument(formData: FormData) {
   const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "resume"));
   const type = typeParsed.success ? typeParsed.data : "other";
 
+  const useInKit = parseUseInKit(formData);
+
   if (files.length === 0) redirectWith(sectionReturn(formData) || `${MEMORY}?section=supporting`, { error: "required" });
 
-  let notice: "uploaded" | "extracted" | "binary_stored" | "conflict_detected" | "duplicate_file" = "uploaded";
+  let notice: FlashCode = uploadQueuedNotice(useInKit);
 
   // Resumes always go through the categorized ingest so onboarding + memory stay in sync.
   if (type === "resume" || type === "resume_variant") {
@@ -373,9 +375,10 @@ export async function uploadMemoryDocument(formData: FormData) {
           upload,
           category,
           source: "memory",
+          fillKit: useInKit,
         });
         if (result.duplicate) notice = "duplicate_file";
-        else notice = await noticeForResumeUpload(upload);
+        else notice = uploadQueuedNotice(useInKit);
       } catch {
         redirectWith(sectionReturn(formData), { error: "upload" });
       }
@@ -436,27 +439,24 @@ export async function uploadMemoryDocument(formData: FormData) {
     });
     await supabase.from("documents").update({ current_version_id: versionId }).eq("id", documentId);
 
-    const extractedText = await extractDocumentText(upload.buffer, upload.mimeType);
-    if (extractedText) notice = "extracted";
-    else notice = "binary_stored";
-
     await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId, source: "memory" });
 
-    await runOwnedJob(supabase, { actor, type: "document_extract", inputRef: versionId }, async () => {
-      await processDocumentVersion({
-        supabase,
-        userId: user.id,
-        documentId,
-        versionId,
-        documentLabel: label,
-        profileDisplayName: profile.display_name,
-        buffer: upload.buffer,
-        mimeType: upload.mimeType,
-      });
+    scheduleDocumentVersionProcessing({
+      supabase,
+      actor,
+      userId: user.id,
+      documentId,
+      versionId,
+      documentLabel: label,
+      profileDisplayName: profile.display_name,
+      fillKit: useInKit,
     });
+    notice = uploadQueuedNotice(useInKit);
   }
 
-  await autoAttachKitAcrossOpenApplications(supabase, actor);
+  if (!useInKit) {
+    await autoAttachKitAcrossOpenApplications(supabase, actor);
+  }
   revalidatePath(MEMORY);
   revalidatePath("/app/documents");
   redirectWith(sectionReturn(formData), { notice });

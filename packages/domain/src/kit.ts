@@ -33,9 +33,13 @@ export type KitStatus = {
   hasResume: boolean;
   hasIdentityDocument: boolean;
   hasFamilyDocument: boolean;
+  /** True when either CNIC or Pharm-B (B-form) has been uploaded. */
+  hasCnicPharmB: boolean;
   ready: boolean;
   missing: string[];
 };
+
+export const CNIC_PHARM_B_LABEL = "CNIC/Pharm-B";
 
 const STOP = new Set(["the", "and", "for", "with", "from", "copy", "scan", "scanned", "original", "attested", "upload", "file", "document", "pdf"]);
 
@@ -46,7 +50,7 @@ const KIND_PATTERNS: Array<{ kind: Exclude<KitDocumentKind, "other">; patterns: 
   },
   {
     kind: "family_document",
-    patterns: [/\bb[\s-]?form\b/, /\bbay form\b/, /family registration/, /child registration/, /form b\b/],
+    patterns: [/\bb[\s-]?form\b/, /\bbay form\b/, /family registration/, /child registration/, /form b\b/, /\bpharm[\s-]?b\b/i],
   },
   { kind: "resume", patterns: [/\bresume\b/, /\bcv\b/, /curriculum vitae/] },
   { kind: "cover_letter", patterns: [/cover letter/, /covering letter/] },
@@ -104,7 +108,10 @@ export function requiredDocumentCovered(
   const requiredKind = classifyRequiredDocumentLabel(requiredLabel);
   const requiredTokens = tokens(requiredLabel);
   return attached.some((doc) => {
-    if (doc.label.trim().toLowerCase() === requiredLabel.trim().toLowerCase()) return true;
+    const requiredNorm = requiredLabel.trim().toLowerCase();
+    const labelNorm = doc.label.trim().toLowerCase();
+    if (labelNorm === requiredNorm) return true;
+    if (labelNorm.includes(requiredNorm) || requiredNorm.includes(labelNorm)) return true;
     const attachedKind = classifyVaultDocument(doc);
     if (requiredKind !== "other" && attachedKind === requiredKind) return true;
     const attachedTokens = tokens(doc.label);
@@ -128,7 +135,10 @@ export function matchVaultDocument(
     .map((doc) => {
       const kind = classifyVaultDocument(doc);
       let score = 0;
-      if (doc.label.trim().toLowerCase() === requiredLabel.trim().toLowerCase()) score += 8;
+      const labelNorm = doc.label.trim().toLowerCase();
+      const requiredNorm = requiredLabel.trim().toLowerCase();
+      if (labelNorm === requiredNorm) score += 8;
+      else if (labelNorm.includes(requiredNorm) || requiredNorm.includes(labelNorm)) score += 6;
       if (requiredKind !== "other" && kind === requiredKind) score += 5;
       const overlap = [...requiredTokens].filter((token) => tokens(doc.label).has(token));
       score += overlap.length * 2;
@@ -171,13 +181,13 @@ export function kitStatus(input: {
   const hasResume = input.documents.some((doc) => classifyVaultDocument(doc) === "resume");
   const hasIdentityDocument = input.documents.some((doc) => classifyVaultDocument(doc) === "identity_document");
   const hasFamilyDocument = input.documents.some((doc) => classifyVaultDocument(doc) === "family_document");
+  const hasCnicPharmB = hasIdentityDocument || hasFamilyDocument;
   const missing: string[] = [];
   if (!hasName) missing.push("name");
   if (!hasUniversity) missing.push("university");
   if (!hasEducation) missing.push("education");
   if (!hasResume) missing.push("resume");
-  if (!hasIdentityDocument) missing.push("CNIC");
-  if (!hasFamilyDocument) missing.push("B-form");
+  if (!hasCnicPharmB) missing.push(CNIC_PHARM_B_LABEL);
   return {
     hasName,
     hasUniversity,
@@ -185,6 +195,7 @@ export function kitStatus(input: {
     hasResume,
     hasIdentityDocument,
     hasFamilyDocument,
+    hasCnicPharmB,
     ready: hasName && hasResume,
     missing,
   };

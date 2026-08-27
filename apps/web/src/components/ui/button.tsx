@@ -1,10 +1,12 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { Loader2 } from "lucide-react";
 
+import { useActionProgress, useReportActionPending } from "@/components/ui/action-progress";
 import { cn } from "@/lib/cn";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "inverse" | "danger";
@@ -52,6 +54,7 @@ export function Button({
 export function SubmitButton({
   children,
   pendingText,
+  pending: pendingOverride,
   variant = "primary",
   size = "md",
   className,
@@ -60,22 +63,76 @@ export function SubmitButton({
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
   pendingText?: string;
+  /** Force pending UI for client-handled forms (useFormStatus stays false after preventDefault). */
+  pending?: boolean;
   variant?: ButtonVariant;
   size?: ButtonSize;
 }) {
-  const { pending } = useFormStatus();
+  const { pending: formPending } = useFormStatus();
+  const pending = pendingOverride ?? formPending;
+  useReportActionPending(pending);
 
   return (
     <button
       type="submit"
       disabled={pending || disabled}
+      aria-busy={pending}
       className={buttonClassName(variant, size, className)}
       {...props}
     >
       {pending ? (
         <>
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          <span>{pendingText ?? "Processing…"}</span>
+          <span>{pendingText ?? "Working…"}</span>
+        </>
+      ) : (
+        children
+      )}
+    </button>
+  );
+}
+
+/** Client-side async click handler with spinner + global progress bar. */
+export function AsyncButton({
+  children,
+  pendingText,
+  variant = "primary",
+  size = "md",
+  className,
+  disabled,
+  onClick,
+  ...props
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
+  children: ReactNode;
+  pendingText?: string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
+}) {
+  const [pending, setPending] = useState(false);
+  useReportActionPending(pending);
+
+  return (
+    <button
+      type="button"
+      disabled={pending || disabled}
+      aria-busy={pending}
+      className={buttonClassName(variant, size, className)}
+      {...props}
+      onClick={async (event) => {
+        if (!onClick) return;
+        setPending(true);
+        try {
+          await onClick(event);
+        } finally {
+          setPending(false);
+        }
+      }}
+    >
+      {pending ? (
+        <>
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          <span>{pendingText ?? "Working…"}</span>
         </>
       ) : (
         children
@@ -90,15 +147,28 @@ export function ButtonLink({
   size = "md",
   className,
   children,
+  onClick,
+  ...props
 }: {
   href: string;
   variant?: ButtonVariant;
   size?: ButtonSize;
   className?: string;
   children: ReactNode;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
+  const { beginNavigation } = useActionProgress();
+
   return (
-    <Link href={href} className={buttonClassName(variant, size, className)}>
+    <Link
+      href={href}
+      className={buttonClassName(variant, size, className)}
+      onClick={(event) => {
+        beginNavigation();
+        onClick?.(event);
+      }}
+      {...props}
+    >
       {children}
     </Link>
   );

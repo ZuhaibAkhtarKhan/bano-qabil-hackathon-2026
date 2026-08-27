@@ -8,7 +8,7 @@ import { Menu } from "lucide-react";
 import { signOut } from "@/app/app/actions";
 import { Wordmark } from "@/components/brand/wordmark";
 import { WORKSPACE_NAV, isNavActive } from "@/components/app/nav";
-import { Button } from "@/components/ui/button";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/overlays";
 import { cn } from "@/lib/cn";
 
@@ -80,9 +80,9 @@ export function MobileTopbar({ email }: { email: string }) {
           ))}
         </nav>
         <form action={signOut} className="mt-8">
-          <Button type="submit" variant="secondary">
+          <SubmitButton variant="secondary">
             Sign out
-          </Button>
+          </SubmitButton>
         </form>
       </Drawer>
     </div>

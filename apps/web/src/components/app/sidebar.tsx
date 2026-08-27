@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "@/app/app/actions";
 import { Wordmark } from "@/components/brand/wordmark";
 import { WORKSPACE_NAV, isNavActive } from "@/components/app/nav";
+import { SubmitButton } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
@@ -61,9 +62,9 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
         <p className="truncate text-sm font-medium">{displayName ?? "Applicant"}</p>
         <p className="truncate text-xs text-ink-muted">{email}</p>
         <form action={signOut}>
-          <button type="submit" className="mt-3 text-sm text-ink-muted hover:text-ink">
+          <SubmitButton variant="ghost" size="sm" className="mt-3 px-0 text-ink-muted hover:text-ink" pendingText="Signing out…">
             Sign out
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </aside>

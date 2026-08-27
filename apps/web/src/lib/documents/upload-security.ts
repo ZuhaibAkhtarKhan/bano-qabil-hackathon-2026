@@ -77,7 +77,7 @@ export function assertUploadMagicBytes(buffer: Buffer, mimeType: string): void {
   }
 }
 
-export function chunkDocumentText(text: string, chunkSize = 1600, maxChunks = 40): string[] {
+export function chunkDocumentText(text: string, chunkSize = 1600, maxChunks = 60): string[] {
   const chunks: string[] = [];
   let remaining = text.trim();
   while (remaining.length > 0 && chunks.length < maxChunks) {

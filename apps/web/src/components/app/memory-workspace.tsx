@@ -1,16 +1,15 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { MemoryCategory } from "@1apply/contracts";
-import { MEMORY_SECTIONS, kitStatus } from "@1apply/domain";
+import { MEMORY_SECTIONS, CNIC_PHARM_B_LABEL, kitStatus } from "@1apply/domain";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
-import { Button } from "@/components/ui/button";
+import { KitDocumentUploadForm, UploadSubmitButton } from "@/components/app/kit-document-upload-form";
+import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { ApplicationCard, DocumentCard, EvidenceCard } from "@/components/ui/product-cards";
-import { SemanticBadge } from "@/components/ui/status-pill";
-import { factSemanticStatus } from "@/lib/status";
+import { DocumentCard } from "@/components/ui/product-cards";
+import { cn } from "@/lib/cn";
 import {
   addMemoryEvidence,
   addMemoryLink,
@@ -18,13 +17,8 @@ import {
   deleteMemoryEvidence,
   deleteMemoryLink,
   deleteMemorySkill,
-  deleteProfileFact,
-  resolveMemoryConflictAction,
-  setEvidenceExclusion,
-  setEvidenceVerification,
   updateIdentity,
   uploadMemoryDocument,
-  verifyProfileFact,
 } from "@/server/memory/actions";
 import type { loadMemoryWorkspace } from "@/server/memory/queries";
 
@@ -41,9 +35,8 @@ const SECTION_KIND: Partial<Record<MemoryCategory, string>> = {
   supporting: "volunteering",
 };
 
-function factText(value: Record<string, unknown>): string {
-  if (typeof value.text === "string") return value.text;
-  return JSON.stringify(value);
+function isManualKitEntry(item: MemoryData["evidence"][number]): boolean {
+  return item.source === "manual" || item.extraction_status === "manual" || item.extraction_status === "user_edited";
 }
 
 function sourceLabel(
@@ -65,86 +58,28 @@ export function MemoryWorkspace({
   data: MemoryData;
   section: MemoryCategory;
 }) {
-  const openConflicts = data.conflicts.filter((item) => item.status === "open");
-  const conflictFactIds = new Set(openConflicts.flatMap((item) => item.fact_ids));
-
-  const factById = new Map<string, { label: string; source: string | null; excerpt: string | null }>();
-  for (const item of data.evidence) {
-    factById.set(item.id, {
-      label: item.end_date ? `${item.title} · ends ${item.end_date}` : item.title,
-      source: sourceLabel(item, data.documentById),
-      excerpt: item.source_location,
-    });
-  }
-  for (const item of data.facts) {
-    factById.set(item.id, {
-      label: factText(item.value),
-      source: sourceLabel(item, data.documentById),
-      excerpt: item.excerpt ?? item.source_location,
-    });
-  }
-
   const nav = (
     <nav className="flex flex-wrap gap-2" aria-label="Memory sections">
-      {MEMORY_SECTIONS.map((item) => (
-        <Link
-          key={item.id}
-          href={`/app/memory?section=${item.id}`}
-          className={`rounded-full px-3 py-1.5 text-sm ${
-            section === item.id ? "bg-ink text-paper" : "bg-sand/40 text-ink-muted hover:bg-sand/70"
-          }`}
-        >
-          {item.label}
-        </Link>
-      ))}
+      {MEMORY_SECTIONS.map((item) => {
+        const active = section === item.id;
+        return (
+          <Link
+            key={item.id}
+            href={`/app/memory?section=${item.id}`}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-sm transition-colors",
+              active
+                ? "border-teal/30 bg-mint-soft font-medium text-teal-text"
+                : "border-line bg-white text-ink-muted hover:border-teal/20 hover:bg-canvas hover:text-ink",
+            )}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
     </nav>
   );
-
-  const conflictsPanel =
-    openConflicts.length > 0 ? (
-      <Card className="border-coral/30 bg-coral/5 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-coral">Conflicts</p>
-            <h2 className="mt-1 text-lg font-medium">Sources disagree — pick the value to keep</h2>
-            <p className="mt-1 text-sm text-ink-muted">
-              1-Apply never auto-resolves conflicts. Rejected sources stay in history.
-            </p>
-          </div>
-          <SemanticBadge status="conflict" />
-        </div>
-        <ul className="mt-4 grid gap-4">
-          {openConflicts.map((conflict) => (
-            <li key={conflict.id} className="rounded-xl border border-coral/20 bg-paper p-4">
-              <p className="text-sm font-medium">{conflict.fact_key.replace(/:/g, " · ")}</p>
-              <ul className="mt-3 grid gap-2">
-                {conflict.fact_ids.map((factId) => {
-                  const meta = factById.get(factId);
-                  return (
-                    <li key={factId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-sand/20 px-3 py-2">
-                      <div>
-                        <p className="text-sm">{meta?.label ?? factId}</p>
-                        <p className="text-xs text-ink-muted">
-                          Source: {meta?.source ?? "Unknown"}
-                          {meta?.excerpt ? ` · "${meta.excerpt.slice(0, 120)}"` : ""}
-                        </p>
-                      </div>
-                      <form action={resolveMemoryConflictAction}>
-                        <input type="hidden" name="conflictId" value={conflict.id} />
-                        <input type="hidden" name="chosenFactId" value={factId} />
-                        <Button type="submit" variant="secondary" size="sm">
-                          Use this value
-                        </Button>
-                      </form>
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    ) : null;
 
   const hiddenSection = <input type="hidden" name="section" value={section} />;
   const prefs = parseWorkspacePreferences(data.preferences);
@@ -156,49 +91,9 @@ export function MemoryWorkspace({
   });
 
   const personalPanel = (
-    <div className="grid gap-8">
-      <Card className="p-5">
-        <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Repeat documents</p>
-        <p className="mt-1 text-sm text-ink-muted">
-          Resume {kit.hasResume ? "ready" : "missing"} · CNIC {kit.hasIdentityDocument ? "ready" : "missing"} · B-form{" "}
-          {kit.hasFamilyDocument ? "ready" : "missing"}. Resume categories are for your remembrance; matching scores every
-          resume with AI. Same category appends the next version by upload time.
-        </p>
-        <div className="mt-4 grid gap-4">
-          <div className="rounded-xl border border-sand/50 p-3">
-            <p className="text-sm font-medium">Resume / CV</p>
-            <div className="mt-3">
-              <ResumeAwareUploadForm
-                action={uploadMemoryDocument}
-                mode="kit"
-                hiddenFields={{ section: "personal" }}
-                submitLabel="Upload resume"
-              />
-            </div>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {[
-              { type: "identity_document", label: "CNIC", title: "CNIC" },
-              { type: "family_document", label: "B-form", title: "B-form" },
-            ].map((slot) => (
-              <form key={slot.type} action={uploadMemoryDocument} className="grid gap-2 rounded-xl border border-sand/50 p-3">
-                {hiddenSection}
-                <input type="hidden" name="type" value={slot.type} />
-                <input type="hidden" name="label" value={slot.label} />
-                <p className="text-sm font-medium">{slot.title}</p>
-                <Input id={`kit-${slot.type}`} name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
-                <Button type="submit" variant="secondary" size="sm">
-                  Upload
-                </Button>
-              </form>
-            ))}
-          </div>
-        </div>
-      </Card>
-
-      <form action={updateIdentity} className="grid gap-4">
-        {hiddenSection}
-        <Field label="Name" htmlFor="displayName">
+    <form action={updateIdentity} className="grid gap-4">
+      {hiddenSection}
+      <Field label="Name" htmlFor="displayName">
           <Input id="displayName" name="displayName" defaultValue={data.profile.display_name ?? ""} required />
         </Field>
         <Field label="University" htmlFor="university">
@@ -239,77 +134,8 @@ export function MemoryWorkspace({
         <Field label="Portfolio" htmlFor="portfolioUrl">
           <Input id="portfolioUrl" name="portfolioUrl" defaultValue={data.profile.portfolio_url ?? ""} />
         </Field>
-        <Button type="submit">Save personal information</Button>
-      </form>
-
-      {data.facts.filter((item) => item.category === "personal").length > 0 ? (
-        <section>
-          <h3 className="text-sm font-medium">Extracted personal facts</h3>
-          <ul className="mt-3 grid gap-3">
-            {data.facts
-              .filter((item) => item.category === "personal")
-              .map((item) => (
-                <li key={item.id}>
-                  <Card as="article" className="p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">{factText(item.value)}</p>
-                        <p className="mt-1 text-xs text-ink-muted">
-                          {item.fact_key} · {sourceLabel(item, data.documentById) ?? "Unknown source"}
-                        </p>
-                        {item.excerpt ? (
-                          <p className="mt-2 text-xs italic text-ink-muted">&ldquo;{item.excerpt}&rdquo;</p>
-                        ) : null}
-                      </div>
-                      <SemanticBadge
-                        status={factSemanticStatus({
-                          verificationStatus: item.verification_status,
-                          extractionStatus: item.extraction_status,
-                          hasOpenConflict: conflictFactIds.has(item.id),
-                        })}
-                      />
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <form action={verifyProfileFact}>
-                        {hiddenSection}
-                        <input type="hidden" name="factId" value={item.id} />
-                        <Button type="submit" variant="secondary" size="sm">
-                          Verify
-                        </Button>
-                      </form>
-                      <form action={deleteProfileFact}>
-                        {hiddenSection}
-                        <input type="hidden" name="factId" value={item.id} />
-                        <Button type="submit" variant="ghost" size="sm">
-                          Delete
-                        </Button>
-                      </form>
-                    </div>
-                  </Card>
-                </li>
-              ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <section>
-        <h3 className="text-sm font-medium">Opportunities you are pursuing</h3>
-        {data.applications.length === 0 ? (
-          <p className="mt-2 text-sm text-ink-muted">No active applications yet.</p>
-        ) : (
-          <ul className="mt-3 grid gap-3">
-            {data.applications.map((row) => (
-              <li key={row.id}>
-                <ApplicationCard row={row} />
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="mt-3 text-xs text-ink-muted">
-          {data.snapshotCount} submission snapshot{data.snapshotCount === 1 ? "" : "s"} frozen from prior applies.
-        </p>
-      </section>
-    </div>
+        <SubmitButton>Save personal information</SubmitButton>
+    </form>
   );
 
   const evidenceSections: MemoryCategory[] = [
@@ -324,13 +150,13 @@ export function MemoryWorkspace({
   ];
 
   const evidencePanel = (category: MemoryCategory) => {
-    const items = data.evidence.filter((item) => item.category === category);
+    const items = data.evidence.filter((item) => item.category === category && isManualKitEntry(item));
     const defaultKind = SECTION_KIND[category] ?? "project";
     return (
       <div className="grid gap-6">
         <form action={addMemoryEvidence} className="grid gap-4 rounded-xl border border-sand/50 p-4">
           {hiddenSection}
-          <p className="text-sm font-medium">Add unverified entry</p>
+          <p className="text-sm font-medium">Add entry manually</p>
           <Field label="Title" htmlFor={`${category}-title`}>
             <Input id={`${category}-title`} name="title" required />
           </Field>
@@ -358,74 +184,54 @@ export function MemoryWorkspace({
           <Field label="Skills (comma separated)" htmlFor={`${category}-skills`}>
             <Input id={`${category}-skills`} name="skills" />
           </Field>
-          <Button type="submit" variant="secondary">
-            Add — needs review
-          </Button>
+          <SubmitButton variant="secondary">
+            Add entry
+          </SubmitButton>
         </form>
 
-        {items.length === 0 ? (
-          <EmptyState
-            eyebrow="Empty"
-            title={`No ${category} memory yet`}
-            body="Upload a resume in Supporting Evidence or add an entry manually. Extracted facts stay unverified until you confirm them."
-          />
-        ) : (
+        {items.length > 0 ? (
           <ul className="grid gap-4">
             {items.map((item) => (
               <li key={item.id}>
-                <EvidenceCard
-                  title={item.title}
-                  kind={item.kind}
-                  organization={item.organization}
-                  outcome={item.outcome}
-                  startDate={item.start_date}
-                  endDate={item.end_date}
-                  verificationStatus={item.verification_status}
-                  excludedFromAi={item.excluded_from_ai}
-                  extractionStatus={item.extraction_status}
-                  sourceLabel={sourceLabel(item, data.documentById)}
-                  sourceExcerpt={item.source_location}
-                  hasOpenConflict={conflictFactIds.has(item.id)}
-                  actions={
-                    <>
-                      <form action={setEvidenceVerification}>
-                        {hiddenSection}
-                        <input type="hidden" name="evidenceId" value={item.id} />
-                        <input type="hidden" name="status" value="verified" />
-                        <Button type="submit" variant="secondary" size="sm">
-                          Verify
-                        </Button>
-                      </form>
-                      <form action={setEvidenceVerification}>
-                        {hiddenSection}
-                        <input type="hidden" name="evidenceId" value={item.id} />
-                        <input type="hidden" name="status" value="rejected" />
-                        <Button type="submit" variant="ghost" size="sm">
-                          Reject
-                        </Button>
-                      </form>
-                      <form action={setEvidenceExclusion}>
-                        {hiddenSection}
-                        <input type="hidden" name="evidenceId" value={item.id} />
-                        <input type="hidden" name="excluded" value={item.excluded_from_ai ? "false" : "true"} />
-                        <Button type="submit" variant="ghost" size="sm">
-                          {item.excluded_from_ai ? "Include in AI" : "Exclude from AI"}
-                        </Button>
-                      </form>
-                      <form action={deleteMemoryEvidence}>
-                        {hiddenSection}
-                        <input type="hidden" name="evidenceId" value={item.id} />
-                        <Button type="submit" variant="ghost" size="sm">
-                          Delete
-                        </Button>
-                      </form>
-                    </>
-                  }
-                />
+                <Card as="article" className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-medium">{item.title}</h3>
+                      {item.organization ? (
+                        <p className="mt-1 text-sm text-ink-muted">{item.organization}</p>
+                      ) : null}
+                      {(item.start_date || item.end_date) && (
+                        <p className="mt-1 text-xs text-ink-muted">
+                          {[item.start_date, item.end_date].filter(Boolean).join(" – ")}
+                        </p>
+                      )}
+                      {item.outcome ? (
+                        <p className="mt-2 text-sm text-ink-muted">{item.outcome}</p>
+                      ) : null}
+                      {item.action ? (
+                        <p className="mt-1 text-sm text-ink-muted">{item.action}</p>
+                      ) : null}
+                      {sourceLabel(item, data.documentById) ? (
+                        <p className="mt-2 text-xs text-ink-muted">
+                          Source: {sourceLabel(item, data.documentById)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <form action={deleteMemoryEvidence}>
+                      {hiddenSection}
+                      <input type="hidden" name="evidenceId" value={item.id} />
+                      <SubmitButton variant="ghost" size="sm">
+                        Delete
+                      </SubmitButton>
+                    </form>
+                  </div>
+                </Card>
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -439,31 +245,31 @@ export function MemoryWorkspace({
             <Input id="skill-name" name="name" required placeholder="TypeScript" />
           </Field>
         </div>
-        <Button type="submit" variant="secondary">
+        <SubmitButton variant="secondary">
           Add skill
-        </Button>
+        </SubmitButton>
       </form>
-      {data.skills.length === 0 ? (
-        <EmptyState eyebrow="Empty" title="No skills yet" body="Extract from a resume or add skills manually." />
-      ) : (
+      {data.skills.length > 0 ? (
         <ul className="flex flex-wrap gap-2">
           {data.skills.map((skill) => (
             <li key={skill.id}>
               <form action={deleteMemorySkill} className="inline">
                 {hiddenSection}
                 <input type="hidden" name="skillId" value={skill.id} />
-                <button
-                  type="submit"
-                  className="rounded-full border border-sand/60 bg-paper px-3 py-1 text-sm hover:border-coral/40"
+                <SubmitButton
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-full border border-sand/60 bg-white px-3 py-1 text-sm hover:border-coral/40"
+                  pendingText="Removing…"
                   title={`Remove ${skill.name}`}
                 >
                   {skill.name} ×
-                </button>
+                </SubmitButton>
               </form>
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 
@@ -485,13 +291,11 @@ export function MemoryWorkspace({
         <Field label="Label" htmlFor="link-label">
           <Input id="link-label" name="label" />
         </Field>
-        <Button type="submit" variant="secondary">
+        <SubmitButton variant="secondary">
           Add link
-        </Button>
+        </SubmitButton>
       </form>
-      {data.links.length === 0 ? (
-        <EmptyState eyebrow="Empty" title="No links yet" body="Add portfolio and profile links here." />
-      ) : (
+      {data.links.length > 0 ? (
         <ul className="grid gap-3">
           {data.links.map((link) => (
             <li key={link.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sand/40 px-4 py-3">
@@ -504,14 +308,14 @@ export function MemoryWorkspace({
               <form action={deleteMemoryLink}>
                 {hiddenSection}
                 <input type="hidden" name="linkId" value={link.id} />
-                <Button type="submit" variant="ghost" size="sm">
+                <SubmitButton variant="ghost" size="sm">
                   Delete
-                </Button>
+                </SubmitButton>
               </form>
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 
@@ -527,11 +331,9 @@ export function MemoryWorkspace({
         />
       </div>
 
-      <section>
-        <h3 className="text-sm font-medium">Your documents</h3>
-        {data.documents.length === 0 ? (
-          <p className="mt-2 text-sm text-ink-muted">No documents uploaded yet.</p>
-        ) : (
+      {data.documents.length > 0 ? (
+        <section>
+          <h3 className="text-sm font-medium">Your documents</h3>
           <ul className="mt-3 grid gap-3 sm:grid-cols-2">
             {data.documents.map((doc) => (
               <li key={doc.id}>
@@ -539,32 +341,8 @@ export function MemoryWorkspace({
               </li>
             ))}
           </ul>
-        )}
-      </section>
-
-      <section>
-        <h3 className="text-sm font-medium">All extracted evidence (by source)</h3>
-        <ul className="mt-3 grid gap-4">
-          {data.evidence
-            .filter((item) => item.extraction_status === "extracted")
-            .map((item) => (
-              <li key={item.id}>
-                <EvidenceCard
-                  title={item.title}
-                  kind={item.kind}
-                  organization={item.organization}
-                  outcome={item.outcome}
-                  verificationStatus={item.verification_status}
-                  excludedFromAi={item.excluded_from_ai}
-                  extractionStatus={item.extraction_status}
-                  sourceLabel={sourceLabel(item, data.documentById)}
-                  sourceExcerpt={item.source_location}
-                  hasOpenConflict={conflictFactIds.has(item.id)}
-                />
-              </li>
-            ))}
-        </ul>
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 
@@ -578,14 +356,71 @@ export function MemoryWorkspace({
 
   const activeLabel = MEMORY_SECTIONS.find((item) => item.id === section)?.label ?? "Personal";
 
+  const documentUploadBar = (
+    <Card className="p-4">
+      <p className="text-xs text-ink-muted">
+        Resume {kit.hasResume ? "ready" : "missing"} · {CNIC_PHARM_B_LABEL}{" "}
+        {kit.hasCnicPharmB ? "ready" : "missing"}. Name other documents exactly as application forms ask — we match
+        and attach them automatically.
+      </p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="rounded-xl border border-sand/50 p-3">
+          <p className="text-sm font-medium">Resume / CV</p>
+          <div className="mt-2">
+            <ResumeAwareUploadForm
+              action={uploadMemoryDocument}
+              mode="kit"
+              compact
+              hiddenFields={{ section }}
+              submitLabel="Upload resume"
+            />
+          </div>
+        </div>
+        <KitDocumentUploadForm action={uploadMemoryDocument} className="rounded-xl border border-sand/50 p-3" compactUseInKit>
+          {hiddenSection}
+          <p className="text-sm font-medium">{CNIC_PHARM_B_LABEL}</p>
+          <Field label="Document type" htmlFor="kit-id-doc-type">
+            <Select id="kit-id-doc-type" name="type" defaultValue="identity_document">
+              <option value="identity_document">CNIC</option>
+              <option value="family_document">Pharm-B</option>
+            </Select>
+          </Field>
+          <input type="hidden" name="label" value={CNIC_PHARM_B_LABEL} />
+          <Input id="kit-id-doc-file" name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
+          <UploadSubmitButton>Upload</UploadSubmitButton>
+        </KitDocumentUploadForm>
+        <KitDocumentUploadForm
+          action={uploadMemoryDocument}
+          className="grid gap-2 rounded-xl border border-sand/50 p-3 md:col-span-2 lg:col-span-1"
+          compactUseInKit
+        >
+          {hiddenSection}
+          <input type="hidden" name="type" value="other" />
+          <p className="text-sm font-medium">Other document</p>
+          <Field label="Document name" htmlFor="kit-other-label" hint="Use the same name as on the application form">
+            <Input
+              id="kit-other-label"
+              name="label"
+              required
+              placeholder="e.g. Official transcript, Cover letter"
+              maxLength={120}
+            />
+          </Field>
+          <Input id="kit-other-file" name="file" type="file" required accept=".txt,.md,.pdf,.docx" />
+          <UploadSubmitButton>Upload</UploadSubmitButton>
+        </KitDocumentUploadForm>
+      </div>
+    </Card>
+  );
+
   return (
     <div className="mt-8 grid gap-6">
-      {conflictsPanel}
+      {documentUploadBar}
       {nav}
       <Card className="p-6">
         <h2 className="text-lg font-medium">{activeLabel}</h2>
         <p className="mt-1 text-sm text-ink-muted">
-          Verified facts can power drafts. AI extracted and conflicting items need your review first.
+          Upload once — resume, {CNIC_PHARM_B_LABEL}, named documents, and supporting files auto-fill every kit section from extracted text.
         </p>
         <div className="mt-6">{panel}</div>
       </Card>

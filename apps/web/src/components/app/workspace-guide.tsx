@@ -2,7 +2,7 @@ import { currentGuideStep, type GuideStep } from "@1apply/domain";
 import Link from "next/link";
 
 import { skipWorkspaceGuide } from "@/server/memory/actions";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 export function WorkspaceGuideCard({
@@ -24,9 +24,9 @@ export function WorkspaceGuideCard({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <ButtonLink href={next.href}>{next.cta}</ButtonLink>
         <form action={skipWorkspaceGuide}>
-          <Button type="submit" variant="ghost">
+          <SubmitButton variant="ghost">
             Skip tutorial
-          </Button>
+          </SubmitButton>
         </form>
       </div>
       {later.length > 0 ? (
@@ -69,9 +69,9 @@ export function WorkspaceGuideBar({
             {next.cta}
           </ButtonLink>
           <form action={skipWorkspaceGuide}>
-            <Button type="submit" variant="ghost" size="sm">
+            <SubmitButton variant="ghost" size="sm">
               Skip tutorial
-            </Button>
+            </SubmitButton>
           </form>
         </div>
       </div>

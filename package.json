@@ -17,5 +17,15 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "allowScripts": {
+    "unrs-resolver@1.12.2": true,
+    "@tailwindcss/oxide@4.1.12": true,
+    "sharp@0.34.5": true,
+    "esbuild@0.25.5": true
+  },
+  "dependencies": {
+    "approve": "^0.0.12",
+    "esbuild": "^0.25.5"
   }
 }

@@ -4,14 +4,14 @@ import { resolveResumeCategory, type ResolvedResumeCategory } from "@1apply/doma
 import type { Actor } from "@/auth/actor";
 import { extractDocumentText } from "@/lib/documents/extract-text";
 import { type readValidatedUpload } from "@/lib/documents/upload-security";
-import { runOwnedJob } from "@/infra/jobs/runner";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { recordAuditEvent } from "@/server/audit";
 import {
   addDocumentVersion,
   createDocumentWithVersion,
-  processDocumentVersion,
 } from "@/server/documents/service";
+import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 
 type UploadPayload = Awaited<ReturnType<typeof readValidatedUpload>>;
 
@@ -35,12 +35,16 @@ export async function ingestCategorizedResume(input: {
   upload: UploadPayload;
   category: ResolvedResumeCategory;
   source: "memory" | "onboarding" | "documents";
+  fillKit?: boolean;
 }): Promise<{
   documentId: string;
   versionId: string;
   versionLabel: string;
   duplicate: boolean;
   isNewCategory: boolean;
+  textExtracted: boolean;
+  kitFilled: boolean;
+  remainingBlanks: number;
 }> {
   const { data: existingResume } = await input.supabase
     .from("resumes")
@@ -116,8 +120,23 @@ export async function ingestCategorizedResume(input: {
   }
 
   if (duplicate) {
-    return { documentId, versionId, versionLabel, duplicate: true, isNewCategory };
+    return {
+      documentId,
+      versionId,
+      versionLabel,
+      duplicate: true,
+      isNewCategory,
+      textExtracted: false,
+      kitFilled: false,
+      remainingBlanks: 0,
+    };
   }
+
+  let processResult = {
+    textExtracted: false,
+    kitFilled: false,
+    remainingBlanks: 0,
+  };
 
   await recordAuditEvent(input.supabase, "document.uploaded", {
     documentId,
@@ -127,22 +146,50 @@ export async function ingestCategorizedResume(input: {
     versionLabel,
   });
 
-  await runOwnedJob(input.supabase, { actor: input.actor, type: "document_extract", inputRef: versionId }, async () => {
-    await processDocumentVersion({
-      supabase: input.supabase,
-      userId: input.userId,
-      documentId,
-      versionId,
-      documentLabel: input.category.label,
-      profileDisplayName: input.profileDisplayName,
-      buffer: input.upload.buffer,
-      mimeType: input.upload.mimeType,
-    });
+  const fillKit = input.fillKit !== false;
+  scheduleDocumentVersionProcessing({
+    supabase: input.supabase,
+    actor: input.actor,
+    userId: input.userId,
+    documentId,
+    versionId,
+    documentLabel: input.category.label,
+    profileDisplayName: input.profileDisplayName,
+    fillKit,
+    postProcess: async () => {
+      const CLOSED = new Set(["submitted", "rejected", "withdrawn", "archived", "offer", "accepted"]);
+      const { data: openApps } = await input.supabase
+        .from("applications")
+        .select("id, status")
+        .eq("user_id", input.userId)
+        .limit(20);
+
+      for (const app of (openApps ?? []).filter((row) => !CLOSED.has(String(row.status)))) {
+        try {
+          await ensureApplicationResumeSelection(input.supabase, input.actor, String(app.id), {
+            autoAttach: true,
+            notifyOnAiPick: true,
+            forceRefresh: true,
+          });
+        } catch {
+          // Best-effort — upload already succeeded.
+        }
+      }
+    },
   });
 
-  await autoAttachKitAcrossOpenApplications(input.supabase, input.actor);
+  if (!fillKit) {
+    await autoAttachKitAcrossOpenApplications(input.supabase, input.actor);
+  }
 
-  return { documentId, versionId, versionLabel, duplicate: false, isNewCategory };
+  return {
+    documentId,
+    versionId,
+    versionLabel,
+    duplicate: false,
+    isNewCategory,
+    ...processResult,
+  };
 }
 
 export async function noticeForResumeUpload(upload: UploadPayload) {

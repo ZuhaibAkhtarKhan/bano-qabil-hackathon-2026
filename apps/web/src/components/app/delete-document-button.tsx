@@ -1,7 +1,7 @@
 "use client";
 
 import { deleteDocument } from "@/server/documents/actions";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 
 export function DeleteDocumentButton({
   documentId,
@@ -25,9 +25,9 @@ export function DeleteDocumentButton({
     >
       <input type="hidden" name="documentId" value={documentId} />
       <input type="hidden" name="returnTo" value={returnTo} />
-      <Button type="submit" variant="danger" size="sm">
+      <SubmitButton variant="danger" size="sm" pendingText="Deleting…">
         {label}
-      </Button>
+      </SubmitButton>
     </form>
   );
 }

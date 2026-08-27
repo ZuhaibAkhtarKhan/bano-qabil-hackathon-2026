@@ -106,7 +106,7 @@ describe("onboarding routing", () => {
       postAuthHref({
         onboardingCompleted: true,
         onboardingStep: "done",
-        kitMissing: ["CNIC", "B-form"],
+        kitMissing: ["CNIC/Pharm-B"],
       }),
     ).toBe("/app/memory?remind=kit");
   });
@@ -126,7 +126,7 @@ describe("onboarding routing", () => {
       postAuthHref({
         onboardingCompleted: false,
         onboardingStep: "consent",
-        kitMissing: ["university", "CNIC"],
+        kitMissing: ["university", "CNIC/Pharm-B"],
       }),
     ).toBe("/app/onboarding/consent");
   });
@@ -138,7 +138,7 @@ describe("onboarding routing", () => {
         preferences: { university: "NUST", educationSummary: "BS CS" },
         documents: [{ type: "resume", label: "CV" }],
       }),
-    ).toEqual(["CNIC", "B-form"]);
+    ).toEqual(["CNIC/Pharm-B"]);
   });
 
   it("stores consent without marking onboarding complete", () => {

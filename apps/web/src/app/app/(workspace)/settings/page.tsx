@@ -3,7 +3,7 @@ import { requestAccountDeletion } from "@/server/account/actions";
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { ExtensionConnectCard } from "@/components/settings/extension-connect-card";
-import { Button } from "@/components/ui/button";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { isAiConfigured } from "@/infra/ai/openai";
@@ -48,9 +48,9 @@ export default async function SettingsPage({
               : "Server AI provider is not configured — write answers from verified evidence yourself."}
           </p>
           <form action={signOut} className="mt-5">
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Sign out
-            </Button>
+            </SubmitButton>
           </form>
         </Card>
 
@@ -68,9 +68,9 @@ export default async function SettingsPage({
                 placeholder="Asia/Karachi"
               />
             </Field>
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Save timezone
-            </Button>
+            </SubmitButton>
           </form>
         </Card>
 
@@ -90,9 +90,9 @@ export default async function SettingsPage({
               />
               <span>Freeze this packet at the deadline if I stay silent. Email/in-app notice goes out first.</span>
             </label>
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Save send preference
-            </Button>
+            </SubmitButton>
           </form>
         </Card>
 
@@ -129,9 +129,9 @@ export default async function SettingsPage({
           </p>
           <form action={requestAccountDeletion} className="mt-4 grid gap-3">
             <Input name="confirm" type="email" required placeholder={profile?.email ?? "you@example.com"} aria-label="Confirm email" />
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Delete my data
-            </Button>
+            </SubmitButton>
           </form>
         </Card>
       </div>

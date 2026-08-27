@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
-import { extractTextFromBuffer } from "@/lib/documents/extract-text";
+import { extractDocumentText } from "@/lib/documents/extract-text";
 import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { documentStoragePath } from "@/infra/storage/documents";
@@ -132,7 +132,7 @@ export async function uploadOnboardingResume(formData: FormData) {
     })
     .eq("id", user.id);
 
-  const notice = extractTextFromBuffer(buffer, mimeType) ? "extracted" : "binary_stored";
+  const notice = (await extractDocumentText(buffer, mimeType)) ? "extracted" : "binary_stored";
 
   revalidatePath("/app/onboarding");
   revalidatePath("/app/memory");

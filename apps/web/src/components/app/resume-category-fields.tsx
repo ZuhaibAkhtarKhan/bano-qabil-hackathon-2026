@@ -13,10 +13,12 @@ export function ResumeCategoryFields({
   idPrefix,
   className,
   defaultPreset = "general",
+  compact = false,
 }: {
   idPrefix: string;
   className?: string;
   defaultPreset?: string;
+  compact?: boolean;
 }) {
   const [preset, setPreset] = useState(defaultPreset);
 
@@ -25,7 +27,11 @@ export function ResumeCategoryFields({
       <Field
         label="Resume category"
         htmlFor={`${idPrefix}-category`}
-        hint="For your own organization only. Job matching scores every resume with AI — category is never used as a filter."
+        hint={
+          compact
+            ? undefined
+            : "For your own organization only. Job matching scores every resume with AI — category is never used as a filter."
+        }
       >
         <Select
           id={`${idPrefix}-category`}
@@ -55,10 +61,12 @@ export function ResumeCategoryFields({
       ) : (
         <input type="hidden" name="resumeCategoryOther" value="" />
       )}
-      <p className="text-xs text-ink-muted">
-        Uploading again to the same category creates the next version automatically (v1, v2, …) by time. You do not pick
-        the version.
-      </p>
+      {compact ? null : (
+        <p className="text-xs text-ink-muted">
+          Uploading again to the same category creates the next version automatically (v1, v2, …) by time. You do not pick
+          the version.
+        </p>
+      )}
     </div>
   );
 }

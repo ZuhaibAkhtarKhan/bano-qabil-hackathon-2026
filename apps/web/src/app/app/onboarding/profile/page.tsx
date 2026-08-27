@@ -2,7 +2,7 @@ import { ensureOnboardingStep } from "@/lib/onboarding";
 import { loadOnboardingProfileDetails } from "@/lib/profile";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { saveOnboardingProfile } from "@/server/onboarding/actions";
 
@@ -85,7 +85,7 @@ export default async function OnboardingProfilePage({
             Could not save your profile. Try again.
           </p>
         ) : null}
-        <Button type="submit">Continue to your kit</Button>
+        <SubmitButton>Continue to your kit</SubmitButton>
       </form>
       <p className="mt-4 text-xs text-ink-muted">
         Signed in as {state.profile.email}. Education, projects, experience, and skills can be extracted from your resume on the next step.

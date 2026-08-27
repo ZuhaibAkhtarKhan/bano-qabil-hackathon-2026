@@ -11,7 +11,7 @@ import {
 import { nextVersionLabel } from "@/lib/documents/versioning";
 import { logError } from "@/lib/log";
 import { documentStoragePath } from "@/infra/storage/documents";
-import { extractFromDocumentText } from "@/server/memory/extract-from-document";
+import { extractAndFillKitFromDocument } from "@/server/memory/fill-kit-blanks";
 import { indexDocumentVersionEmbeddings } from "@/services/embeddings";
 
 type UploadPayload = Awaited<ReturnType<typeof readValidatedUpload>>;
@@ -324,12 +324,34 @@ export async function processDocumentVersion(input: {
   profileDisplayName: string | null;
   buffer: Buffer;
   mimeType: string;
-}): Promise<{ extracted: boolean; embedded: boolean; textExtracted: boolean }> {
+  fillKit?: boolean;
+}): Promise<{
+  extracted: boolean;
+  embedded: boolean;
+  textExtracted: boolean;
+  kitFilled: boolean;
+  remainingBlanks: number;
+}> {
+  const fillKit = input.fillKit !== false;
+
+  if (!fillKit) {
+    await input.supabase.from("document_versions").update({ status: "ready" }).eq("id", input.versionId);
+    return {
+      extracted: false,
+      embedded: false,
+      textExtracted: false,
+      kitFilled: false,
+      remainingBlanks: 0,
+    };
+  }
+
   const extractedText = await extractDocumentText(input.buffer, input.mimeType);
   let extracted = false;
   let embedded = false;
+  let kitFilled = false;
+  let remainingBlanks = 0;
 
-  if (extractedText) {
+  if (extractedText && fillKit) {
     const chunks = chunkDocumentText(extractedText);
     if (chunks.length > 0) {
       await input.supabase.from("document_chunks").insert(
@@ -342,7 +364,7 @@ export async function processDocumentVersion(input: {
       );
     }
 
-    const result = await extractFromDocumentText({
+    const result = await extractAndFillKitFromDocument({
       supabase: input.supabase,
       userId: input.userId,
       documentId: input.documentId,
@@ -352,15 +374,19 @@ export async function processDocumentVersion(input: {
       profileDisplayName: input.profileDisplayName,
     });
     extracted = result.extracted;
+    kitFilled = Boolean(result.extracted);
+    remainingBlanks = "remainingBlanks" in result ? Number(result.remainingBlanks ?? 0) : 0;
   }
 
-  try {
-    await indexDocumentVersionEmbeddings(input.supabase, input.userId, input.versionId);
-    embedded = true;
-  } catch {
-    logError("documents.embed_failed", { versionId: input.versionId });
+  if (fillKit && extractedText) {
+    try {
+      await indexDocumentVersionEmbeddings(input.supabase, input.userId, input.versionId);
+      embedded = true;
+    } catch {
+      logError("documents.embed_failed", { versionId: input.versionId });
+    }
   }
 
   await input.supabase.from("document_versions").update({ status: "ready" }).eq("id", input.versionId);
-  return { extracted, embedded, textExtracted: Boolean(extractedText) };
+  return { extracted, embedded, textExtracted: Boolean(extractedText), kitFilled, remainingBlanks };
 }

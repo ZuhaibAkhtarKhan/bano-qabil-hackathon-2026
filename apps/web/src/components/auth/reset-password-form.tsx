@@ -5,7 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { mapAuthError } from "@/lib/auth-errors";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -80,9 +80,9 @@ export function ResetPasswordForm() {
           {error}
         </p>
       ) : null}
-      <Button type="submit" className="w-full" disabled={pending}>
+      <SubmitButton className="w-full" disabled={pending} pending={pending} pendingText="Updating password…">
         Update password
-      </Button>
+      </SubmitButton>
       <p className="text-sm text-ink-muted">
         <Link href="/sign-in" className="underline">
           Back to sign in

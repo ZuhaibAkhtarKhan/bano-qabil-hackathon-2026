@@ -1,14 +1,9 @@
 import Link from "next/link";
 
 import { needsYouKindLabel, type NeedsYouItem } from "@/lib/needs-you";
-import {
-  dismissNeedsYouReview,
-  resolveNeedsYouAnswer,
-  resolveNeedsYouDocument,
-  resolveNeedsYouMemory,
-} from "@/server/needs-you/actions";
+import { resolveNeedsYouDocument, resolveNeedsYouValue } from "@/server/needs-you/actions";
 import type { NeedsYouDocumentOption, NeedsYouQueue } from "@/server/needs-you/queries";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -35,11 +30,14 @@ function groupByApplication(items: NeedsYouItem[]) {
   return [...groups.values()];
 }
 
-function MemoryForm({ item }: { item: NeedsYouItem }) {
+/** Text questions: Save to memory (platform-wide) or fill this application only. */
+function QuestionForm({ item }: { item: NeedsYouItem }) {
+  const inputId = `${item.id}-value`;
   return (
-    <form action={resolveNeedsYouMemory} className="grid gap-3">
+    <form action={resolveNeedsYouValue} className="grid gap-3">
       <input type="hidden" name="applicationId" value={item.applicationId} />
       <input type="hidden" name="label" value={item.title} />
+      <input type="hidden" name="detail" value={item.detail ?? ""} />
       {item.payload.profileField ? (
         <input type="hidden" name="profileField" value={item.payload.profileField} />
       ) : null}
@@ -49,58 +47,52 @@ function MemoryForm({ item }: { item: NeedsYouItem }) {
       {item.payload.questionId ? (
         <input type="hidden" name="questionId" value={item.payload.questionId} />
       ) : null}
+      {item.payload.answerId ? (
+        <input type="hidden" name="answerId" value={item.payload.answerId} />
+      ) : null}
       {item.payload.mappingId ? (
         <input type="hidden" name="mappingId" value={item.payload.mappingId} />
       ) : null}
-      <Field label={item.inputLabel} htmlFor={`${item.id}-value`}>
+
+      <Field label="Your answer" htmlFor={inputId}>
         {item.inputType === "textarea" ? (
-          <Textarea id={`${item.id}-value`} name="value" required rows={4} placeholder="Write the missing information…" />
+          <Textarea
+            id={inputId}
+            name="value"
+            required
+            rows={item.kind === "answer" ? 5 : 4}
+            placeholder="Enter the value for this question…"
+          />
         ) : (
           <Input
-            id={`${item.id}-value`}
+            id={inputId}
             name="value"
             type={item.inputType === "date" ? "date" : "text"}
             required
-            placeholder="Enter the value Application Memory should keep"
+            placeholder="Enter the value for this question…"
           />
         )}
       </Field>
+
       <div className="flex flex-wrap gap-2">
-        <Button type="submit">Save to memory & continue</Button>
+        <SubmitButton name="scope" value="memory" pendingText="Saving to memory…">
+          Save to memory
+        </SubmitButton>
+        <SubmitButton
+          name="scope"
+          value="application"
+          variant="secondary"
+          pendingText="Filling application…"
+        >
+          Fill just for this application
+        </SubmitButton>
       </div>
-    </form>
-  );
-}
-
-function ReviewActions({ item }: { item: NeedsYouItem }) {
-  if (!item.payload.reviewItemId) return null;
-  return (
-    <form action={dismissNeedsYouReview} className="mt-2">
-      <input type="hidden" name="applicationId" value={item.applicationId} />
-      <input type="hidden" name="reviewItemId" value={item.payload.reviewItemId} />
-      <Button type="submit" variant="secondary">
-        Mark resolved without new fact
-      </Button>
-    </form>
-  );
-}
-
-function AnswerForm({ item }: { item: NeedsYouItem }) {
-  return (
-    <form action={resolveNeedsYouAnswer} className="grid gap-3">
-      <input type="hidden" name="applicationId" value={item.applicationId} />
-      <input type="hidden" name="questionId" value={item.payload.questionId ?? ""} />
-      <input type="hidden" name="answerId" value={item.payload.answerId ?? ""} />
-      <Field label={item.inputLabel} htmlFor={`${item.id}-answer`}>
-        <Textarea
-          id={`${item.id}-answer`}
-          name="value"
-          required
-          rows={5}
-          placeholder="Write your answer. It is saved to Application Memory and approved for this application."
-        />
-      </Field>
-      <Button type="submit">Save answer & continue</Button>
+      <p className="text-xs leading-5 text-ink-muted">
+        <span className="font-medium text-ink">Save to memory</span> keeps this for every future
+        application.{" "}
+        <span className="font-medium text-ink">Fill just for this application</span> uses it only
+        here and does not update Application Memory.
+      </p>
     </form>
   );
 }
@@ -126,10 +118,19 @@ function DocumentForm({
           ))}
         </Select>
       </Field>
-      <Field label="Or upload a new file" htmlFor={`${item.id}-file`} hint="Stored in Application Memory, then attached.">
-        <Input id={`${item.id}-file`} name="file" type="file" accept=".pdf,.doc,.docx,.txt,.md,application/pdf" />
+      <Field
+        label="Or upload a new file"
+        htmlFor={`${item.id}-file`}
+        hint="Stored in Application Memory, then attached to this application."
+      >
+        <Input
+          id={`${item.id}-file`}
+          name="file"
+          type="file"
+          accept=".pdf,.doc,.docx,.txt,.md,application/pdf"
+        />
       </Field>
-      <Button type="submit">Attach & continue</Button>
+      <SubmitButton pendingText="Attaching…">Attach document</SubmitButton>
     </form>
   );
 }
@@ -147,20 +148,13 @@ function ItemCard({
         <StatusPill tone={item.kind === "document" ? "sand" : item.kind === "answer" ? "teal" : "coral"}>
           {needsYouKindLabel(item.kind)}
         </StatusPill>
-        {item.payload.profileField ? <StatusPill tone="mint">Memory field</StatusPill> : null}
       </div>
       <h3 className="mt-3 text-base font-semibold leading-snug">{item.title}</h3>
-      {item.detail ? <p className="mt-2 text-sm leading-6 text-ink-muted">{item.detail}</p> : null}
       <div className="mt-4">
-        {item.kind === "answer" ? (
-          <AnswerForm item={item} />
-        ) : item.kind === "document" ? (
+        {item.kind === "document" ? (
           <DocumentForm item={item} documents={documents} />
         ) : (
-          <>
-            <MemoryForm item={item} />
-            {item.kind === "review" ? <ReviewActions item={item} /> : null}
-          </>
+          <QuestionForm item={item} />
         )}
       </div>
     </article>
@@ -197,13 +191,18 @@ export function NeedsYouWorkspace({ data }: { data: NeedsYouQueue }) {
         <section key={group.applicationId} className="grid gap-4">
           <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-3">
             <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">Required by</p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">
+                Required by
+              </p>
               <h2 className="mt-1 font-display text-2xl leading-tight">
                 {group.role}
                 <span className="text-ink-muted"> · {group.company}</span>
               </h2>
             </div>
-            <Link href={group.href} className="text-sm font-medium text-ink-muted underline-offset-4 hover:text-ink hover:underline">
+            <Link
+              href={group.href}
+              className="text-sm font-medium text-ink-muted underline-offset-4 hover:text-ink hover:underline"
+            >
               Open application
             </Link>
           </div>

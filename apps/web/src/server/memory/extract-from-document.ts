@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { documentExtractionSchema, tryGetAiProvider } from "@/infra/ai/openai";
+import { normalizeDocumentExtractionRaw } from "@/lib/kit-fill-normalize";
 import { logError } from "@/lib/log";
 import { wrapUntrustedDocumentContent } from "@/lib/opportunities/untrusted";
 import { heuristicExtractDocument } from "@/server/memory/heuristic-extract";
@@ -49,10 +50,10 @@ export async function extractFromDocumentText(input: {
     try {
       const raw = await provider.completeStructured({
         schemaName: "documentExtraction",
-        instruction: `Extract only facts the document states about ${input.profileDisplayName ?? "the applicant"}. Return JSON {displayName, headline, phone, locationCity, locationCountry, links:[{kind,url}], skills:[], evidence:[{title,kind,organization,situation,action,outcome,skills[],startDate,endDate,excerpt}]}. Map kinds to education, employment, project, leadership, volunteering, achievement, certification, or research. Include graduation/end years in endDate when present. Never invent employers, dates, skills, or outcomes. If unsure, omit the item.`,
+        instruction: `Extract only facts the document states about ${input.profileDisplayName ?? "the applicant"}. Return JSON {displayName, headline, phone, locationCity, locationCountry, links:[{kind,url}], skills:[], evidence:[{title,kind,organization,situation,action,outcome,skills[],startDate,endDate,excerpt}]}. Map kinds to education, employment, project, leadership, volunteering, achievement, certification, or research so they land in the correct kit section (Education, Experience, Projects, Achievements, Certifications, Leadership, Research, Supporting Evidence). For CNIC, B-form, or identity documents, extract legal name, ID number, date of birth, and address into displayName, phone, locationCity, locationCountry, and headline where present. Include graduation/end years in endDate. Never invent employers, dates, skills, or outcomes. If unsure, omit the item.`,
         untrustedData: wrapUntrustedDocumentContent(input.extractedText, input.documentLabel),
       });
-      const parsed = documentExtractionSchema.safeParse(raw);
+      const parsed = documentExtractionSchema.safeParse(normalizeDocumentExtractionRaw(raw));
       if (parsed.success) {
         return persist(parsed.data);
       }

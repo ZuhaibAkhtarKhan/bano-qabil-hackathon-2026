@@ -76,7 +76,6 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
-    "mammoth": "^1.12.1",
-    "pdfjs-dist": "^6.2.108"
+    "mammoth": "^1.12.1"
   }
 }

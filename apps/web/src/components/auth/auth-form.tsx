@@ -5,7 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
+import { AsyncButton, SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { authErrorFromSearchParams, ACCOUNT_EXISTS_MESSAGE, mapAuthError, safeNextPath } from "@/lib/auth-errors";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -26,10 +26,9 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     }),
   );
   const [passwordPending, setPasswordPending] = useState(false);
-  const [magicPending, setMagicPending] = useState(false);
   const configured = isSupabaseConfigured();
   const nextPath = safeNextPath(searchParams.get("next"), mode === "sign-up" ? "/app/onboarding/consent" : "/app");
-  const busy = passwordPending || magicPending;
+  const busy = passwordPending;
 
   async function onPasswordSubmit(event: FormEvent) {
     event.preventDefault();
@@ -99,7 +98,6 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       setError("Enter an email address for the magic link.");
       return;
     }
-    setMagicPending(true);
     try {
       const supabase = createBrowserSupabaseClient();
       const { error: otpError } = await supabase.auth.signInWithOtp({
@@ -116,8 +114,6 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           caught instanceof Error ? { message: caught.message } : { message: String(caught) },
         ),
       );
-    } finally {
-      setMagicPending(false);
     }
   }
 
@@ -179,18 +175,23 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           {message}
         </p>
       ) : null}
-      <Button type="submit" className="w-full" disabled={busy}>
-        {passwordPending
-          ? mode === "sign-up"
-            ? "Creating account…"
-            : "Signing in…"
-          : mode === "sign-up"
-            ? "Create account"
-            : "Sign in"}
-      </Button>
-      <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={onMagicLink}>
-        {magicPending ? "Sending…" : "Email a magic link"}
-      </Button>
+      <SubmitButton
+        className="w-full"
+        disabled={busy}
+        pending={passwordPending}
+        pendingText={mode === "sign-up" ? "Creating account…" : "Signing in…"}
+      >
+        {mode === "sign-up" ? "Create account" : "Sign in"}
+      </SubmitButton>
+      <AsyncButton
+        variant="secondary"
+        className="w-full"
+        disabled={busy}
+        pendingText="Sending…"
+        onClick={() => onMagicLink()}
+      >
+        Email a magic link
+      </AsyncButton>
     </form>
   );
 }

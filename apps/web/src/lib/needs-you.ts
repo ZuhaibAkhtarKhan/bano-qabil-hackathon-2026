@@ -62,6 +62,25 @@ export function detectProfileMemoryField(label: string): ProfileMemoryField | nu
   return null;
 }
 
+/** Internal eligibility / analysis copy — not an applicant-facing form question. */
+export function isNeedsYouSystemNoise(text: string): boolean {
+  const value = text.trim();
+  if (!value) return true;
+  return [
+    /no explicit requirements were extracted/i,
+    /add them before treating this as a fit check/i,
+    /not enough verified experience to decide/i,
+    /this is not an official eligibility decision/i,
+    /requirement:\s*no explicit requirements/i,
+    /^kind:\s*eligibility$/i,
+  ].some((pattern) => pattern.test(value));
+}
+
+/** Need You is for scraped form questions only — not workspace review/eligibility rows. */
+export function isNeedsYouApplicantQuestion(kind: NeedsYouKind): boolean {
+  return kind === "field_mapping" || kind === "missing_fact" || kind === "answer" || kind === "document";
+}
+
 export function needsYouInputType(label: string, kind: NeedsYouKind): NeedsYouItem["inputType"] {
   if (kind === "document") return "document";
   if (kind === "answer") return "textarea";

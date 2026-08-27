@@ -9,7 +9,7 @@ import { runOwnedJob } from "@/infra/jobs/runner";
 import {
   APPLICATION_LIFECYCLE_ACTIONS,
 } from "@/lib/application-lifecycle";
-import { detectProfileMemoryField } from "@/lib/needs-you";
+import { detectProfileMemoryField, isNeedsYouSystemNoise } from "@/lib/needs-you";
 import { logError } from "@/lib/log";
 import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";
@@ -223,10 +223,13 @@ async function continueAfterFillStop(
         const review = eligibility
           .filter(
             (item) =>
-              item.state === "unclear" ||
-              item.state === "not_met" ||
-              item.state === "not_evaluated" ||
-              item.state === "partial",
+              item.requirementId !== "none" &&
+              !isNeedsYouSystemNoise(String(item.explanation ?? "")) &&
+              !isNeedsYouSystemNoise(String(item.requirementText ?? "")) &&
+              (item.state === "unclear" ||
+                item.state === "not_met" ||
+                item.state === "not_evaluated" ||
+                item.state === "partial"),
           )
           .map((item) => ({
             user_id: actor.userId,

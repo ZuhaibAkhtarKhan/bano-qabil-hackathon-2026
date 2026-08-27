@@ -1,7 +1,7 @@
 import { opportunityCategorySchema } from "@1apply/contracts";
 import { computeDeadlineInfo, type RankedDiscovery } from "@1apply/domain";
 
-import { Button, ButtonLink, SubmitButton } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScoreIndicator } from "@/components/ui/data";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
@@ -140,12 +140,12 @@ function DiscoveryResultCard({ item }: { item: RankedDiscovery }) {
             <input type="hidden" name="category" value={item.category} />
             <input type="hidden" name="location" value={item.location ?? ""} />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" size="sm">
+              <SubmitButton size="sm">
                 Save opportunity
-              </Button>
-              <Button type="submit" size="sm" variant="secondary">
+              </SubmitButton>
+              <SubmitButton size="sm" variant="secondary">
                 Analyze opportunity
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         )}

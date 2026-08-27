@@ -12,6 +12,7 @@ import {
 
 import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
+import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { syncDeadlineReminders } from "@/server/applications/reminders";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
@@ -401,7 +402,17 @@ export async function loadApplicationsWorkspace() {
 }
 
 export async function loadApplicationWorkspace(applicationId: string) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
+
+  // Auto-pick resume category / AI fallback before rendering submission checklist.
+  try {
+    await ensureApplicationResumeSelection(supabase, actor, applicationId, {
+      autoAttach: true,
+      notifyOnAiPick: true,
+    });
+  } catch {
+    // Non-blocking — workspace still loads if selection fails.
+  }
 
   const { data: application } = await supabase
     .from("applications")

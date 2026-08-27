@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { mapAuthError } from "@/lib/auth-errors";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -65,9 +65,9 @@ export function ForgotPasswordForm() {
           {message}
         </p>
       ) : null}
-      <Button type="submit" className="w-full" disabled={pending}>
+      <SubmitButton className="w-full" disabled={pending} pending={pending} pendingText="Sending reset link…">
         Send reset link
-      </Button>
+      </SubmitButton>
       <p className="text-sm text-ink-muted">
         <Link href="/sign-in" className="underline">
           Back to sign in

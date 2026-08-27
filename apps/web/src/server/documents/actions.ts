@@ -7,7 +7,7 @@ import { documentTypeSchema } from "@1apply/contracts";
 
 import { createDocumentReadUrl } from "@/infra/storage/documents";
 import { logError } from "@/lib/log";
-import { extractDocumentText } from "@/lib/documents/extract-text";
+import { parseUseInKit, uploadQueuedNotice } from "@/lib/document-upload-options";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import {
@@ -15,15 +15,13 @@ import {
   assertOwnedVersion,
   createDocumentWithVersion,
   deleteOwnedDocument,
-  processDocumentVersion,
   setCurrentDocumentVersion,
 } from "@/server/documents/service";
+import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/infra/jobs/runner";
-import { reindexUserRetrievalCorpus } from "@/services/embeddings";
 import { recordAuditEvent } from "@/server/audit";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
-import { categoryFromFormData, ingestCategorizedResume, noticeForResumeUpload } from "@/server/resumes/upload";
+import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
 
 const DOCUMENTS = "/app/documents";
 
@@ -38,48 +36,12 @@ function mapUploadError(error: unknown): "required" | "upload" {
   return "upload";
 }
 
-async function runVersionJobs(input: {
-  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"];
-  actor: Awaited<ReturnType<typeof requireWorkspace>>["actor"];
-  userId: string;
-  profileDisplayName: string | null;
-  documentId: string;
-  versionId: string;
-  label: string;
-  buffer: Buffer;
-  mimeType: string;
-}) {
-  await runOwnedJob(
-    input.supabase,
-    { actor: input.actor, type: "document_extract", inputRef: input.versionId },
-    async () => {
-      await processDocumentVersion({
-        supabase: input.supabase,
-        userId: input.userId,
-        documentId: input.documentId,
-        versionId: input.versionId,
-        documentLabel: input.label,
-        profileDisplayName: input.profileDisplayName,
-        buffer: input.buffer,
-        mimeType: input.mimeType,
-      });
-    },
-  );
-
-  await runOwnedJob(
-    input.supabase,
-    { actor: input.actor, type: "embedding_index", inputRef: input.versionId },
-    async () => {
-      await reindexUserRetrievalCorpus(input.supabase, input.userId);
-    },
-  );
-}
-
 export async function uploadDocument(formData: FormData) {
   const { user, profile, supabase, actor } = await requireWorkspace();
   const file = formData.get("file");
   const label = String(formData.get("label") ?? "").trim();
   const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "other"));
+  const useInKit = parseUseInKit(formData);
 
   if (!(file instanceof File) || !typeParsed.success) {
     redirectWith(DOCUMENTS, { error: "required" });
@@ -104,16 +66,17 @@ export async function uploadDocument(formData: FormData) {
         upload,
         category,
         source: "documents",
+        fillKit: useInKit,
       });
       if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+      revalidatePath("/app");
+      revalidatePath(DOCUMENTS);
+      revalidatePath("/app/memory");
+      revalidatePath("/app/resumes");
+      redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
     } catch {
       redirectWith(DOCUMENTS, { error: "upload" });
     }
-    revalidatePath("/app");
-    revalidatePath(DOCUMENTS);
-    revalidatePath("/app/memory");
-    revalidatePath("/app/resumes");
-    redirectWith(DOCUMENTS, { notice: await noticeForResumeUpload(upload) });
   }
 
   if (!label) {
@@ -142,24 +105,25 @@ export async function uploadDocument(formData: FormData) {
 
   await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId });
 
-  await runVersionJobs({
+  scheduleDocumentVersionProcessing({
     supabase,
     actor,
     userId: user.id,
-    profileDisplayName: profile.display_name,
     documentId,
     versionId,
-    label,
-    buffer: upload.buffer,
-    mimeType: upload.mimeType,
+    documentLabel: label,
+    profileDisplayName: profile.display_name,
+    fillKit: useInKit,
   });
 
-  await autoAttachKitAcrossOpenApplications(supabase, actor);
+  if (!useInKit) {
+    await autoAttachKitAcrossOpenApplications(supabase, actor);
+  }
 
   revalidatePath("/app");
   revalidatePath(DOCUMENTS);
   revalidatePath("/app/memory");
-  redirectWith(DOCUMENTS, { notice: (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored" });
+  redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
 }
 
 export async function uploadDocumentVersion(formData: FormData) {
@@ -167,6 +131,7 @@ export async function uploadDocumentVersion(formData: FormData) {
   const documentId = String(formData.get("documentId") ?? "");
   const file = formData.get("file");
   const setAsCurrent = String(formData.get("setAsCurrent") ?? "true") !== "false";
+  const useInKit = parseUseInKit(formData);
 
   if (!documentId || !(file instanceof File)) {
     redirectWith(DOCUMENTS, { error: "required" });
@@ -205,22 +170,21 @@ export async function uploadDocumentVersion(formData: FormData) {
     redirectWith(documentPath(documentId), { error: "upload" });
   }
 
-  await runVersionJobs({
+  scheduleDocumentVersionProcessing({
     supabase,
     actor,
     userId: user.id,
-    profileDisplayName: profile.display_name,
     documentId,
     versionId,
-    label: document.label,
-    buffer: upload.buffer,
-    mimeType: upload.mimeType,
+    documentLabel: document.label,
+    profileDisplayName: profile.display_name,
+    fillKit: useInKit,
   });
 
   revalidatePath(DOCUMENTS);
   revalidatePath(documentPath(documentId));
   revalidatePath("/app/memory");
-  redirectWith(documentPath(documentId), { notice: (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored" });
+  redirectWith(documentPath(documentId), { notice: uploadQueuedNotice(useInKit) });
 }
 
 export async function setCurrentVersion(formData: FormData) {

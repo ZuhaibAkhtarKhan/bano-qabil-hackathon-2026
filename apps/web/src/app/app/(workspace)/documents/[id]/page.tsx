@@ -1,17 +1,16 @@
 import Link from "next/link";
 
 import { DeleteDocumentButton } from "@/components/app/delete-document-button";
-import { FlashBanner } from "@/components/app/flash-banner";
+import { DocumentVersionUploadForm } from "@/components/app/document-version-upload-form";
+import { UploadFeedback } from "@/components/app/upload-feedback";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { FileUpload } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatDocumentType } from "@/lib/documents/versioning";
 import {
   downloadDocumentVersion,
   setCurrentVersion,
-  uploadDocumentVersion,
 } from "@/server/documents/actions";
 import { loadDocumentDetail } from "@/server/documents/queries";
 import { notFound } from "next/navigation";
@@ -53,12 +52,12 @@ export default async function DocumentDetailPage({
           ← Back to vault
         </Link>
       </p>
-      <FlashBanner notice={notice} error={error} />
+      <UploadFeedback notice={notice} error={error} />
 
       <Card className="mt-8 max-w-2xl p-6">
         <h2 className="text-lg font-medium">Extracted text</h2>
         {extractedPreview ? (
-          <p className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-6 text-ink-muted">
+          <p className="mt-3 max-h-[32rem] overflow-auto whitespace-pre-wrap text-sm leading-6 text-ink-muted">
             {extractedPreview}
           </p>
         ) : (
@@ -76,17 +75,7 @@ export default async function DocumentDetailPage({
         <p className="mt-1 text-sm text-ink-muted">
           Historical versions are never deleted. New uploads become the latest unless you choose otherwise.
         </p>
-        <form action={uploadDocumentVersion} className="mt-4 grid gap-4">
-          <input type="hidden" name="documentId" value={document.id} />
-          <FileUpload id="version-file" label="File" accept=".txt,.md,.pdf,.docx,text/plain,application/pdf" />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="setAsCurrent" value="true" defaultChecked />
-            Set as latest version after upload
-          </label>
-          <Button type="submit" variant="secondary">
-            Upload version
-          </Button>
-        </form>
+        <DocumentVersionUploadForm documentId={document.id} />
       </Card>
 
       <section className="mt-8 max-w-2xl">
@@ -123,16 +112,16 @@ export default async function DocumentDetailPage({
                       <form action={setCurrentVersion}>
                         <input type="hidden" name="documentId" value={document.id} />
                         <input type="hidden" name="versionId" value={version.id} />
-                        <Button type="submit" variant="secondary" size="sm">
+                        <SubmitButton variant="secondary" size="sm">
                           Set as latest
-                        </Button>
+                        </SubmitButton>
                       </form>
                     ) : null}
                     <form action={downloadDocumentVersion}>
                       <input type="hidden" name="versionId" value={version.id} />
-                      <Button type="submit" variant="ghost" size="sm">
+                      <SubmitButton variant="ghost" size="sm">
                         Download
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </div>
                 </Card>

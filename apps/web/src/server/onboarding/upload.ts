@@ -4,15 +4,15 @@ import { revalidatePath } from "next/cache";
 
 import { documentTypeSchema } from "@1apply/contracts";
 
-import { extractDocumentText } from "@/lib/documents/extract-text";
+import { parseUseInKit, uploadQueuedNotice } from "@/lib/document-upload-options";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import { createDocumentWithVersion, processDocumentVersion } from "@/server/documents/service";
+import { createDocumentWithVersion } from "@/server/documents/service";
+import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/infra/jobs/runner";
 import { recordAuditEvent } from "@/server/audit";
-import { categoryFromFormData, ingestCategorizedResume, noticeForResumeUpload } from "@/server/resumes/upload";
+import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
 
 const DOCUMENTS = "/app/onboarding/documents";
 
@@ -25,6 +25,8 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
   const file = formData.get("file");
   const label = String(formData.get("label") ?? "Document").trim() || "Document";
   const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "resume"));
+
+  const useInKit = parseUseInKit(formData);
 
   if (!(file instanceof File) || file.size === 0 || !typeParsed.success) {
     redirectWith(DOCUMENTS, { error: "required" });
@@ -52,17 +54,18 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
         upload,
         category,
         source: "onboarding",
+        fillKit: useInKit,
       });
       if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+      revalidatePath("/app/onboarding");
+      revalidatePath("/app/memory");
+      revalidatePath("/app/documents");
+      revalidatePath("/app/resumes");
+      redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
     } catch {
       redirectWith(DOCUMENTS, { error: "upload" });
     }
-
-    revalidatePath("/app/onboarding");
-    revalidatePath("/app/memory");
-    revalidatePath("/app/documents");
-    revalidatePath("/app/resumes");
-    redirectWith(DOCUMENTS, { notice: await noticeForResumeUpload(upload) });
+    return;
   }
 
   let documentId: string;
@@ -87,29 +90,23 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
 
   await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId, source: "onboarding" });
 
-  await runOwnedJob(
+  scheduleDocumentVersionProcessing({
     supabase,
-    { actor, type: "document_extract", inputRef: versionId },
-    async () => {
-      await processDocumentVersion({
-        supabase,
-        userId: user.id,
-        documentId,
-        versionId,
-        documentLabel: label,
-        profileDisplayName: profile.display_name,
-        buffer: upload.buffer,
-        mimeType: upload.mimeType,
-      });
-    },
-  );
+    actor,
+    userId: user.id,
+    documentId,
+    versionId,
+    documentLabel: label,
+    profileDisplayName: profile.display_name,
+    fillKit: useInKit,
+  });
 
-  await autoAttachKitAcrossOpenApplications(supabase, actor);
-
-  const notice = (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored";
+  if (!useInKit) {
+    await autoAttachKitAcrossOpenApplications(supabase, actor);
+  }
 
   revalidatePath("/app/onboarding");
   revalidatePath("/app/memory");
   revalidatePath("/app/documents");
-  redirectWith(DOCUMENTS, { notice });
+  redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
 }

@@ -52,9 +52,10 @@ export default async function DashboardPage() {
     .filter((item) => item.score != null)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-  const recentApps = applications.slice(0, 4);
   const matchSource: DashboardMatch[] = (
-    scoredApps.length > 0 ? scoredApps.slice(0, 4) : recentApps.map((row) => ({ row, score: fitScore(row) }))
+    scoredApps.length > 0
+      ? scoredApps
+      : applications.map((row) => ({ row, score: fitScore(row) }))
   ).map(({ row, score }, index) => {
     const opportunity = asOne(row.opportunities);
     const company = companyFromOpportunity(opportunity);
