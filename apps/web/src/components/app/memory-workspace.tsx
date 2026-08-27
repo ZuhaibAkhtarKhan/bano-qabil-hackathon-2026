@@ -35,19 +35,16 @@ const SECTION_KIND: Partial<Record<MemoryCategory, string>> = {
   supporting: "volunteering",
 };
 
-function isManualKitEntry(item: MemoryData["evidence"][number]): boolean {
-  return item.source === "manual" || item.extraction_status === "manual" || item.extraction_status === "user_edited";
-}
-
 function sourceLabel(
-  item: { source: string | null; source_document_id: string | null },
+  item: { source: string | null; source_document_id: string | null; extraction_status?: string | null },
   documentById: MemoryData["documentById"],
 ): string | null {
   if (item.source_document_id) {
-    return documentById.get(item.source_document_id)?.label ?? "Document";
+    return documentById.get(item.source_document_id)?.label ?? "Uploaded document";
   }
   if (item.source?.startsWith("document:")) return "Uploaded document";
-  if (item.source === "manual") return "Manual entry";
+  if (item.source === "manual" || item.extraction_status === "manual") return "Manual entry";
+  if (item.extraction_status === "extracted") return "Auto-filled from document";
   return item.source;
 }
 
@@ -150,7 +147,9 @@ export function MemoryWorkspace({
   ];
 
   const evidencePanel = (category: MemoryCategory) => {
-    const items = data.evidence.filter((item) => item.category === category && isManualKitEntry(item));
+    const items = data.evidence.filter(
+      (item) => item.category === category && item.verification_status !== "rejected",
+    );
     const defaultKind = SECTION_KIND[category] ?? "project";
     return (
       <div className="grid gap-6">

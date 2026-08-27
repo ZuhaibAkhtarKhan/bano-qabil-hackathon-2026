@@ -10,6 +10,7 @@ import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith, type FlashCode } from "@/server/http/flash";
+import { rethrowNavigationError } from "@/server/http/navigation-errors";
 import { insertOwnedDocument } from "@/server/documents/service";
 import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
@@ -366,8 +367,9 @@ export async function uploadMemoryDocument(formData: FormData) {
           error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload",
         });
       }
+      let result;
       try {
-        const result = await ingestCategorizedResume({
+        result = await ingestCategorizedResume({
           supabase,
           actor,
           userId: user.id,
@@ -377,11 +379,12 @@ export async function uploadMemoryDocument(formData: FormData) {
           source: "memory",
           fillKit: useInKit,
         });
-        if (result.duplicate) notice = "duplicate_file";
-        else notice = uploadQueuedNotice(useInKit);
-      } catch {
+      } catch (error) {
+        rethrowNavigationError(error);
         redirectWith(sectionReturn(formData), { error: "upload" });
       }
+      if (result.duplicate) notice = "duplicate_file";
+      else notice = uploadQueuedNotice(useInKit);
     }
     revalidatePath(MEMORY);
     revalidatePath("/app/documents");

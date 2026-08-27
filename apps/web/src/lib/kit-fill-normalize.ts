@@ -40,6 +40,70 @@ function asObjectArray(value: unknown): Record<string, unknown>[] | undefined {
   return undefined;
 }
 
+const MONTHS: Record<string, string> = {
+  jan: "01",
+  january: "01",
+  feb: "02",
+  february: "02",
+  mar: "03",
+  march: "03",
+  apr: "04",
+  april: "04",
+  may: "05",
+  jun: "06",
+  june: "06",
+  jul: "07",
+  july: "07",
+  aug: "08",
+  august: "08",
+  sep: "09",
+  sept: "09",
+  september: "09",
+  oct: "10",
+  october: "10",
+  nov: "11",
+  november: "11",
+  dec: "12",
+  december: "12",
+};
+
+/**
+ * Postgres `date` columns reject resume strings like "Present" / "Jul 2028".
+ * Normalize to YYYY-MM-DD or null (ongoing / unparseable).
+ */
+export function normalizeEvidenceDate(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^(present|current|now|ongoing|today|n\/?a|tbd|—|-|–)$/i.test(raw)) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const yearMonthDay = raw.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+  if (yearMonthDay) {
+    const [, y, m, d] = yearMonthDay;
+    return `${y}-${m!.padStart(2, "0")}-${d!.padStart(2, "0")}`;
+  }
+
+  const yearMonth = raw.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (yearMonth) {
+    return `${yearMonth[1]}-${yearMonth[2]!.padStart(2, "0")}-01`;
+  }
+
+  if (/^\d{4}$/.test(raw)) return `${raw}-01-01`;
+
+  const monthYear = raw.match(/^([A-Za-z]+)\.?\s+(\d{4})$/);
+  if (monthYear) {
+    const month = MONTHS[monthYear[1]!.toLowerCase()];
+    if (month) return `${monthYear[2]}-${month}-01`;
+  }
+
+  const yearOnlyInText = raw.match(/\b(19|20)\d{2}\b/);
+  if (yearOnlyInText) return `${yearOnlyInText[0]}-01-01`;
+
+  return null;
+}
+
 function normalizeLink(raw: Record<string, unknown>) {
   return {
     kind: String(raw.kind ?? raw.type ?? "other"),
@@ -58,8 +122,12 @@ function normalizeEvidence(raw: Record<string, unknown>) {
     action: raw.action != null ? String(raw.action) : null,
     outcome: raw.outcome != null ? String(raw.outcome) : null,
     skills,
-    startDate: raw.startDate != null ? String(raw.startDate) : raw.start_date != null ? String(raw.start_date) : null,
-    endDate: raw.endDate != null ? String(raw.endDate) : raw.end_date != null ? String(raw.end_date) : null,
+    startDate: normalizeEvidenceDate(
+      raw.startDate != null ? String(raw.startDate) : raw.start_date != null ? String(raw.start_date) : null,
+    ),
+    endDate: normalizeEvidenceDate(
+      raw.endDate != null ? String(raw.endDate) : raw.end_date != null ? String(raw.end_date) : null,
+    ),
     excerpt: raw.excerpt != null ? String(raw.excerpt) : null,
   };
 }

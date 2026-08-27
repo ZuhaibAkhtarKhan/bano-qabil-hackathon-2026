@@ -24,13 +24,14 @@ async function notifyDocumentProcessingComplete(
   supabase: SupabaseClient,
   userId: string,
   versionId: string,
-  result: { textExtracted: boolean; kitFilled: boolean; remainingBlanks: number },
+  result: { textExtracted: boolean; kitFilled: boolean; remainingBlanks: number; fieldsWritten: number },
 ) {
   const noticeCode = uploadProcessingNotice({
     useInKit: true,
     textExtracted: result.textExtracted,
-    kitFilled: result.kitFilled,
+    kitFilled: result.fieldsWritten > 0,
     remainingBlanks: result.remainingBlanks,
+    fieldsWritten: result.fieldsWritten,
   });
   const title =
     noticeCode === "kit_updated"
@@ -73,7 +74,12 @@ export function scheduleDocumentVersionProcessing(input: {
   after(async () => {
     try {
       const version = await assertOwnedVersion(input.supabase, input.actor, input.versionId);
-      let processResult = { textExtracted: false, kitFilled: false, remainingBlanks: 0 };
+      let processResult = {
+        textExtracted: false,
+        kitFilled: false,
+        remainingBlanks: 0,
+        fieldsWritten: 0,
+      };
 
       await runOwnedJob(
         input.supabase,
@@ -95,6 +101,7 @@ export function scheduleDocumentVersionProcessing(input: {
             textExtracted: result.textExtracted,
             kitFilled: result.kitFilled,
             remainingBlanks: result.remainingBlanks,
+            fieldsWritten: result.fieldsWritten,
           };
         },
       );

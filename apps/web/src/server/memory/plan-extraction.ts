@@ -2,6 +2,7 @@ import type { ExperienceKind, MemoryCategory } from "@1apply/contracts";
 import { categoryFromKind, detectMemoryConflicts, memoryFactKey, type ConflictCandidate } from "@1apply/domain";
 
 import { mapExtractedEvidenceKind, uniqueSkillNames } from "@/lib/extraction";
+import { normalizeEvidenceDate } from "@/lib/kit-fill-normalize";
 
 export type ExtractedDocument = {
   displayName: string | null;
@@ -56,6 +57,7 @@ export function isSubstantiveExtractedEvidence(item: {
   situation?: string | null;
   action?: string | null;
   outcome?: string | null;
+  excerpt?: string | null;
 }): boolean {
   const title = item.title.trim();
   if (!title) return false;
@@ -68,8 +70,10 @@ export function isSubstantiveExtractedEvidence(item: {
   }
   const org = String(item.organization ?? "").trim();
   if (org) return true;
-  if (item.situation?.trim() || item.action?.trim() || item.outcome?.trim()) return true;
-  return title.length > 12;
+  if (item.situation?.trim() || item.action?.trim() || item.outcome?.trim() || item.excerpt?.trim()) {
+    return true;
+  }
+  return title.length > 6;
 }
 
 export function planDocumentExtraction(
@@ -80,30 +84,32 @@ export function planDocumentExtraction(
     .filter((item) => isSubstantiveExtractedEvidence(item))
     .slice(0, 48)
     .map((item) => {
-    const kind = mapExtractedEvidenceKind(item.kind);
-    const category = categoryFromKind(kind);
-    return {
-      title: item.title.slice(0, 180),
-      kind,
-      category,
-      organization: item.organization,
-      situation: item.situation,
-      action: item.action,
-      outcome: item.outcome,
-      skills: item.skills.slice(0, 16),
-      startDate: item.startDate ?? null,
-      endDate: item.endDate ?? null,
-      excerpt: item.excerpt ?? null,
-      factKey: memoryFactKey({
+      const kind = mapExtractedEvidenceKind(item.kind);
+      const category = categoryFromKind(kind);
+      const startDate = normalizeEvidenceDate(item.startDate);
+      const endDate = normalizeEvidenceDate(item.endDate);
+      return {
+        title: item.title.slice(0, 180),
+        kind,
         category,
         organization: item.organization,
-        title: item.title,
-        field: item.endDate ? "end_year" : "title",
-      }),
-      extractionStatus: "extracted",
-      verificationStatus: "verified",
-    };
-  });
+        situation: item.situation ?? item.excerpt ?? null,
+        action: item.action,
+        outcome: item.outcome,
+        skills: item.skills.slice(0, 16),
+        startDate,
+        endDate,
+        excerpt: item.excerpt ?? null,
+        factKey: memoryFactKey({
+          category,
+          organization: item.organization,
+          title: item.title,
+          field: endDate ? "end_year" : "title",
+        }),
+        extractionStatus: "extracted" as const,
+        verificationStatus: "verified" as const,
+      };
+    });
 
   const facts: PlannedScalarFact[] = [];
   if (extracted.displayName?.trim()) {

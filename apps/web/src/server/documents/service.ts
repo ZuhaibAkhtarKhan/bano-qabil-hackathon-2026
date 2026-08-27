@@ -331,6 +331,7 @@ export async function processDocumentVersion(input: {
   textExtracted: boolean;
   kitFilled: boolean;
   remainingBlanks: number;
+  fieldsWritten: number;
 }> {
   const fillKit = input.fillKit !== false;
 
@@ -342,6 +343,7 @@ export async function processDocumentVersion(input: {
       textExtracted: false,
       kitFilled: false,
       remainingBlanks: 0,
+      fieldsWritten: 0,
     };
   }
 
@@ -350,6 +352,7 @@ export async function processDocumentVersion(input: {
   let embedded = false;
   let kitFilled = false;
   let remainingBlanks = 0;
+  let fieldsWritten = 0;
 
   if (extractedText && fillKit) {
     const chunks = chunkDocumentText(extractedText);
@@ -364,6 +367,7 @@ export async function processDocumentVersion(input: {
       );
     }
 
+    // Immediately after text extraction: force kit-fill from this document's full text.
     const result = await extractAndFillKitFromDocument({
       supabase: input.supabase,
       userId: input.userId,
@@ -376,6 +380,7 @@ export async function processDocumentVersion(input: {
     extracted = result.extracted;
     kitFilled = Boolean(result.extracted);
     remainingBlanks = "remainingBlanks" in result ? Number(result.remainingBlanks ?? 0) : 0;
+    fieldsWritten = "fieldsWritten" in result ? Number(result.fieldsWritten ?? 0) : kitFilled ? 1 : 0;
   }
 
   if (fillKit && extractedText) {
@@ -388,5 +393,5 @@ export async function processDocumentVersion(input: {
   }
 
   await input.supabase.from("document_versions").update({ status: "ready" }).eq("id", input.versionId);
-  return { extracted, embedded, textExtracted: Boolean(extractedText), kitFilled, remainingBlanks };
+  return { extracted, embedded, textExtracted: Boolean(extractedText), kitFilled, remainingBlanks, fieldsWritten };
 }

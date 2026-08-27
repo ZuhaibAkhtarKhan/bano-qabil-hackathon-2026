@@ -1,6 +1,6 @@
-/** Wrap untrusted webpage content so models treat it as data, not instructions. */
+/** Wrap untrusted document content so models treat it as data, not instructions. */
 export function wrapUntrustedDocumentContent(text: string, label?: string): string {
-  const trimmed = text.trim().slice(0, 24_000);
+  const trimmed = text.trim();
   const header = label ? `Document label (reference only): ${label}\n\n` : "";
   return `${header}<untrusted_document_content>\n${trimmed}\n</untrusted_document_content>`;
 }

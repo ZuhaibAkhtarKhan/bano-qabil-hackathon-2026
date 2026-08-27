@@ -11,6 +11,7 @@ import { createDocumentWithVersion } from "@/server/documents/service";
 import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 import { redirectWith } from "@/server/http/flash";
+import { rethrowNavigationError } from "@/server/http/navigation-errors";
 import { recordAuditEvent } from "@/server/audit";
 import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
 
@@ -45,8 +46,9 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
     const category = categoryFromFormData(formData);
     if (!category) redirectWith(DOCUMENTS, { error: "required" });
 
+    let result;
     try {
-      const result = await ingestCategorizedResume({
+      result = await ingestCategorizedResume({
         supabase,
         actor,
         userId: user.id,
@@ -56,15 +58,16 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
         source: "onboarding",
         fillKit: useInKit,
       });
-      if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
-      revalidatePath("/app/onboarding");
-      revalidatePath("/app/memory");
-      revalidatePath("/app/documents");
-      revalidatePath("/app/resumes");
-      redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
-    } catch {
+    } catch (error) {
+      rethrowNavigationError(error);
       redirectWith(DOCUMENTS, { error: "upload" });
     }
+    if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+    revalidatePath("/app/onboarding");
+    revalidatePath("/app/memory");
+    revalidatePath("/app/documents");
+    revalidatePath("/app/resumes");
+    redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
     return;
   }
 
@@ -84,7 +87,8 @@ export async function uploadOnboardingKitDocument(formData: FormData) {
     }
     documentId = created.documentId;
     versionId = created.versionId;
-  } catch {
+  } catch (error) {
+    rethrowNavigationError(error);
     redirectWith(DOCUMENTS, { error: "upload" });
   }
 

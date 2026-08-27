@@ -19,6 +19,7 @@ import {
 } from "@/server/documents/service";
 import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { redirectWith } from "@/server/http/flash";
+import { rethrowNavigationError } from "@/server/http/navigation-errors";
 import { recordAuditEvent } from "@/server/audit";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
@@ -57,8 +58,9 @@ export async function uploadDocument(formData: FormData) {
   if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
     const category = categoryFromFormData(formData);
     if (!category) redirectWith(DOCUMENTS, { error: "required" });
+    let result;
     try {
-      const result = await ingestCategorizedResume({
+      result = await ingestCategorizedResume({
         supabase,
         actor,
         userId: user.id,
@@ -68,15 +70,16 @@ export async function uploadDocument(formData: FormData) {
         source: "documents",
         fillKit: useInKit,
       });
-      if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
-      revalidatePath("/app");
-      revalidatePath(DOCUMENTS);
-      revalidatePath("/app/memory");
-      revalidatePath("/app/resumes");
-      redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
-    } catch {
+    } catch (error) {
+      rethrowNavigationError(error);
       redirectWith(DOCUMENTS, { error: "upload" });
     }
+    if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+    revalidatePath("/app");
+    revalidatePath(DOCUMENTS);
+    revalidatePath("/app/memory");
+    revalidatePath("/app/resumes");
+    redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
   }
 
   if (!label) {
@@ -99,7 +102,8 @@ export async function uploadDocument(formData: FormData) {
     }
     documentId = created.documentId;
     versionId = created.versionId;
-  } catch {
+  } catch (error) {
+    rethrowNavigationError(error);
     redirectWith(DOCUMENTS, { error: "upload" });
   }
 
@@ -166,7 +170,8 @@ export async function uploadDocumentVersion(formData: FormData) {
       redirectWith(documentPath(documentId), { notice: "duplicate_file" });
     }
     versionId = created.versionId;
-  } catch {
+  } catch (error) {
+    rethrowNavigationError(error);
     redirectWith(documentPath(documentId), { error: "upload" });
   }
 

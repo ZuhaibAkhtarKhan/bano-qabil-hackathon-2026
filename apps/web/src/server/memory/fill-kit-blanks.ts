@@ -3,8 +3,8 @@ import type { MemoryCategory } from "@1apply/contracts";
 import { MEMORY_SECTIONS, categoryFromKind, memoryFactKey } from "@1apply/domain";
 
 import { kitFillSchema, tryGetAiProvider } from "@/infra/ai/openai";
-import { normalizeDocumentExtractionRaw, normalizeKitFillRaw } from "@/lib/kit-fill-normalize";
-import { logError } from "@/lib/log";
+import { normalizeKitFillRaw } from "@/lib/kit-fill-normalize";
+import { logError, logInfo } from "@/lib/log";
 import { wrapUntrustedDocumentContent } from "@/lib/opportunities/untrusted";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { extractFromDocumentText } from "@/server/memory/extract-from-document";
@@ -26,10 +26,25 @@ const EVIDENCE_SECTIONS: MemoryCategory[] = [
   "supporting",
 ];
 
-const MAX_FILL_PASSES = 100;
-/** Stop early when the model keeps returning nothing useful for this many calls in a row. */
-const MAX_CONSECUTIVE_NO_PROGRESS = 8;
-const PASS_DELAY_MS = 400;
+const MAX_FILL_PASSES = 6;
+const MAX_CONSECUTIVE_NO_PROGRESS = 3;
+const PASS_DELAY_MS = 250;
+
+/** Always ask the model to scan every kit category from this document. */
+const FULL_KIT_SCAN_BLANKS: KitBlankDescriptor[] = [
+  {
+    id: "scan:personal",
+    section: "personal",
+    label: "Personal profile (name, university, education, headline, phone, location, availability, work authorization, timezone, links)",
+  },
+  { id: "scan:skills", section: "skills", label: "Skills list" },
+  ...EVIDENCE_SECTIONS.map((section) => ({
+    id: `scan:${section}`,
+    section,
+    label: `${MEMORY_SECTIONS.find((item) => item.id === section)?.label ?? section} entries`,
+  })),
+  { id: "scan:links", section: "links", label: "LinkedIn, GitHub, and portfolio links" },
+];
 
 export type KitBlankDescriptor = {
   id: string;
@@ -37,12 +52,27 @@ export type KitBlankDescriptor = {
   label: string;
 };
 
+export type KitFillWriteStats = {
+  filled: boolean;
+  blankCount: number;
+  passes: number;
+  fieldsWritten: number;
+};
+
 function isBlank(value: string | null | undefined): boolean {
   return !String(value ?? "").trim();
 }
 
 function categoryHasSubstantiveEvidence(
-  evidence: Array<{ kind: string; source: string | null; organization: string | null; title: string | null; situation: string | null; action: string | null; outcome: string | null }>,
+  evidence: Array<{
+    kind: string;
+    source: string | null;
+    organization: string | null;
+    title: string | null;
+    situation: string | null;
+    action: string | null;
+    outcome: string | null;
+  }>,
   section: MemoryCategory,
 ): boolean {
   return evidence.some((row) => {
@@ -54,6 +84,7 @@ function categoryHasSubstantiveEvidence(
       situation: row.situation,
       action: row.action,
       outcome: row.outcome,
+      excerpt: null,
     });
   });
 }
@@ -64,14 +95,12 @@ export async function loadUserDocumentCorpus(supabase: SupabaseClient, userId: s
     .select("content, chunk_index, document_version_id")
     .eq("user_id", userId)
     .order("document_version_id", { ascending: true })
-    .order("chunk_index", { ascending: true })
-    .limit(200);
+    .order("chunk_index", { ascending: true });
 
-  const joined = (chunks ?? [])
+  return (chunks ?? [])
     .map((row) => String(row.content ?? "").trim())
     .filter(Boolean)
     .join("\n\n");
-  return joined.slice(0, 72_000);
 }
 
 export async function detectKitBlanks(
@@ -150,44 +179,42 @@ export async function detectKitBlanks(
 }
 
 function buildFillInstruction(blanks: KitBlankDescriptor[]): string {
-  const lines = blanks.map((blank) => `- ${blank.label} (${blank.section})`);
-  const focus =
-    blanks.length === 1
-      ? `Focus on this ONE blank field only: ${blanks[0].label} (${blanks[0].section}).`
-      : "Fill ONLY the blank kit fields listed below.";
+  const lines = blanks.map((blank) => `- ${blank.label} [${blank.section}]`);
   return [
-    `${focus} Use facts explicitly stated in the uploaded document text.`,
-    "Return JSON matching the schema. Include every field you can support from the document; omit keys you cannot support.",
-    "Never invent employers, dates, credentials, or contact details.",
-    "Personal profile mapping:",
-    "- Resume name → displayName; degree line → educationSummary; school → university",
-    "- Job title / headline → headline; phone, city, country from contact block",
-    "- CNIC / B-form / national ID → nationalId plus name, phone, city, country when present",
-    "Section mapping for evidence items:",
-    "- education, employment→experience, project→projects, achievement→achievements",
-    "- certification→certifications, leadership, research, volunteering→supporting",
-    "Each evidence item needs a meaningful title and organization when the document provides them.",
-    "Do not return section headers (e.g. 'EDUCATION') as evidence titles.",
-    'Return JSON only. "skills" must be a string array. "evidence" and "links" must be arrays, not objects.',
+    "You are filling the applicant's Your kit from uploaded document text.",
+    "Read the ENTIRE document. Decide which empty kit fields below can be filled and map each fact to the correct category.",
     "",
-    "Blank fields to fill:",
+    "Be CONFIDENT: when the document clearly contains or strongly implies a value, include it.",
+    "Use reasonable inference from context:",
+    "- Name from header, CNIC, or signature block → displayName",
+    "- Degree line → educationSummary; school/university name → university",
+    "- Current or most recent role → headline",
+    "- Phone, city, country from contact block, CNIC, or letterhead",
+    "- Country/city → timezone (e.g. Pakistan → Asia/Karachi, UAE → Asia/Dubai)",
+    "- Nationality or work-eligibility cues → workAuthorization when stated or clearly implied",
+    "- Open-to-work / immediate availability language → availability",
+    "- Skills section plus tools and languages mentioned in jobs and projects → skills array",
+    "- URLs and handles → links (linkedin, github, portfolio)",
+    "",
+    "Evidence kinds and kit sections (you choose the best fit per entry):",
+    "- education → Education; employment → Experience; project → Projects",
+    "- achievement → Achievements; certification → Certifications",
+    "- leadership → Leadership; research → Research; volunteering → Supporting Evidence",
+    "",
+    "For each evidence item: title = role/degree/project name; organization = employer or school;",
+    "situation/action/outcome from resume bullets; startDate/endDate as YYYY-MM-DD when possible",
+    "(use null for Present/Current/ongoing — never the word Present).",
+    "Extract EVERY education, job, project, achievement, certification, leadership, and research entry present.",
+    "Never use bare headers like EDUCATION as titles.",
+    "",
+    'Return JSON only: { profile?, skills?, evidence?, links? }.',
+    '"skills" must be a string array. "evidence" and "links" must be arrays, not objects.',
+    "Fill every listed blank the document supports. Omit only when there is truly no signal.",
+    "Do not fabricate employers, credentials, or contact details that are nowhere in the text.",
+    "",
+    "Kit fields / categories to fill:",
     ...lines,
   ].join("\n");
-}
-
-function buildDocumentContext(input: {
-  uploadedText: string;
-  documentLabel: string;
-  corpus: string;
-}): string {
-  const primary = wrapUntrustedDocumentContent(input.uploadedText.slice(0, 48_000), input.documentLabel);
-  const corpus = input.corpus.trim();
-  if (!corpus || corpus === input.uploadedText.trim()) return primary;
-  return [
-    primary,
-    "",
-    wrapUntrustedDocumentContent(corpus.slice(0, 24_000), "Other uploaded kit documents"),
-  ].join("\n\n");
 }
 
 async function applyKitFillResult(input: {
@@ -196,7 +223,7 @@ async function applyKitFillResult(input: {
   data: ReturnType<typeof kitFillSchema.parse>;
   sourceDocumentId?: string;
   sourceVersionId?: string;
-}): Promise<boolean> {
+}): Promise<number> {
   const { data: profileRow } = await input.supabase
     .from("profiles")
     .select(
@@ -208,14 +235,18 @@ async function applyKitFillResult(input: {
   const prefs = parseWorkspacePreferences((profileRow?.preferences as Record<string, unknown> | null) ?? {});
   const profilePatch: Record<string, string | null> = {};
   const nextPrefs = { ...prefs };
-  let changed = false;
+  let fieldsWritten = 0;
 
   const p = input.data.profile ?? {};
-  if (isBlank(profileRow?.display_name) && p.displayName?.trim()) profilePatch.display_name = p.displayName.trim();
+  if (isBlank(profileRow?.display_name) && p.displayName?.trim()) {
+    profilePatch.display_name = p.displayName.trim();
+  }
   if (isBlank(profileRow?.headline) && p.headline?.trim()) profilePatch.headline = p.headline.trim();
   if (isBlank(profileRow?.phone) && p.phone?.trim()) profilePatch.phone = p.phone.trim();
   if (isBlank(profileRow?.location_city) && p.locationCity?.trim()) profilePatch.location_city = p.locationCity.trim();
-  if (isBlank(profileRow?.location_country) && p.locationCountry?.trim()) profilePatch.location_country = p.locationCountry.trim();
+  if (isBlank(profileRow?.location_country) && p.locationCountry?.trim()) {
+    profilePatch.location_country = p.locationCountry.trim();
+  }
   if (isBlank(profileRow?.availability) && p.availability?.trim()) profilePatch.availability = p.availability.trim();
   if (isBlank(profileRow?.work_authorization) && p.workAuthorization?.trim()) {
     profilePatch.work_authorization = p.workAuthorization.trim();
@@ -229,19 +260,21 @@ async function applyKitFillResult(input: {
     nextPrefs.educationSummary = p.educationSummary.trim();
   }
 
-  if (
-    Object.keys(profilePatch).length > 0 ||
-    nextPrefs.university !== prefs.university ||
-    nextPrefs.educationSummary !== prefs.educationSummary
-  ) {
-    await input.supabase
+  const prefsChanged =
+    nextPrefs.university !== prefs.university || nextPrefs.educationSummary !== prefs.educationSummary;
+  if (Object.keys(profilePatch).length > 0 || prefsChanged) {
+    const { error } = await input.supabase
       .from("profiles")
       .update({
         ...profilePatch,
         preferences: nextPrefs,
       })
       .eq("id", input.userId);
-    changed = true;
+    if (error) {
+      logError("memory.kit_fill_profile_update_failed", { message: error.message });
+    } else {
+      fieldsWritten += Object.keys(profilePatch).length + (prefsChanged ? 1 : 0);
+    }
   }
 
   if (p.nationalId?.trim() && input.sourceDocumentId && input.sourceVersionId) {
@@ -253,7 +286,7 @@ async function applyKitFillResult(input: {
       .eq("fact_key", factKey)
       .maybeSingle();
     if (!existing) {
-      await input.supabase.from("profile_facts").insert({
+      const { error } = await input.supabase.from("profile_facts").insert({
         user_id: input.userId,
         category: "personal",
         fact_type: "national_id",
@@ -265,11 +298,20 @@ async function applyKitFillResult(input: {
         extraction_status: "extracted",
         verification_status: "verified",
       });
-      changed = true;
+      if (error) {
+        logError("memory.kit_fill_national_id_failed", { message: error.message });
+      } else {
+        fieldsWritten += 1;
+      }
     }
   }
 
-  const substantiveEvidence = (input.data.evidence ?? []).filter((item) => isSubstantiveExtractedEvidence(item));
+  const substantiveEvidence = (input.data.evidence ?? []).filter((item) =>
+    isSubstantiveExtractedEvidence({
+      ...item,
+      situation: item.situation ?? item.excerpt ?? null,
+    }),
+  );
 
   if (
     input.sourceDocumentId &&
@@ -277,6 +319,7 @@ async function applyKitFillResult(input: {
     (substantiveEvidence.length > 0 || (input.data.skills?.length ?? 0) > 0 || (input.data.links?.length ?? 0) > 0)
   ) {
     const existing = await loadConflictCandidates(input.supabase, input.userId);
+    const existingKeys = new Set(existing.map((row) => row.factKey));
     const plan = planDocumentExtraction(
       {
         displayName: p.displayName ?? null,
@@ -291,22 +334,24 @@ async function applyKitFillResult(input: {
       existing,
     );
 
-    if (plan.evidence.length > 0 || plan.skills.length > 0 || plan.links.length > 0) {
-      await persistDocumentExtraction(input.supabase, {
+    const newEvidence = plan.evidence.filter((item) => !existingKeys.has(item.factKey));
+    if (newEvidence.length > 0 || plan.skills.length > 0 || plan.links.length > 0) {
+      const persisted = await persistDocumentExtraction(input.supabase, {
         userId: input.userId,
         documentId: input.sourceDocumentId,
         versionId: input.sourceVersionId,
         documentLabel: "Kit auto-fill",
-        evidence: plan.evidence,
+        evidence: newEvidence,
         facts: [],
         skills: plan.skills,
         links: plan.links,
       });
-      changed = true;
+      fieldsWritten +=
+        persisted.insertedEvidenceIds.length + plan.skills.length + plan.links.length;
     }
   }
 
-  return changed;
+  return fieldsWritten;
 }
 
 async function runKitFillPass(input: {
@@ -315,29 +360,37 @@ async function runKitFillPass(input: {
   blanks: KitBlankDescriptor[];
   uploadedText: string;
   documentLabel: string;
-  corpus: string;
   sourceDocumentId?: string;
   sourceVersionId?: string;
-}): Promise<boolean> {
+}): Promise<number> {
   const provider = tryGetAiProvider();
-  if (!provider) return false;
+  if (!provider) {
+    logError("memory.kit_fill_no_ai_provider", { userId: input.userId });
+    return 0;
+  }
 
   const raw = await provider.completeStructured({
     schemaName: "kitFill",
     instruction: buildFillInstruction(input.blanks),
-    untrustedData: buildDocumentContext({
-      uploadedText: input.uploadedText,
-      documentLabel: input.documentLabel,
-      corpus: input.corpus,
-    }),
+    // Full extracted text only — never truncate, never pad with other-doc corpus.
+    untrustedData: wrapUntrustedDocumentContent(input.uploadedText, input.documentLabel),
   });
   const parsed = kitFillSchema.safeParse(normalizeKitFillRaw(raw));
   if (!parsed.success) {
     logError("memory.kit_fill_parse_failed", {
-      issues: parsed.error.issues.slice(0, 5).map((issue) => issue.message),
+      issues: parsed.error.issues.slice(0, 8).map((issue) => `${issue.path.join(".")}: ${issue.message}`),
     });
-    return false;
+    return 0;
   }
+
+  const profileKeys = Object.values(parsed.data.profile ?? {}).filter((value) => String(value ?? "").trim()).length;
+  logInfo("memory.kit_fill_llm_ok", {
+    userId: input.userId,
+    profileFields: profileKeys,
+    skills: parsed.data.skills?.length ?? 0,
+    evidence: parsed.data.evidence?.length ?? 0,
+    links: parsed.data.links?.length ?? 0,
+  });
 
   return applyKitFillResult({
     supabase: input.supabase,
@@ -348,7 +401,7 @@ async function runKitFillPass(input: {
   });
 }
 
-/** Fill every remaining kit blank from the uploaded document, re-running the LLM until blanks are exhausted. */
+/** Fill kit blanks from this document's extracted text (full text, no corpus). */
 export async function fillKitBlanksFromUploadedDocument(input: {
   supabase: SupabaseClient;
   userId: string;
@@ -357,36 +410,41 @@ export async function fillKitBlanksFromUploadedDocument(input: {
   sourceDocumentId: string;
   sourceVersionId: string;
   maxPasses?: number;
-}): Promise<{ filled: boolean; blankCount: number; passes: number }> {
+  /** When true, always run a full-category scan even if heuristics report no blanks. */
+  forceFullScan?: boolean;
+}): Promise<KitFillWriteStats> {
   const uploadedText = input.extractedText.trim();
   if (!uploadedText) {
-    return { filled: false, blankCount: 0, passes: 0 };
+    return { filled: false, blankCount: 0, passes: 0, fieldsWritten: 0 };
   }
 
   let passes = 0;
-  let anyFilled = false;
+  let fieldsWritten = 0;
   let noProgressStreak = 0;
   const maxPasses = input.maxPasses ?? MAX_FILL_PASSES;
 
   while (passes < maxPasses) {
-    const { blanks, corpus } = await detectKitBlanks(input.supabase, input.userId);
+    let { blanks } = await detectKitBlanks(input.supabase, input.userId);
+
+    if (input.forceFullScan && passes === 0) {
+      blanks = FULL_KIT_SCAN_BLANKS;
+    } else if (blanks.length === 0 && passes === 0) {
+      blanks = FULL_KIT_SCAN_BLANKS;
+    }
     if (blanks.length === 0) break;
 
-    const targetBlanks = [blanks[passes % blanks.length]];
-
     try {
-      const changed = await runKitFillPass({
+      const written = await runKitFillPass({
         supabase: input.supabase,
         userId: input.userId,
-        blanks: targetBlanks,
+        blanks,
         uploadedText,
         documentLabel: input.documentLabel,
-        corpus,
         sourceDocumentId: input.sourceDocumentId,
         sourceVersionId: input.sourceVersionId,
       });
-      if (changed) {
-        anyFilled = true;
+      if (written > 0) {
+        fieldsWritten += written;
         noProgressStreak = 0;
       } else {
         noProgressStreak += 1;
@@ -399,7 +457,7 @@ export async function fillKitBlanksFromUploadedDocument(input: {
         message,
       });
       noProgressStreak += 1;
-      if (!anyFilled && noProgressStreak >= MAX_CONSECUTIVE_NO_PROGRESS) break;
+      if (fieldsWritten === 0 && noProgressStreak >= MAX_CONSECUTIVE_NO_PROGRESS) break;
     }
 
     passes += 1;
@@ -416,7 +474,12 @@ export async function fillKitBlanksFromUploadedDocument(input: {
   await syncMemoryConflicts(input.supabase, input.userId);
 
   const { blanks: finalBlanks } = await detectKitBlanks(input.supabase, input.userId);
-  return { filled: anyFilled, blankCount: finalBlanks.length, passes };
+  return {
+    filled: fieldsWritten > 0,
+    blankCount: finalBlanks.length,
+    passes,
+    fieldsWritten,
+  };
 }
 
 export async function fillKitBlanksFromCorpus(input: {
@@ -428,11 +491,6 @@ export async function fillKitBlanksFromCorpus(input: {
   extractedText?: string;
   documentLabel?: string;
 }): Promise<{ filled: boolean; blankCount: number }> {
-  const { blanks, corpus } = await detectKitBlanks(input.supabase, input.userId);
-  if (blanks.length === 0 || !corpus.trim()) {
-    return { filled: false, blankCount: blanks.length };
-  }
-
   if (input.extractedText?.trim() && input.sourceDocumentId && input.sourceVersionId) {
     return fillKitBlanksFromUploadedDocument({
       supabase: input.supabase,
@@ -441,22 +499,27 @@ export async function fillKitBlanksFromCorpus(input: {
       documentLabel: input.documentLabel ?? "Uploaded document",
       sourceDocumentId: input.sourceDocumentId,
       sourceVersionId: input.sourceVersionId,
+      forceFullScan: true,
     });
   }
 
+  const { blanks, corpus } = await detectKitBlanks(input.supabase, input.userId);
+  if (blanks.length === 0 || !corpus.trim()) {
+    return { filled: false, blankCount: blanks.length };
+  }
+
   try {
-    const changed = await runKitFillPass({
+    const written = await runKitFillPass({
       supabase: input.supabase,
       userId: input.userId,
       blanks,
       uploadedText: corpus,
       documentLabel: "All uploaded kit documents",
-      corpus: "",
       sourceDocumentId: input.sourceDocumentId,
       sourceVersionId: input.sourceVersionId,
     });
     await syncMemoryConflicts(input.supabase, input.userId);
-    return { filled: changed, blankCount: blanks.length };
+    return { filled: written > 0, blankCount: blanks.length };
   } catch (error) {
     logError("memory.kit_fill_failed", {
       userId: input.userId,
@@ -466,7 +529,10 @@ export async function fillKitBlanksFromCorpus(input: {
   }
 }
 
-/** Fill kit blanks from the uploaded document text, then fall back to legacy extraction if needed. */
+/**
+ * After text extraction: force a full-kit LLM fill from this document, then legacy extract, then mop-up.
+ * Notifications must use fieldsWritten from THIS run — not pre-existing kit content.
+ */
 export async function extractAndFillKitFromDocument(input: {
   supabase: SupabaseClient;
   userId: string;
@@ -476,36 +542,70 @@ export async function extractAndFillKitFromDocument(input: {
   extractedText: string;
   profileDisplayName: string | null;
 }) {
-  const fill = await fillKitBlanksFromUploadedDocument({
+  const fillInput = {
     supabase: input.supabase,
     userId: input.userId,
     extractedText: input.extractedText,
     documentLabel: input.documentLabel,
     sourceDocumentId: input.documentId,
     sourceVersionId: input.versionId,
-  });
+  };
 
-  if (fill.filled) {
-    return { extracted: true as const, conflictCount: 0, fillPasses: fill.passes, remainingBlanks: fill.blankCount };
-  }
-
-  const extracted = await extractFromDocumentText(input);
-  if (extracted.extracted) {
-    return extracted;
-  }
-
-  const retry = await fillKitBlanksFromUploadedDocument({
-    supabase: input.supabase,
+  logInfo("memory.kit_fill_start", {
     userId: input.userId,
-    extractedText: input.extractedText,
-    documentLabel: input.documentLabel,
-    sourceDocumentId: input.documentId,
-    sourceVersionId: input.versionId,
+    versionId: input.versionId,
+    textChars: input.extractedText.trim().length,
   });
+
+  // Pass 1: always scan every kit category from this document's full text.
+  const primary = await fillKitBlanksFromUploadedDocument({
+    ...fillInput,
+    forceFullScan: true,
+    maxPasses: 3,
+  });
+
+  let legacyFieldsWritten = 0;
+  let conflictCount = 0;
+  try {
+    const legacy = await extractFromDocumentText(input);
+    legacyFieldsWritten = "fieldsWritten" in legacy ? Number(legacy.fieldsWritten ?? 0) : 0;
+    conflictCount = "conflictCount" in legacy ? Number(legacy.conflictCount ?? 0) : 0;
+  } catch (error) {
+    logError("memory.extract_ai_failed", {
+      versionId: input.versionId,
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  }
+
+  // Pass 2: mop up any blanks still empty after primary + legacy.
+  const mopUp = await fillKitBlanksFromUploadedDocument({
+    ...fillInput,
+    forceFullScan: false,
+    maxPasses: 3,
+  });
+
+  await syncMemoryConflicts(input.supabase, input.userId);
+
+  const fieldsWritten = primary.fieldsWritten + mopUp.fieldsWritten + legacyFieldsWritten;
+  const kitFilled = fieldsWritten > 0;
+  const remainingBlanks = mopUp.blankCount;
+
+  logInfo("memory.kit_fill_done", {
+    userId: input.userId,
+    versionId: input.versionId,
+    fieldsWritten,
+    primaryWritten: primary.fieldsWritten,
+    mopUpWritten: mopUp.fieldsWritten,
+    legacyFieldsWritten,
+    remainingBlanks,
+    passes: primary.passes + mopUp.passes,
+  });
+
   return {
-    extracted: retry.filled,
-    conflictCount: 0,
-    fillPasses: retry.passes,
-    remainingBlanks: retry.blankCount,
+    extracted: kitFilled,
+    conflictCount,
+    fillPasses: primary.passes + mopUp.passes,
+    remainingBlanks,
+    fieldsWritten,
   };
 }
