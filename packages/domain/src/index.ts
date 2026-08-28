@@ -46,6 +46,12 @@ export {
   type CategorizedResume,
 } from "./resume-auto-select";
 
+export {
+  computeResumeKeywordGaps,
+  type ResumeKeywordGap,
+  type ResumeKeywordGapResult,
+} from "./resume-keyword-gaps";
+
 export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
 
 export {

@@ -151,36 +151,57 @@ function parseRateLimitWaitMs(detail: string, attempt: number): number {
   return Math.min(30_000, (attempt + 1) * 5_000);
 }
 
-/** Prefer Gemini (OPENAI_* env) when configured; Groq is fallback only. */
-function resolveChatProvider(config: ReturnType<typeof loadAppConfig>): {
+const HEAVY_SCHEMAS = new Set(["documentExtraction", "opportunityExtraction", "kitFill"]);
+
+function geminiChatProvider(config: ReturnType<typeof loadAppConfig>) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new AiNotConfiguredError();
+  return {
+    apiKey,
+    baseUrl: config.openaiBaseUrl,
+    model: config.openaiModel,
+    timeoutMs: 120_000,
+    provider: "openai" as const,
+  };
+}
+
+function groqChatProvider(config: ReturnType<typeof loadAppConfig>) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new AiNotConfiguredError();
+  return {
+    apiKey,
+    baseUrl: "https://api.groq.com/openai/v1",
+    model: config.groqModel,
+    timeoutMs: 25_000,
+    provider: "groq" as const,
+  };
+}
+
+/** Groq-first for real-time demos; Gemini for heavy extraction when configured. */
+export function resolveChatProvider(
+  config: ReturnType<typeof loadAppConfig>,
+  schemaName?: string,
+): {
   apiKey: string;
   baseUrl: string;
   model: string;
   timeoutMs: number;
   provider: "openai" | "groq";
 } {
-  if (config.openaiConfigured) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new AiNotConfiguredError();
-    return {
-      apiKey,
-      baseUrl: config.openaiBaseUrl,
-      model: config.openaiModel,
-      timeoutMs: 120_000,
-      provider: "openai",
-    };
+  const mode = config.aiChatProvider;
+  const heavy = schemaName ? HEAVY_SCHEMAS.has(schemaName) : false;
+
+  if (mode === "groq" && config.groqConfigured) return groqChatProvider(config);
+  if (mode === "gemini" && config.openaiConfigured) return geminiChatProvider(config);
+
+  if (mode === "auto") {
+    if (heavy && config.openaiConfigured) return geminiChatProvider(config);
+    if (config.groqConfigured) return groqChatProvider(config);
+    if (config.openaiConfigured) return geminiChatProvider(config);
   }
-  if (config.groqConfigured) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new AiNotConfiguredError();
-    return {
-      apiKey,
-      baseUrl: "https://api.groq.com/openai/v1",
-      model: config.groqModel,
-      timeoutMs: 20_000,
-      provider: "groq",
-    };
-  }
+
+  if (config.groqConfigured) return groqChatProvider(config);
+  if (config.openaiConfigured) return geminiChatProvider(config);
   throw new AiNotConfiguredError();
 }
 
@@ -289,7 +310,7 @@ class OpenAiCompatibleProvider implements AiProvider {
   ): Promise<unknown> {
     const config = loadAppConfig();
     if (!config.aiConfigured) throw new AiNotConfiguredError();
-    const resolved = resolveChatProvider(config);
+    const resolved = resolveChatProvider(config, schemaName);
     const response = await fetch(`${resolved.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {

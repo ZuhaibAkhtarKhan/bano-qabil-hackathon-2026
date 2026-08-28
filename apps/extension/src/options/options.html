@@ -15,11 +15,16 @@
     </div>
     <h1>Extension options</h1>
     <p class="muted">
-      Talks to <code>http://localhost:3000</code> (hardcoded for local dev). Sign in to 1-Apply in this browser, then
-      connect. The extension uses that session for save, scan, and fill — never submit, sign, pay, or CAPTCHA bypass.
+      Point the extension at your 1-Apply deployment, sign in in this browser, then connect. The extension uses that
+      session for save, scan, and fill — never submit, sign, pay, or CAPTCHA bypass.
     </p>
-    <div class="row">
-      <button id="connect" type="button">Connect with website session</button>
+    <div class="row" style="flex-direction: column; align-items: stretch; gap: 0.5rem;">
+      <label for="app-url" class="muted">1-Apply URL</label>
+      <input id="app-url" type="url" placeholder="http://localhost:3000" style="padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #ddd;" />
+      <div class="row">
+        <button id="save-url" type="button">Save URL</button>
+        <button id="connect" type="button">Connect with website session</button>
+      </div>
     </div>
     <p id="log" class="log"></p>
     <script src="options.js" type="module"></script>
