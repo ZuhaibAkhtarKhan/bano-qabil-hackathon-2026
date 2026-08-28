@@ -11,6 +11,14 @@ export const FLASH = {
   binary_stored:
     "File stored, but no extractable text was found (encrypted PDF, scan-only, or unsupported encoding). Add evidence from it yourself.",
   duplicate_file: "That file is already in your vault.",
+  kit_updated: "Your kit was updated from this document. Review Personal and Skills to confirm.",
+  kit_updated_partial:
+    "Your kit was partially updated. Some fields could not be matched automatically — review the remaining blanks.",
+  kit_fill_failed:
+    "Text was extracted, but Your kit could not be auto-filled. Check your AI settings or fill fields manually.",
+  stored_only: "Document stored for applications. Your kit was not changed.",
+  document_processing:
+    "File uploaded. Text extraction and Your kit update are running in the background — we'll notify you when done.",
   opportunity_created: "Opportunity saved. Review the structured analysis before applying.",
   analyzing: "Opportunity fetched. Structured analysis is running — review the detail page.",
   duplicate_opportunity: "This website is already added. Opening the existing opportunity.",
@@ -30,6 +38,9 @@ export const FLASH = {
   already_submitted: "This application already has a frozen snapshot.",
   status_updated: "Application status updated.",
   deleted: "Removed from Application Memory.",
+  application_deleted: "Application and its saved posting were removed.",
+  document_deleted: "Document deleted. Extracted memory from that file was removed too.",
+  version_deleted: "Version removed from your vault.",
   conflict_resolved: "Conflict resolved. The chosen value is verified; other sources were rejected.",
   conflict_detected: "New facts were extracted. Review conflicts before verifying.",
   version_selected: "Selected version is now the latest for this document.",

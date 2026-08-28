@@ -1,7 +1,7 @@
 import { acceptConsent } from "@/app/app/actions";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 
 export default async function OnboardingConsentPage({
   searchParams,
@@ -43,7 +43,7 @@ export default async function OnboardingConsentPage({
             {message}
           </p>
         ) : null}
-        <Button type="submit">Continue</Button>
+        <SubmitButton>Continue</SubmitButton>
       </form>
     </OnboardingShell>
   );

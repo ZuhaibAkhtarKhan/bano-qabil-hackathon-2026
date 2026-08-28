@@ -12,8 +12,10 @@ import {
 
 import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
+import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { syncDeadlineReminders } from "@/server/applications/reminders";
+import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import type { PendingPacket } from "@/lib/dashboard";
 import {
@@ -233,11 +235,13 @@ export async function loadWorkspaceGuide() {
     return { dismissed: true as const, steps: [], next: null };
   }
 
-  const [{ data: kitDocuments }, { count: opportunityCount }, { count: applicationCount }] = await Promise.all([
-    supabase.from("documents").select("type, label").eq("user_id", profile.id),
-    supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
-    supabase.from("applications").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
-  ]);
+  const [{ data: kitDocuments }, { count: opportunityCount }, { count: applicationCount }, needsYouCounts] =
+    await Promise.all([
+      supabase.from("documents").select("type, label").eq("user_id", profile.id),
+      supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+      supabase.from("applications").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+      loadNeedsYouFieldCounts(),
+    ]);
 
   const kit = kitStatus({
     displayName: profile.display_name,
@@ -249,7 +253,7 @@ export async function loadWorkspaceGuide() {
     kitMissing: kit.missing,
     opportunityCount: opportunityCount ?? 0,
     applicationCount: applicationCount ?? 0,
-    needsYouCount: 0,
+    needsYouCount: needsYouCounts.applicationCount,
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
   });
 
@@ -393,15 +397,83 @@ export async function loadApplicationsWorkspace() {
   const { data } = await supabase
     .from("applications")
     .select(
-      "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source_url ), fit_evaluations ( score )",
+      "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source, source_url, canonical_url ), fit_evaluations ( score )",
     )
     .eq("user_id", profile.id)
     .order("updated_at", { ascending: false });
-  return { applications: (data ?? []) as ApplicationListRow[] };
+
+  const applicationRows = (data ?? []) as ApplicationListRow[];
+  const applicationIds = applicationRows.map((row) => row.id);
+  const opportunityIds = [
+    ...new Set(applicationRows.map((row) => row.opportunity_id).filter((id): id is string => Boolean(id))),
+  ];
+  const requiredDocsByOpportunity = new Map<string, string[]>();
+  const attachedLabelsByApplication = new Map<string, string[]>();
+
+  if (applicationIds.length > 0) {
+    const [{ data: requiredDocs }, { data: attachedRows }, { data: userDocuments }] = await Promise.all([
+      opportunityIds.length > 0
+        ? supabase
+            .from("opportunity_documents")
+            .select("opportunity_id, label, required")
+            .eq("user_id", profile.id)
+            .in("opportunity_id", opportunityIds)
+        : Promise.resolve({ data: [] as Array<{ opportunity_id: string; label: string; required: boolean }> }),
+      supabase
+        .from("application_documents")
+        .select("application_id, document_id")
+        .eq("user_id", profile.id)
+        .in("application_id", applicationIds),
+      supabase.from("documents").select("id, label, type").eq("user_id", profile.id),
+    ]);
+
+    for (const row of requiredDocs ?? []) {
+      if (!row.required) continue;
+      const list = requiredDocsByOpportunity.get(String(row.opportunity_id)) ?? [];
+      list.push(String(row.label));
+      requiredDocsByOpportunity.set(String(row.opportunity_id), list);
+    }
+
+    const docMeta = new Map(
+      (userDocuments ?? []).map((doc) => [
+        String(doc.id),
+        { label: String(doc.label ?? ""), type: String(doc.type ?? "") },
+      ]),
+    );
+
+    for (const row of attachedRows ?? []) {
+      const meta = docMeta.get(String(row.document_id));
+      if (!meta) continue;
+      const labels = attachedLabelsByApplication.get(String(row.application_id)) ?? [];
+      labels.push(meta.label || meta.type);
+      if (meta.type === "resume" && !/\bresume\b|\bcv\b/i.test(meta.label)) {
+        labels.push("resume");
+      }
+      attachedLabelsByApplication.set(String(row.application_id), labels);
+    }
+  }
+
+  return {
+    applications: applicationRows.map((row) => ({
+      ...row,
+      requiredDocumentLabels: requiredDocsByOpportunity.get(row.opportunity_id) ?? [],
+      attachedDocumentLabels: attachedLabelsByApplication.get(row.id) ?? [],
+    })),
+  };
 }
 
 export async function loadApplicationWorkspace(applicationId: string) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
+
+  // Auto-pick resume category / AI fallback before rendering submission checklist.
+  try {
+    await ensureApplicationResumeSelection(supabase, actor, applicationId, {
+      autoAttach: true,
+      notifyOnAiPick: true,
+    });
+  } catch {
+    // Non-blocking — workspace still loads if selection fails.
+  }
 
   const { data: application } = await supabase
     .from("applications")

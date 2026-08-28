@@ -62,6 +62,9 @@ export type ResumeCandidate = {
   label: string;
   type: string;
   text?: string | null;
+  /** User remembrance category — matching may use it for auto-selection only, not filtering. */
+  categoryKey?: string | null;
+  categoryLabel?: string | null;
 };
 
 export function eligibleEvidence(items: MemoryEvidence[]): MemoryEvidence[] {

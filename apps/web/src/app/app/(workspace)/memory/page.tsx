@@ -2,7 +2,7 @@ import type { MemoryCategory } from "@1apply/contracts";
 import { memoryCategorySchema } from "@1apply/contracts";
 import Link from "next/link";
 
-import { FlashBanner } from "@/components/app/flash-banner";
+import { UploadFeedback } from "@/components/app/upload-feedback";
 import { MemoryWorkspace } from "@/components/app/memory-workspace";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Notice } from "@/components/ui/feedback";
@@ -32,7 +32,7 @@ export default async function MemoryPage({
       <PageHeader
         eyebrow="Your kit"
         title="Who you are — reused on every posting"
-        body="Confirm name, university, and education. Upload CNIC, B-form, and resume once. Suggestions later are optional. Extra sections below are for details, not a second home."
+        body="Confirm name, university, and education. Upload CNIC/Pharm-B and categorized resumes once — extracted text auto-fills every kit section."
       />
       {remind === "kit" && kit.missing.length > 0 ? (
         <div className="mt-6">
@@ -46,7 +46,7 @@ export default async function MemoryPage({
           </Notice>
         </div>
       ) : null}
-      <FlashBanner notice={notice} error={error} />
+      <UploadFeedback notice={notice} error={error} />
       <MemoryWorkspace data={data} section={section} />
     </WorkspaceMain>
   );

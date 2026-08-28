@@ -6,10 +6,12 @@ import {
   describeFieldLengthLimit,
   detectFieldLengthLimit,
   fillTargetAllowed,
+  findPrimaryStepAdvance,
   inspectPage,
   inventoryFromDocument,
   isProtectedControl,
   isSensitiveField,
+  isStepAdvanceControl,
   type FieldLengthLimit,
 } from "@1apply/form-engine";
 
@@ -45,11 +47,42 @@ const root = globalThis as {
   __1APPLY_FILLING?: boolean;
   __1APPLY_CONTINUE_TIMER?: number | null;
   __1APPLY_CONTINUE_TRIES?: number;
+  __1APPLY_ADVANCE_LOCK?: boolean;
+  __1APPLY_STEPS?: number;
+  /** Hard stop — ignores late APPLY / Next until the user fills again. */
+  __1APPLY_STOPPED?: boolean;
+  __1APPLY_PENDING_TIMERS?: number[];
 };
 if (!root.__1APPLY_LISTENERS) {
   root.__1APPLY_LISTENERS = true;
   root.__1APPLY_CONTINUE_TIMER = null;
   root.__1APPLY_CONTINUE_TRIES = 0;
+  root.__1APPLY_PENDING_TIMERS = [];
+  root.__1APPLY_STOPPED = false;
+
+  function clearPendingTimers() {
+    if (root.__1APPLY_CONTINUE_TIMER) {
+      window.clearTimeout(root.__1APPLY_CONTINUE_TIMER);
+      root.__1APPLY_CONTINUE_TIMER = null;
+    }
+    for (const id of root.__1APPLY_PENDING_TIMERS ?? []) {
+      window.clearTimeout(id);
+    }
+    root.__1APPLY_PENDING_TIMERS = [];
+  }
+
+  function trackTimeout(handler: () => void, delay: number) {
+    const id = window.setTimeout(() => {
+      root.__1APPLY_PENDING_TIMERS = (root.__1APPLY_PENDING_TIMERS ?? []).filter((item) => item !== id);
+      handler();
+    }, delay);
+    root.__1APPLY_PENDING_TIMERS = [...(root.__1APPLY_PENDING_TIMERS ?? []), id];
+    return id;
+  }
+
+  function isFillActive() {
+    return Boolean(root.__1APPLY_AUTO_CONTINUE) && !root.__1APPLY_STOPPED;
+  }
 
   function pageFingerprint(): string {
     const urlKey = `${location.origin}${location.pathname}?${location.search}#${location.hash}`;
@@ -89,18 +122,19 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   function requestAutoContinue(force = false) {
-    if (!root.__1APPLY_AUTO_CONTINUE || root.__1APPLY_FILLING) return;
+    if (!isFillActive() || root.__1APPLY_FILLING) return;
     const fp = pageFingerprint();
     if (!fp) return;
     if (!force && fp === root.__1APPLY_LAST_PAGE_FP) return;
 
     const pendingFp = fp;
     chrome.runtime.sendMessage({ type: "AUTO_CONTINUE_FILL", url: location.href, fingerprint: pendingFp }, (response) => {
+      if (!isFillActive()) return;
       if (chrome.runtime.lastError) {
         // Service worker may be waking — retry without locking the fingerprint.
         root.__1APPLY_CONTINUE_TRIES = (root.__1APPLY_CONTINUE_TRIES ?? 0) + 1;
         if ((root.__1APPLY_CONTINUE_TRIES ?? 0) <= 4) {
-          window.setTimeout(() => requestAutoContinue(true), 700 * (root.__1APPLY_CONTINUE_TRIES ?? 1));
+          trackTimeout(() => requestAutoContinue(true), 700 * (root.__1APPLY_CONTINUE_TRIES ?? 1));
         }
         return;
       }
@@ -113,6 +147,7 @@ if (!root.__1APPLY_LISTENERS) {
         root.__1APPLY_CONTINUE_TRIES = 0;
         const filled = Number((response as { filled?: number }).filled ?? 0);
         showToast(filled ? `1-Apply filled ${filled} field(s) on this step.` : "1-Apply ready on this step.");
+        // Next-page advance is scheduled from APPLY_SUGGESTIONS after this fill completes.
         return;
       }
 
@@ -120,56 +155,79 @@ if (!root.__1APPLY_LISTENERS) {
       if (reason === "no-fields" || reason === "busy" || reason.includes("bad-tab") || reason.includes("Receiving end")) {
         root.__1APPLY_CONTINUE_TRIES = (root.__1APPLY_CONTINUE_TRIES ?? 0) + 1;
         if ((root.__1APPLY_CONTINUE_TRIES ?? 0) <= 6) {
-          window.setTimeout(() => requestAutoContinue(true), 600 + 400 * (root.__1APPLY_CONTINUE_TRIES ?? 1));
+          trackTimeout(() => requestAutoContinue(true), 600 + 400 * (root.__1APPLY_CONTINUE_TRIES ?? 1));
         }
         return;
       }
 
-      // Hard failures (no session / origin mismatch) — stop quietly.
-      if (reason === "no-session" || reason === "origin-mismatch") {
+      // Hard failures (no session / origin mismatch / stopped) — stop quietly.
+      if (reason === "no-session" || reason === "origin-mismatch" || reason === "stopped") {
         root.__1APPLY_AUTO_CONTINUE = false;
+        root.__1APPLY_STOPPED = true;
+        clearPendingTimers();
       }
     });
   }
 
-  function isStepAdvanceControl(el: Element | null): boolean {
-    if (!el) return false;
-    const control = el.closest(
-      'button, a, [role="button"], input[type="button"], input[type="submit"], [data-action], [data-testid], [data-qa]',
-    ) as HTMLElement | null;
-    if (!control) return false;
-    const text = [
-      control.textContent ?? "",
-      control.getAttribute("aria-label") ?? "",
-      control.getAttribute("title") ?? "",
-      control.getAttribute("value") ?? "",
-      control.getAttribute("name") ?? "",
-      control.getAttribute("data-action") ?? "",
-      control.getAttribute("data-testid") ?? "",
-      control.id ?? "",
-      typeof control.className === "string" ? control.className : "",
-    ]
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+  function isStepAdvanceControlLocal(el: Element | null): boolean {
+    return isStepAdvanceControl(el);
+  }
 
-    if (/\b(submit application|submit form|place order|pay now|finalize|confirm payment)\b/i.test(text) && !/\b(next|continue)\b/i.test(text)) {
-      return false;
+  async function tryAutoAdvance(): Promise<{ clicked: boolean; reason?: string }> {
+    if (!isFillActive()) return { clicked: false, reason: "stopped" };
+    if (root.__1APPLY_FILLING) return { clicked: false, reason: "busy" };
+    if (root.__1APPLY_ADVANCE_LOCK) return { clicked: false, reason: "locked" };
+
+    const steps = root.__1APPLY_STEPS ?? 0;
+    if (steps >= 12) {
+      showToast("1-Apply stopped after 12 pages — review and Stop when done.");
+      return { clicked: false, reason: "max-steps" };
     }
 
-    if (
-      /\b(next|continue|proceed|weiter|siguiente|suivant|avanti|próximo|proximo|save\s*(&|and)?\s*continue|continue\s*to|go\s*to\s*step|step\s*\d+|page\s*\d+)\b/i.test(
-        text,
-      )
-    ) {
-      return true;
+    const btn = findPrimaryStepAdvance(document);
+    if (!btn) {
+      showToast("1-Apply finished fillable pages. Missing answers stay in Need You — Stop when done.");
+      return { clicked: false, reason: "no-next" };
     }
 
-    return /\b(btn[-_]?next|step[-_]?next|wizard[-_]?next|continue[-_]?btn|next[-_]?step)\b/i.test(text);
+    root.__1APPLY_ADVANCE_LOCK = true;
+    try {
+      if (!isFillActive()) return { clicked: false, reason: "stopped" };
+      assertFillActionAllowed("clickNext");
+      const before = pageFingerprint();
+      root.__1APPLY_LAST_PAGE_FP = undefined;
+      root.__1APPLY_CONTINUE_TRIES = 0;
+      root.__1APPLY_STEPS = steps + 1;
+
+      btn.scrollIntoView({ block: "center", inline: "nearest" });
+      await sleep(80);
+      if (!isFillActive()) return { clicked: false, reason: "stopped" };
+      btn.click();
+      showToast("1-Apply opened the next page…");
+
+      // Wait for SPA / Google Forms paint; if fingerprint unchanged, host may have blocked Next.
+      await sleep(1400);
+      if (!isFillActive()) return { clicked: false, reason: "stopped" };
+      const after = pageFingerprint();
+      if (after && before && after === before) {
+        // Stay on this step; lock fingerprint so we don't thrash fill → Next.
+        root.__1APPLY_LAST_PAGE_FP = after;
+        showToast("Next page blocked — fill highlighted fields or answer in Need You.");
+        return { clicked: true, reason: "no-change" };
+      }
+
+      trackTimeout(() => requestAutoContinue(true), 400);
+      trackTimeout(() => requestAutoContinue(true), 1600);
+      trackTimeout(() => requestAutoContinue(true), 3200);
+      return { clicked: true };
+    } finally {
+      // Release promptly so the next page’s fill can schedule another advance.
+      root.__1APPLY_ADVANCE_LOCK = false;
+    }
   }
 
   function scheduleAutoContinue(delay = 800, force = false) {
-    if (!root.__1APPLY_AUTO_CONTINUE || root.__1APPLY_FILLING) return;
+    if (!isFillActive() || root.__1APPLY_FILLING) return;
     if (root.__1APPLY_CONTINUE_TIMER) window.clearTimeout(root.__1APPLY_CONTINUE_TIMER);
     root.__1APPLY_CONTINUE_TIMER = window.setTimeout(() => {
       root.__1APPLY_CONTINUE_TIMER = null;
@@ -178,7 +236,10 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   function enableAutoContinueWatch() {
+    if (root.__1APPLY_STOPPED) return;
+    const wasActive = root.__1APPLY_AUTO_CONTINUE;
     root.__1APPLY_AUTO_CONTINUE = true;
+    if (!wasActive) root.__1APPLY_STEPS = 0;
     if (root.__1APPLY_PAGE_WATCH) return;
     root.__1APPLY_PAGE_WATCH = true;
 
@@ -204,13 +265,14 @@ if (!root.__1APPLY_LISTENERS) {
     document.addEventListener(
       "click",
       (event) => {
-        if (isStepAdvanceControl(event.target as Element | null)) {
+        if (!isFillActive()) return;
+        if (isStepAdvanceControlLocal(event.target as Element | null)) {
           // Invalidate current fingerprint so the next step is always attempted.
           root.__1APPLY_LAST_PAGE_FP = undefined;
           root.__1APPLY_CONTINUE_TRIES = 0;
-          window.setTimeout(() => requestAutoContinue(true), 1200);
-          window.setTimeout(() => requestAutoContinue(true), 2500);
-          window.setTimeout(() => requestAutoContinue(true), 4500);
+          trackTimeout(() => requestAutoContinue(true), 1200);
+          trackTimeout(() => requestAutoContinue(true), 2500);
+          trackTimeout(() => requestAutoContinue(true), 4500);
         }
       },
       true,
@@ -219,17 +281,20 @@ if (!root.__1APPLY_LISTENERS) {
     document.addEventListener(
       "submit",
       () => {
+        if (!isFillActive()) return;
         root.__1APPLY_LAST_PAGE_FP = undefined;
-        window.setTimeout(() => requestAutoContinue(true), 1200);
-        window.setTimeout(() => requestAutoContinue(true), 2800);
+        trackTimeout(() => requestAutoContinue(true), 1200);
+        trackTimeout(() => requestAutoContinue(true), 2800);
       },
       true,
     );
     window.addEventListener("popstate", () => {
+      if (!isFillActive()) return;
       root.__1APPLY_LAST_PAGE_FP = undefined;
       scheduleAutoContinue(700, true);
     });
     window.addEventListener("hashchange", () => {
+      if (!isFillActive()) return;
       root.__1APPLY_LAST_PAGE_FP = undefined;
       scheduleAutoContinue(700, true);
     });
@@ -238,8 +303,10 @@ if (!root.__1APPLY_LISTENERS) {
       const original = history[method].bind(history);
       history[method] = ((...args: Parameters<History["pushState"]>) => {
         const result = original(...args);
-        root.__1APPLY_LAST_PAGE_FP = undefined;
-        scheduleAutoContinue(800, true);
+        if (isFillActive()) {
+          root.__1APPLY_LAST_PAGE_FP = undefined;
+          scheduleAutoContinue(800, true);
+        }
         return result;
       }) as History["pushState"];
     };
@@ -248,19 +315,20 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   function disableAutoContinueWatch() {
+    root.__1APPLY_STOPPED = true;
     root.__1APPLY_AUTO_CONTINUE = false;
     root.__1APPLY_LAST_PAGE_FP = undefined;
     root.__1APPLY_CONTINUE_TRIES = 0;
-    if (root.__1APPLY_CONTINUE_TIMER) {
-      window.clearTimeout(root.__1APPLY_CONTINUE_TIMER);
-      root.__1APPLY_CONTINUE_TIMER = null;
-    }
+    root.__1APPLY_STEPS = 0;
+    root.__1APPLY_ADVANCE_LOCK = false;
+    clearPendingTimers();
   }
 
   // If a fill session is already active for this origin, resume watching after reinjection / reload.
   void chrome.storage.local.get(["fillSession"]).then((data) => {
     const session = data.fillSession as { enabled?: boolean; origin?: string } | undefined;
     if (!session?.enabled || session.origin !== location.origin) return;
+    if (root.__1APPLY_STOPPED) return;
     enableAutoContinueWatch();
     scheduleAutoContinue(900, true);
   });
@@ -1255,13 +1323,13 @@ if (!root.__1APPLY_LISTENERS) {
           const results: Array<{ fieldKey: string; filled: boolean; skippedReason?: string; hasAlternates?: boolean }> = [];
           const assisted = new Set<string>();
 
-          for (const mapping of (message.mappings ?? []) as FillPayload[]) {
+      for (const mapping of (message.mappings ?? []) as FillPayload[]) {
             const options = uniqueOptions(mapping.options, mapping.aiAnswerable ? "" : mapping.value);
-            const el = findControl(mapping.fieldKey);
-            if (!el) {
-              results.push({ fieldKey: mapping.fieldKey, filled: false, skippedReason: "Control not found" });
-              continue;
-            }
+        const el = findControl(mapping.fieldKey);
+        if (!el) {
+          results.push({ fieldKey: mapping.fieldKey, filled: false, skippedReason: "Control not found" });
+          continue;
+        }
             if (!fillTargetAllowed(mapping.fieldKey, mapping.type)) {
               results.push({ fieldKey: mapping.fieldKey, filled: false, skippedReason: "Protected control" });
               continue;
@@ -1367,10 +1435,24 @@ if (!root.__1APPLY_LISTENERS) {
             : ((message.mappings ?? []) as FillPayload[]).map((item) => item.fieldKey);
           highlightEmpty(highlightKeys);
 
-          enableAutoContinueWatch();
-          root.__1APPLY_LAST_PAGE_FP = pageFingerprint();
-          root.__1APPLY_CONTINUE_TRIES = 0;
+          // Explicit Fill from the popup clears Stop; auto-continue mid-flight does not.
+          if (message.resumeFill) {
+            root.__1APPLY_STOPPED = false;
+          }
+
           if (message.autoContinue) {
+            if (root.__1APPLY_STOPPED) {
+              sendResponse({
+                type: "FILL_RESULT",
+                filled: results,
+                highlighted: document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length,
+                stopped: true,
+              });
+              return;
+            }
+            enableAutoContinueWatch();
+            root.__1APPLY_LAST_PAGE_FP = pageFingerprint();
+            root.__1APPLY_CONTINUE_TRIES = 0;
             const filledCount = results.filter((item) => item.filled).length;
             showToast(filledCount ? `1-Apply filled ${filledCount} field(s).` : "1-Apply ready — tap 1A for AI questions.");
           }
@@ -1382,6 +1464,12 @@ if (!root.__1APPLY_LISTENERS) {
           });
         } finally {
           root.__1APPLY_FILLING = false;
+        }
+
+        // Multi-page: click Next/Continue (never Submit), then continueFill → Need You pipeline.
+        if (message.autoContinue && isFillActive()) {
+          await sleep(450);
+          if (isFillActive()) await tryAutoAdvance();
         }
       })();
 

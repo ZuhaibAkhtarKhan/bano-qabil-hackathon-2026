@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -34,6 +35,26 @@ export function useRealtime() {
   return useContext(RealtimeContext);
 }
 
+const LIVE_TABLES = [
+  "applications",
+  "jobs",
+  "review_items",
+  "application_answers",
+  "email_events",
+  "calendar_events",
+  "documents",
+  "document_versions",
+  "document_chunks",
+  "field_mappings",
+  "profile_facts",
+  "eligibility_results",
+  "opportunities",
+  "evidence_items",
+  "fit_evaluations",
+  "application_documents",
+  "notifications",
+] as const;
+
 export function RealtimeWorkspaceProvider({
   userId,
   initialUnreadCount = 0,
@@ -47,6 +68,7 @@ export function RealtimeWorkspaceProvider({
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
   const [toasts, setToasts] = useState<RealtimeToastItem[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -65,11 +87,18 @@ export function RealtimeWorkspaceProvider({
 
   const addToast = useCallback((item: RealtimeToastItem) => {
     setToasts((prev) => [item, ...prev.slice(0, 4)]);
-    // Auto dismiss after 7 seconds
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== item.id));
     }, 7000);
   }, []);
+
+  const softRefresh = useCallback(() => {
+    if (refreshTimer.current) return;
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      router.refresh();
+    }, 250);
+  }, [router]);
 
   useEffect(() => {
     let supabase: ReturnType<typeof createBrowserSupabaseClient>;
@@ -88,9 +117,9 @@ export function RealtimeWorkspaceProvider({
         if (typeof count === "number") setUnreadCount(count);
       });
 
-    const channel = supabase.channel(`realtime:workspace:${userId}`);
+    let channel = supabase.channel(`realtime:workspace:${userId}`);
 
-    channel
+    channel = channel
       .on(
         "postgres_changes",
         {
@@ -123,8 +152,7 @@ export function RealtimeWorkspaceProvider({
             createdAt: newRow.created_at,
           });
 
-          // Soft-refresh the server components to reflect live changes
-          router.refresh();
+          softRefresh();
         },
       )
       .on(
@@ -140,48 +168,52 @@ export function RealtimeWorkspaceProvider({
           if (updatedRow.read_at) {
             setUnreadCount((prev) => Math.max(0, prev - 1));
           }
-          router.refresh();
+          softRefresh();
         },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "jobs",
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          router.refresh();
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "applications",
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          router.refresh();
-        },
-      )
-      .subscribe((status) => {
-        setIsRealtimeConnected(status === "SUBSCRIBED");
-      });
+      );
 
-    // Refresh when user returns to the tab to ensure fresh state without periodic lag
+    for (const table of LIVE_TABLES) {
+      for (const event of ["INSERT", "UPDATE", "DELETE"] as const) {
+        channel = channel.on(
+          "postgres_changes",
+          {
+            event,
+            schema: "public",
+            table,
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            softRefresh();
+          },
+        );
+      }
+    }
+
+    channel.subscribe((status) => {
+      setIsRealtimeConnected(status === "SUBSCRIBED");
+    });
+
     const onFocus = () => {
-      router.refresh();
+      softRefresh();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") softRefresh();
     };
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    const fallbackRefresh = window.setInterval(() => {
+      if (!document.hidden) softRefresh();
+    }, 20_000);
 
     return () => {
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearInterval(fallbackRefresh);
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
       void supabase.removeChannel(channel);
     };
-  }, [userId, addToast, router]);
+  }, [userId, addToast, softRefresh]);
 
   const value = useMemo(
     () => ({

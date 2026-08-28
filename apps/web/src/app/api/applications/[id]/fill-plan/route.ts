@@ -8,9 +8,12 @@ import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-c
 import { loadMemoryCatalog } from "@/server/extension/memory-catalog";
 import { enrichAiAnswerableMappings } from "@/server/extension/enrich-ai-answers";
 import { enrichDocumentAttachments } from "@/server/extension/enrich-documents";
+import { enrichJudgmentYesNoMappings } from "@/server/extension/enrich-judgment-yes-no";
 import { enrichYesNoEligibilityMappings } from "@/server/extension/enrich-yes-no";
 import { recordAuditEvent } from "@/server/audit";
 import { markFillStarted } from "@/server/applications/fill-lifecycle";
+import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
+import { persistableFormChoiceOptions } from "@/lib/needs-you-field-kinds";
 
 const fieldSchema = z.object({
   key: z.string(),
@@ -28,9 +31,24 @@ const fieldSchema = z.object({
   signals: z.string().optional(),
 });
 
+const hazardsSchema = z
+  .object({
+    captcha: z.boolean().default(false),
+    captchaVendor: z.string().nullable().optional(),
+    captchaMessage: z.string().nullable().optional(),
+    accountCreation: z.boolean().default(false),
+    accountMessage: z.string().nullable().optional(),
+    unsupported: z.boolean().default(false),
+    unsupportedReason: z.string().nullable().optional(),
+    hasSubmitControl: z.boolean().optional(),
+  })
+  .partial()
+  .default({});
+
 const bodySchema = z.object({
   origin: z.string().url(),
   fields: z.array(fieldSchema).max(80),
+  hazards: hazardsSchema,
 });
 
 const envelope = createApiEnvelopeSchema(
@@ -152,8 +170,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const mapped = mapFields(fields, catalog);
   const withDocs = await enrichDocumentAttachments(session.supabase, session.user.id, mapped);
   const withYesNo = await enrichYesNoEligibilityMappings(session.supabase, session.actor, withDocs);
-  const mappings = await enrichAiAnswerableMappings(session.supabase, session.actor, parsedId.data, withYesNo);
+  const withJudgment = await enrichJudgmentYesNoMappings(session.supabase, session.actor, parsedId.data, withYesNo);
+  const mappings = await enrichAiAnswerableMappings(session.supabase, session.actor, parsedId.data, withJudgment);
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const hazards = {
+    captcha: Boolean(parsed.data.hazards.captcha),
+    captchaVendor: parsed.data.hazards.captchaVendor ?? null,
+    captchaMessage: parsed.data.hazards.captchaMessage ?? null,
+    accountCreation: Boolean(parsed.data.hazards.accountCreation),
+    accountMessage: parsed.data.hazards.accountMessage ?? null,
+    unsupported: Boolean(parsed.data.hazards.unsupported),
+    unsupportedReason: parsed.data.hazards.unsupportedReason ?? null,
+    hasSubmitControl: parsed.data.hazards.hasSubmitControl ?? null,
+  };
 
   const { data: fillSession, error } = await session.supabase
     .from("fill_sessions")
@@ -162,6 +191,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       application_id: parsedId.data,
       origin,
       expires_at: expiresAt,
+      hazards,
     })
     .select("id")
     .single();
@@ -177,19 +207,53 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   if (mappings.length > 0) {
+    const requiredByKey = new Map(parsed.data.fields.map((field) => [field.key, Boolean(field.required)]));
     await session.supabase.from("field_mappings").insert(
-      mappings.map((item) => ({
-        user_id: session.user.id,
-        application_id: parsedId.data,
-        fill_session_id: fillSession.id,
-        field_key: item.fieldKey.slice(0, 180),
-        label: item.label.slice(0, 180),
-        value: item.proposedValue.slice(0, 4000),
-        source: item.source.slice(0, 120),
-        confidence: item.confidence,
-        excluded_by_default: item.excludedByDefault,
-        sensitive: item.sensitive,
-      })),
+      mappings.map((item) => {
+        const hostField = parsed.data.fields.find((field) => field.key === item.fieldKey);
+        const hostOptions = Array.isArray(hostField?.options)
+          ? hostField.options.map((option) => String(option).trim()).filter(Boolean)
+          : [];
+        const mappingOptionValues = item.options.map((option) => option.value).filter(Boolean);
+        const choiceValues = persistableFormChoiceOptions({
+          fieldType: item.fieldType,
+          hostOptions,
+          mappingOptionValues,
+        });
+        const uploadKind =
+          item.fieldType === "file"
+            ? /image|photo|headshot|portrait|profile\s*pic|jpeg|jpg|png|webp/i.test(
+                `${item.label} ${item.memoryPath} ${item.reason}`,
+              )
+              ? "image"
+              : "document"
+            : null;
+        return {
+          user_id: session.user.id,
+          application_id: parsedId.data,
+          fill_session_id: fillSession.id,
+          field_key: item.fieldKey.slice(0, 180),
+          label: item.label.slice(0, 180),
+          value: item.proposedValue.slice(0, 4000),
+          source: item.source.slice(0, 120),
+          confidence: item.confidence,
+          excluded_by_default: item.excludedByDefault,
+          sensitive: item.sensitive,
+          field_type: item.fieldType,
+          options: choiceValues,
+          meta: {
+            required: requiredByKey.get(item.fieldKey) ?? false,
+            ...(uploadKind ? { uploadKind } : {}),
+            ...(item.attachment
+              ? {
+                  documentId: item.attachment.documentId,
+                  versionId: item.attachment.versionId,
+                  filename: item.attachment.filename,
+                }
+              : {}),
+          },
+        };
+      }),
     );
   }
 
@@ -200,6 +264,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   });
 
   await markFillStarted(session.supabase, session.actor, parsedId.data);
+  scheduleRefreshOpenApplicationsFromKit(session.supabase, session.actor);
 
   return withExtensionCors(
     request,
@@ -208,7 +273,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         data: {
           fillSessionId: fillSession.id,
           expiresAt,
-          hazards: { captcha: false },
+          hazards,
           mappings,
         },
         error: null,

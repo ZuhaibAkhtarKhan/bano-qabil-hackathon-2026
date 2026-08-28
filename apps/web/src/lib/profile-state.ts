@@ -19,3 +19,7 @@ export function onboardingComplete(profile: ProfileGateRow | null): boolean {
 export function skippedDocuments(profile: ProfileGateRow | null) {
   return Boolean(profile?.preferences?.onboardingSkippedDocuments);
 }
+
+export function skippedProfile(profile: ProfileGateRow | null) {
+  return Boolean(profile?.preferences?.onboardingSkippedProfile);
+}

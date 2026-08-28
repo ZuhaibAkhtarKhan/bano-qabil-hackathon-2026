@@ -2,9 +2,9 @@ import { ensureOnboardingStep } from "@/lib/onboarding";
 import { loadOnboardingProfileDetails } from "@/lib/profile";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
-import { saveOnboardingProfile } from "@/server/onboarding/actions";
+import { saveOnboardingProfile, skipOnboardingProfile } from "@/server/onboarding/actions";
 
 export default async function OnboardingProfilePage({
   searchParams,
@@ -20,14 +20,14 @@ export default async function OnboardingProfilePage({
     <OnboardingShell
       eyebrow="Onboarding"
       title="Name, university, education"
-      body="Confirm the facts that repeat on every form. Resume extraction can fill the rest — you will review before anything counts as verified."
+      body="Confirm the facts that repeat on every form — or skip and fill them later in Your kit. Resume extraction can fill blanks you leave empty."
       step="profile"
     >
       <form action={saveOnboardingProfile} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
-        <Field label="Full name" htmlFor="displayName" hint="Required to continue.">
+        <Field label="Full name" htmlFor="displayName" hint="Used on every posting. You can fill this later in Your kit.">
           <Input id="displayName" name="displayName" defaultValue={profile?.display_name ?? ""} required />
         </Field>
-        <Field label="University" htmlFor="university" hint="Required. Used on every posting.">
+        <Field label="University" htmlFor="university" hint="Used on every posting.">
           <Input
             id="university"
             name="university"
@@ -36,7 +36,7 @@ export default async function OnboardingProfilePage({
             required
           />
         </Field>
-        <Field label="Education" htmlFor="educationSummary" hint="Required. Degree and year, for example BS Computer Science, 2026.">
+        <Field label="Education" htmlFor="educationSummary" hint="Degree and year, for example BS Computer Science, 2026.">
           <Input
             id="educationSummary"
             name="educationSummary"
@@ -77,18 +77,26 @@ export default async function OnboardingProfilePage({
           <Input id="portfolioUrl" name="portfolioUrl" type="url" defaultValue={profile?.portfolio_url ?? ""} />
         </Field>
         {error === "required" ? (
-          <p className="text-sm text-rose-700" role="alert">
-            Name, university, and education are required before you can continue.
+          <p className="text-sm text-coral-text" role="alert">
+            Name, university, and education are required to continue with this form — or skip for now below.
           </p>
         ) : error === "save" ? (
-          <p className="text-sm text-rose-700" role="alert">
+          <p className="text-sm text-coral-text" role="alert">
             Could not save your profile. Try again.
           </p>
         ) : null}
-        <Button type="submit">Continue to your kit</Button>
+        <div className="flex flex-wrap gap-3">
+          <SubmitButton>Continue to your kit</SubmitButton>
+        </div>
       </form>
+
+      <form action={skipOnboardingProfile} className="mt-4">
+        <SubmitButton variant="ghost">Skip for now — fill later in Your kit</SubmitButton>
+      </form>
+
       <p className="mt-4 text-xs text-ink-muted">
-        Signed in as {state.profile.email}. Education, projects, experience, and skills can be extracted from your resume on the next step.
+        Signed in as {state.profile.email}. Education, projects, experience, and skills can be extracted from your resume
+        on the next step.
       </p>
     </OnboardingShell>
   );

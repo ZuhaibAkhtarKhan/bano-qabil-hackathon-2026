@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 export function Dialog({
@@ -49,9 +49,9 @@ export function Dialog({
           </h2>
           <div className="mt-4">{children}</div>
           <form method="dialog" className="mt-6">
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Close
-            </Button>
+            </SubmitButton>
           </form>
         </div>
       </dialog>

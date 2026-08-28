@@ -1,7 +1,7 @@
 import { FlashBanner } from "@/components/app/flash-banner";
 import { NotificationsInbox } from "@/components/app/notifications-inbox";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { markAllNotificationsReadAction, runAutomationChecksAction } from "@/server/notifications/actions";
 import { loadNotificationsWorkspace } from "@/server/workspace/queries";
@@ -24,15 +24,15 @@ export default async function NotificationsPage({
         actions={
           <div className="flex flex-wrap gap-2">
             <form action={runAutomationChecksAction}>
-              <Button type="submit" size="sm">
+              <SubmitButton size="sm" pendingText="Running checks…">
                 Run checks
-              </Button>
+              </SubmitButton>
             </form>
             {unread > 0 ? (
               <form action={markAllNotificationsReadAction}>
-                <Button type="submit" size="sm" variant="secondary">
+                <SubmitButton size="sm" variant="secondary">
                   Mark all read
-                </Button>
+                </SubmitButton>
               </form>
             ) : null}
           </div>

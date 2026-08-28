@@ -1,6 +1,6 @@
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { SemanticBadge } from "@/components/ui/status-pill";
 import { loadIntegrationsWorkspace } from "@/server/workspace/queries";
@@ -123,22 +123,22 @@ export default async function IntegrationsPage({
                   <>
                     <form action={triggerGmailSync}>
                       <input type="hidden" name="integrationId" value={gmailIntegration.id} />
-                      <Button type="submit" variant="secondary" size="sm">
+                      <SubmitButton variant="secondary" size="sm" pendingText="Syncing…">
                         Sync now
-                      </Button>
+                      </SubmitButton>
                     </form>
                     <form action={disconnectIntegration}>
                       <input type="hidden" name="integrationId" value={gmailIntegration.id} />
-                      <Button type="submit" variant="ghost" size="sm">
+                      <SubmitButton variant="ghost" size="sm">
                         Disconnect
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </>
                 ) : cfg.googleOAuthConfigured ? (
                   <form action={connectGmail}>
-                    <Button type="submit" variant="primary" size="sm">
+                    <SubmitButton variant="primary" size="sm">
                       Connect Gmail
-                    </Button>
+                    </SubmitButton>
                   </form>
                 ) : (
                   <p className="text-sm text-ink-muted">Google OAuth not configured on this deployment.</p>
@@ -176,22 +176,22 @@ export default async function IntegrationsPage({
                   <>
                     <form action={triggerCalendarSync}>
                       <input type="hidden" name="integrationId" value={calendarIntegration.id} />
-                      <Button type="submit" variant="secondary" size="sm">
+                      <SubmitButton variant="secondary" size="sm" pendingText="Syncing…">
                         Sync now
-                      </Button>
+                      </SubmitButton>
                     </form>
                     <form action={disconnectIntegration}>
                       <input type="hidden" name="integrationId" value={calendarIntegration.id} />
-                      <Button type="submit" variant="ghost" size="sm">
+                      <SubmitButton variant="ghost" size="sm">
                         Disconnect
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </>
                 ) : cfg.googleOAuthConfigured ? (
                   <form action={connectCalendar}>
-                    <Button type="submit" variant="primary" size="sm">
+                    <SubmitButton variant="primary" size="sm">
                       Connect Calendar
-                    </Button>
+                    </SubmitButton>
                   </form>
                 ) : (
                   <p className="text-sm text-ink-muted">Google OAuth not configured.</p>
@@ -231,18 +231,18 @@ export default async function IntegrationsPage({
                     {calendarIntegration?.status === "connected" ? (
                       <form action={confirmCalendarEvent}>
                         <input type="hidden" name="calendarEventId" value={ev.id} />
-                        <Button type="submit" variant="primary" size="sm">
+                        <SubmitButton variant="primary" size="sm">
                           Add to Google Calendar
-                        </Button>
+                        </SubmitButton>
                       </form>
                     ) : (
                       <p className="text-sm text-ink-muted">Connect Google Calendar to confirm.</p>
                     )}
                     <form action={dismissCalendarEvent}>
                       <input type="hidden" name="calendarEventId" value={ev.id} />
-                      <Button type="submit" variant="ghost" size="sm">
+                      <SubmitButton variant="ghost" size="sm">
                         Dismiss
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </div>
                 </Card>

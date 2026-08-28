@@ -1,5 +1,5 @@
 import { evaluateRequirement, type MemoryEvidence } from "@1apply/domain";
-import type { FieldMapping } from "@1apply/form-engine";
+import { isJudgmentYesNoQuestion, type FieldMapping } from "@1apply/form-engine";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
@@ -7,12 +7,14 @@ import type { Actor } from "@/auth/actor";
 function isYesNoEligibilityMapping(mapping: FieldMapping): boolean {
   if (mapping.fieldType !== "radio" && mapping.fieldType !== "select") return false;
   if (mapping.sensitive || mapping.approvalState === "blocked") return false;
+  if (isJudgmentYesNoQuestion(mapping.label)) return false;
   const options = mapping.options.map((item) => item.value.trim().toLowerCase());
   if (options.length !== 2) return false;
   const hasYes = options.some((item) => item === "yes" || item === "y");
   const hasNo = options.some((item) => item === "no" || item === "n");
   if (!hasYes || !hasNo) return false;
-  return /\b(do you|have you|are you|bachelor|degree|years?.{0,40}experience|qualified|eligible|or equivalent)\b/i.test(
+  // Degree / years / qualified — not open "are you currently…" status questions.
+  return /\b(do you (have|possess|hold)|have you|bachelor|master|degree|years?.{0,40}experience|qualified|eligible|or equivalent|related field)\b/i.test(
     mapping.label,
   );
 }
@@ -71,8 +73,8 @@ async function loadEvidence(supabase: SupabaseClient, actor: Actor): Promise<{
 }
 
 /**
- * Strengthen Yes/No job-eligibility radios (Microsoft Careers style) using domain eligibility
- * against verified/unverified Application Memory evidence.
+ * Strengthen Yes/No job-eligibility radios (degree/years) using Application Memory.
+ * Never auto-fills "No". Commitment/status questions are skipped (LLM / Need You).
  */
 export async function enrichYesNoEligibilityMappings(
   supabase: SupabaseClient,
@@ -111,7 +113,7 @@ export async function enrichYesNoEligibilityMappings(
     const lexOk = lexical.state === "met";
     const allowsEquivalent = /or equivalent/i.test(mapping.label);
 
-    let answer: "yes" | "no" | null = null;
+    let answer: "yes" | null = null;
     let confidence = mapping.confidence;
     let reason = mapping.reason;
 
@@ -126,42 +128,36 @@ export async function enrichYesNoEligibilityMappings(
       ]
         .filter(Boolean)
         .join(" ");
-    } else if (
-      (education.state === "not_met" || experience.state === "not_met") &&
-      education.state !== "met" &&
-      experience.state !== "met" &&
-      lexical.state !== "met"
-    ) {
-      answer = "no";
-      confidence = Math.max(confidence, 0.6);
-      reason = `Application Memory does not support Yes. Education: ${education.label}. Experience: ${experience.label}.`;
-    } else if (!mapping.proposedValue) {
+    } else {
       reason = [
-        "Review this Yes/No using Application Memory.",
+        "Not enough Application Memory to auto-select Yes. Left for Need You (never guess No).",
         `Education: ${education.label}.`,
         `Experience: ${experience.label}.`,
-        education.explanation.slice(0, 120),
       ].join(" ");
     }
 
     if (!answer) {
       return {
         ...mapping,
+        proposedValue: "",
+        excludedByDefault: true,
+        confidence: Math.min(confidence, 0.4),
         showChip: true,
         reason,
+        aiAnswerable: true,
       };
     }
 
-    const proposedValue = answer === "yes" ? labels.yes : labels.no;
     return {
       ...mapping,
-      proposedValue,
+      proposedValue: labels.yes,
       confidence,
       excludedByDefault: false,
       memoryPath: "Eligibility → Application Memory",
       source: "Application Memory",
       reason,
       showChip: true,
+      aiAnswerable: false,
       options: [
         { value: labels.yes, label: "Yes", source: "Form choice" },
         { value: labels.no, label: "No", source: "Form choice" },

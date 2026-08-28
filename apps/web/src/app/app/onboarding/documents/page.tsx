@@ -4,12 +4,15 @@ import { uploadOnboardingKitDocument } from "@/server/onboarding/upload";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { loadOnboardingState } from "@/lib/profile";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button } from "@/components/ui/button";
-import { Field, FileUpload, Input } from "@/components/ui/field";
-import { Notice } from "@/components/ui/feedback";
-import { ERRORS, FLASH } from "@/server/http/flash";
-import { kitStatus } from "@1apply/domain";
+import { KitDocumentUploadForm, UploadSubmitButton } from "@/components/app/kit-document-upload-form";
+import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
+import { UploadFeedback } from "@/components/app/upload-feedback";
+import { UseInKitField } from "@/components/app/use-in-kit-field";
+import { SubmitButton } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/field";
+import { CNIC_PHARM_B_LABEL, kitStatus } from "@1apply/domain";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
+import { loadResumeCatalog } from "@/server/resumes/queries";
 
 export default async function OnboardingDocumentsPage({
   searchParams,
@@ -19,8 +22,6 @@ export default async function OnboardingDocumentsPage({
   await ensureOnboardingStep("documents");
   const state = await loadOnboardingState();
   const { notice, error } = await searchParams;
-  const noticeMessage = notice && notice in FLASH ? FLASH[notice as keyof typeof FLASH] : null;
-  const errorMessage = error && error in ERRORS ? ERRORS[error as keyof typeof ERRORS] : null;
   const prefs = parseWorkspacePreferences(state?.profile.preferences ?? {});
   const kit = kitStatus({
     displayName: state?.profile.display_name,
@@ -28,79 +29,78 @@ export default async function OnboardingDocumentsPage({
     educationSummary: prefs.educationSummary,
     documents: state?.documents ?? [],
   });
+  const resumeCatalog = await loadResumeCatalog().catch(() => []);
 
   return (
     <OnboardingShell
       eyebrow="Onboarding"
       title="Your kit"
-      body="Upload once: resume, CNIC, and B-form. 1-Apply reuses them on later postings. Skip only if you do not have a file yet — we will ask again the next time you sign in."
+      body={`Upload what you have — resume by category and optional ${CNIC_PHARM_B_LABEL}. Nothing here is required to continue; skip any file and fill it later in Your kit.`}
       step="documents"
     >
-      {noticeMessage ? (
-        <div className="mb-6">
-          <Notice tone="mint">{noticeMessage}</Notice>
-        </div>
-      ) : null}
-      {errorMessage ? (
-        <div className="mb-6">
-          <Notice tone="coral">{errorMessage}</Notice>
-        </div>
-      ) : null}
+      <UploadFeedback notice={notice} error={error} />
 
-      <p className="mb-4 text-sm text-ink-muted">
-        In kit: {kit.hasResume ? "resume" : "no resume"} · {kit.hasIdentityDocument ? "CNIC" : "no CNIC"} ·{" "}
-        {kit.hasFamilyDocument ? "B-form" : "no B-form"}.
+      <p className="mb-4 mt-6 text-sm text-ink-muted">
+        In kit: {kit.hasResume ? "resume ready" : "resume missing"} · {CNIC_PHARM_B_LABEL}{" "}
+        {kit.hasCnicPharmB ? "ready" : "optional — not uploaded yet"}.
       </p>
 
-      <div className="grid gap-4">
-        <form action={uploadOnboardingKitDocument} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
-          <input type="hidden" name="type" value="resume" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 rounded-2xl border border-line bg-white p-6">
           <h2 className="text-base font-medium">Resume / CV</h2>
-          <Field label="Label" htmlFor="resume-label">
-            <Input id="resume-label" name="label" defaultValue="Primary resume" required />
-          </Field>
-          <FileUpload
-            id="resume-file"
-            label="Resume file"
-            accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
-            hint="TXT or MD extracts education. PDF and DOCX are stored even when text cannot be read."
-          />
-          <Button type="submit">Upload resume</Button>
-        </form>
+          <p className="text-sm text-ink-muted">
+            Optional. Pick a category to remember this resume. Matching still scores every resume with AI — category is
+            not a job filter.
+          </p>
+          <ResumeAwareUploadForm action={uploadOnboardingKitDocument} mode="kit" submitLabel="Upload resume" />
+          {resumeCatalog.length > 0 ? (
+            <ul className="mt-2 grid gap-2 text-sm text-ink-muted">
+              {resumeCatalog.map((group) => (
+                <li key={group.documentId}>
+                  {group.categoryLabel} · current {group.currentVersionLabel ?? "v1"} · {group.versions.length} version
+                  {group.versions.length === 1 ? "" : "s"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
 
-        <form action={uploadOnboardingKitDocument} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
-          <input type="hidden" name="type" value="identity_document" />
-          <h2 className="text-base font-medium">CNIC / national ID</h2>
-          <Field label="Label" htmlFor="cnic-label">
-            <Input id="cnic-label" name="label" defaultValue="CNIC" required />
+        <KitDocumentUploadForm
+          action={uploadOnboardingKitDocument}
+          className="grid gap-4 rounded-2xl border border-line bg-white p-6"
+          showUseInKit={false}
+        >
+          <h2 className="text-base font-medium">{CNIC_PHARM_B_LABEL}</h2>
+          <p className="text-sm text-ink-muted">
+            Optional. Choose CNIC or Pharm-B — either one is enough. Skip if you do not have it yet.
+          </p>
+          <Field label="Document type" htmlFor="onboarding-id-doc-type">
+            <Select id="onboarding-id-doc-type" name="type" defaultValue="identity_document">
+              <option value="identity_document">CNIC</option>
+              <option value="family_document">Pharm-B</option>
+            </Select>
           </Field>
-          <FileUpload id="cnic-file" label="CNIC file" accept=".txt,.md,.pdf,.docx,text/plain,application/pdf" />
-          <Button type="submit" variant="secondary">
-            Upload CNIC
-          </Button>
-        </form>
-
-        <form action={uploadOnboardingKitDocument} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
-          <input type="hidden" name="type" value="family_document" />
-          <h2 className="text-base font-medium">B-form</h2>
-          <Field label="Label" htmlFor="bform-label">
-            <Input id="bform-label" name="label" defaultValue="B-form" required />
+          <input type="hidden" name="label" value={CNIC_PHARM_B_LABEL} />
+          <Field label="File" htmlFor="onboarding-id-doc-file">
+            <Input
+              id="onboarding-id-doc-file"
+              name="file"
+              type="file"
+              required
+              accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
+            />
           </Field>
-          <FileUpload id="bform-file" label="B-form file" accept=".txt,.md,.pdf,.docx,text/plain,application/pdf" />
-          <Button type="submit" variant="secondary">
-            Upload B-form
-          </Button>
-        </form>
+          <UseInKitField defaultChecked />
+          <UploadSubmitButton size="md">Upload</UploadSubmitButton>
+        </KitDocumentUploadForm>
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
         <form action={continueOnboardingReview}>
-          <Button type="submit">Continue to review</Button>
+          <SubmitButton>Continue to review</SubmitButton>
         </form>
         <form action={skipOnboardingDocuments}>
-          <Button type="submit" variant="ghost">
-            Skip for now — remind me next sign-in
-          </Button>
+          <SubmitButton variant="ghost">Skip for now — remind me next sign-in</SubmitButton>
         </form>
       </div>
     </OnboardingShell>

@@ -5,7 +5,7 @@ import type { Actor } from "@/auth/actor";
 import { tryGetAiProvider } from "@/infra/ai/openai";
 import { logError } from "@/lib/log";
 
-async function loadDraftContext(supabase: SupabaseClient, actor: Actor, applicationId: string) {
+async function loadDraftContext(supabase: SupabaseClient, actor: Actor, applicationId?: string | null) {
   const [{ data: profile }, { data: facts }, { data: evidence }, { data: answers }, { data: application }] = await Promise.all([
     supabase
       .from("profiles")
@@ -18,12 +18,21 @@ async function loadDraftContext(supabase: SupabaseClient, actor: Actor, applicat
       .select("title, organization, outcome, skills, situation, action, verification_status, excluded_from_ai, kind")
       .eq("user_id", actor.userId)
       .limit(24),
-    supabase
-      .from("application_answers")
-      .select("question_id, approved_text, original_ai_text, user_edited_text")
-      .eq("application_id", applicationId)
-      .eq("user_id", actor.userId),
-    supabase.from("applications").select("opportunity_id").eq("id", applicationId).eq("user_id", actor.userId).maybeSingle(),
+    applicationId
+      ? supabase
+          .from("application_answers")
+          .select("question_id, approved_text, original_ai_text, user_edited_text")
+          .eq("application_id", applicationId)
+          .eq("user_id", actor.userId)
+      : Promise.resolve({ data: [] as Array<{
+          question_id: string;
+          approved_text: string | null;
+          original_ai_text: string | null;
+          user_edited_text: string | null;
+        }> }),
+    applicationId
+      ? supabase.from("applications").select("opportunity_id").eq("id", applicationId).eq("user_id", actor.userId).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   let opportunityLine = "";
@@ -104,7 +113,7 @@ async function loadDraftContext(supabase: SupabaseClient, actor: Actor, applicat
 export async function generateGroundedAiDraft(input: {
   supabase: SupabaseClient;
   actor: Actor;
-  applicationId: string;
+  applicationId?: string | null;
   question: string;
   guidance?: string;
   limitValue?: number | null;
@@ -182,8 +191,9 @@ export async function generateGroundedAiDraft(input: {
 }
 
 /**
- * Fill-plan enrichment no longer eagerly generates AI text.
- * Open questions get a Grammarly-style assistant in the extension; drafts are on-demand.
+ * Fill-plan enrichment no longer eagerly generates AI text for open essays.
+ * Yes/No radios keep any eligibility / judgment proposals already set.
+ * Open text questions get a Grammarly-style assistant in the extension; drafts are on-demand.
  */
 export async function enrichAiAnswerableMappings(
   _supabase: SupabaseClient,
@@ -193,6 +203,8 @@ export async function enrichAiAnswerableMappings(
 ): Promise<FieldMapping[]> {
   return mappings.map((mapping) => {
     if (!mapping.aiAnswerable || mapping.sensitive || mapping.approvalState === "blocked") return mapping;
+    // Keep Yes/No proposals from eligibility / judgment enrichers.
+    if (mapping.fieldType === "radio" || mapping.fieldType === "select") return mapping;
     return {
       ...mapping,
       proposedValue: "",

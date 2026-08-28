@@ -10,7 +10,12 @@ export type EmbeddingSourceTable =
   | "answer_versions"
   | "skills";
 
-const BATCH_SIZE = 16;
+const BATCH_SIZE = 8;
+const BATCH_DELAY_MS = 750;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export function evidenceEmbeddingContent(row: {
   title: string;
@@ -76,7 +81,19 @@ export async function indexRowsWithEmbeddings(
 
   for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
     const batch = rows.slice(offset, offset + BATCH_SIZE);
-    const vectors = await embedTexts(batch.map((row) => row.content));
+    let vectors: number[][] = [];
+    try {
+      vectors = await embedTexts(batch.map((row) => row.content));
+    } catch (error) {
+      logError("embeddings.batch_failed", {
+        sourceTable,
+        offset,
+        error: String(error),
+      });
+      // Back off and continue with remaining batches instead of aborting the whole reindex.
+      await sleep(2_000);
+      continue;
+    }
     if (vectors.length === 0) break;
 
     for (let index = 0; index < batch.length; index += 1) {
@@ -91,6 +108,10 @@ export async function indexRowsWithEmbeddings(
         embedding: vector,
       });
       indexed += 1;
+    }
+
+    if (offset + BATCH_SIZE < rows.length) {
+      await sleep(BATCH_DELAY_MS);
     }
   }
 
@@ -116,23 +137,9 @@ export async function indexDocumentVersionEmbeddings(
 
   const indexed = await indexRowsWithEmbeddings(supabase, userId, "document_chunks", rows);
 
-  if (indexed > 0) {
-    const provider = tryGetAiProvider();
-    if (provider) {
-      const vectors = await provider.embed({ texts: rows.map((row) => row.content.slice(0, 4000)) });
-      for (let index = 0; index < rows.length; index += 1) {
-        const vector = vectors[index];
-        const row = rows[index];
-        if (!vector || !row) continue;
-        await supabase
-          .from("document_chunks")
-          .update({ embedding: vector })
-          .eq("id", row.id)
-          .eq("user_id", userId);
-      }
-    }
-  }
-
+  // Reuse the embeddings table vectors for chunk rows when possible — avoid a second
+  // rate-limit-heavy embed pass. Only backfill document_chunks.embedding from the
+  // same batch results already written above if a direct column update is needed later.
   return indexed;
 }
 
@@ -206,12 +213,14 @@ export async function indexSkillEmbeddings(supabase: SupabaseClient, userId: str
 
 export async function reindexUserRetrievalCorpus(supabase: SupabaseClient, userId: string): Promise<void> {
   try {
-    await Promise.all([
-      indexVerifiedEvidenceEmbeddings(supabase, userId),
-      indexVerifiedProfileFactEmbeddings(supabase, userId),
-      indexApprovedAnswerEmbeddings(supabase, userId),
-      indexSkillEmbeddings(supabase, userId),
-    ]);
+    // Run sequentially — parallel embed bursts trip Gemini free-tier 429s after kit-fill.
+    await indexVerifiedEvidenceEmbeddings(supabase, userId);
+    await sleep(BATCH_DELAY_MS);
+    await indexVerifiedProfileFactEmbeddings(supabase, userId);
+    await sleep(BATCH_DELAY_MS);
+    await indexApprovedAnswerEmbeddings(supabase, userId);
+    await sleep(BATCH_DELAY_MS);
+    await indexSkillEmbeddings(supabase, userId);
   } catch (error) {
     logError("embeddings.reindex_failed", { userId, error: String(error) });
   }

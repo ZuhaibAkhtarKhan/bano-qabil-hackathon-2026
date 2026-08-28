@@ -18,7 +18,7 @@ import {
   ResumeMatchPanel,
 } from "@/components/app/intelligence-panels";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress, Timeline } from "@/components/ui/data";
 import { Field, Input, Select } from "@/components/ui/field";
@@ -280,9 +280,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 placeholder="Asia/Karachi"
               />
             </Field>
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Save schedule
-            </Button>
+            </SubmitButton>
           </form>
           <form action={updateApplicationPersona} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <input type="hidden" name="applicationId" value={application.id} />
@@ -296,9 +296,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 ))}
               </Select>
             </Field>
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Save voice
-            </Button>
+            </SubmitButton>
           </form>
           {opportunity?.raw_excerpt ? (
             <p className="mt-6 max-h-40 overflow-auto rounded-xl bg-canvas p-4 text-sm leading-6 text-ink-muted">
@@ -402,9 +402,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                         ))}
                       </Select>
                     </Field>
-                    <Button type="submit" variant="secondary">
+                    <SubmitButton variant="secondary">
                         {attachment ? "Update selection" : "Select version"}
-                    </Button>
+                    </SubmitButton>
                   </form>
                 </li>
               );
@@ -495,9 +495,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
         <div className="mt-6 flex flex-wrap gap-3">
           <form action={markSubmitted}>
             <input type="hidden" name="applicationId" value={application.id} />
-              <Button type="submit" disabled={submitted || !completeness.readyForSubmission}>
+              <SubmitButton disabled={submitted || !completeness.readyForSubmission}>
                 {submitted ? "Snapshot already frozen" : "Freeze submission snapshot"}
-            </Button>
+            </SubmitButton>
           </form>
           <form action={updateApplicationStatus} className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="applicationId" value={application.id} />
@@ -510,9 +510,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 ))}
               </Select>
             </Field>
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary">
               Update status
-            </Button>
+            </SubmitButton>
           </form>
         </div>
           {snapshots.length > 0 ? (
@@ -557,9 +557,9 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                     <form action={resolveReviewItem}>
                       <input type="hidden" name="applicationId" value={application.id} />
                       <input type="hidden" name="itemId" value={item.id} />
-                      <Button type="submit" variant="ghost">
+                      <SubmitButton variant="ghost">
                         Resolve
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </li>
                 ))
@@ -588,13 +588,13 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           <Card className="border-coral/20 p-6">
             <h2 className="font-display text-2xl text-coral">Danger Zone</h2>
             <p className="mt-2 text-sm text-ink-muted">
-              Permanently delete this application and its prepared answers, mappings, and evaluations.
+              Permanently delete this application, its prepared answers, mappings, evaluations, and the linked saved posting.
             </p>
             <form action={deleteApplication} className="mt-4">
               <input type="hidden" name="applicationId" value={application.id} />
-              <Button type="submit" variant="secondary" className="border-coral/30 text-coral hover:bg-coral-soft">
+              <SubmitButton variant="secondary" className="border-coral/30 text-coral hover:bg-coral-soft">
                 Delete application
-              </Button>
+              </SubmitButton>
             </form>
           </Card>
         </div>

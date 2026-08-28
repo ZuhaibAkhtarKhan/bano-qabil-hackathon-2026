@@ -1,9 +1,10 @@
-import { planAutomation, requiredDocumentCovered, type ApplicationAutomationSnapshot } from "@1apply/domain";
+import { computeDeadlineInfo, planAutomation, requiredDocumentCovered, type ApplicationAutomationSnapshot } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { computeApplicationCompleteness } from "@/lib/application-workflow";
 import { probeApplicationSubmission } from "@/server/applications/fill-lifecycle";
+import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { logError } from "@/lib/log";
@@ -137,6 +138,23 @@ export async function runUserAutomationSweep(supabase: SupabaseClient, actor: Ac
     }
 
     for (const snapshot of snapshots) {
+      const deadline = computeDeadlineInfo(snapshot.deadlineAt, snapshot.deadlineTimezone, new Date());
+      if (
+        deadline.urgency === "imminent" ||
+        deadline.urgency === "soon" ||
+        deadline.urgency === "overdue"
+      ) {
+        try {
+          await ensureApplicationResumeSelection(supabase, actor, snapshot.applicationId, {
+            autoAttach: true,
+            notifyOnAiPick: true,
+            deadlineAuto: true,
+          });
+        } catch (err) {
+          logError("automation.resume_auto_select_failed", { err, applicationId: snapshot.applicationId });
+        }
+      }
+
       const decisions = planAutomation(snapshot);
       for (const decision of decisions) {
         await supabase.from("automation_runs").insert({

@@ -1,5 +1,6 @@
 export type WorkspacePreferences = {
   onboardingSkippedDocuments: boolean;
+  onboardingSkippedProfile: boolean;
   prepareAndSendIfSilent: boolean;
   university: string;
   educationSummary: string;
@@ -10,6 +11,7 @@ export function parseWorkspacePreferences(raw: Record<string, unknown> | null | 
   const value = raw ?? {};
   return {
     onboardingSkippedDocuments: value.onboardingSkippedDocuments === true,
+    onboardingSkippedProfile: value.onboardingSkippedProfile === true,
     prepareAndSendIfSilent: value.prepareAndSendIfSilent === true,
     university: typeof value.university === "string" ? value.university.trim() : "",
     educationSummary: typeof value.educationSummary === "string" ? value.educationSummary.trim() : "",

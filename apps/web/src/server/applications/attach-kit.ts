@@ -68,13 +68,15 @@ export async function autoAttachKitAcrossOpenApplications(supabase: SupabaseClie
     .eq("user_id", actor.userId)
     .limit(40);
 
+  let attached = 0;
   for (const application of applications ?? []) {
     if (CLOSED.has(String(application.status))) continue;
-    await autoAttachMatchingDocuments(
+    attached += await autoAttachMatchingDocuments(
       supabase,
       actor,
       String(application.id),
       String(application.opportunity_id),
     );
   }
+  return attached;
 }

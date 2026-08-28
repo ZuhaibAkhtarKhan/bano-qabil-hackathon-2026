@@ -1,5 +1,5 @@
 import { fieldSignals, type DetectedField, type FieldType } from "./types";
-import { humanQuestionLabel, isNoiseFormField } from "./question-label";
+import { humanQuestionLabel, isNoiseFormField, stripFormSyntaxDecorators } from "./question-label";
 
 export const APPLY_FIELD_ATTR = "data-1apply-key";
 export const APPLY_EMPTY_ATTR = "data-1apply-empty";
@@ -40,25 +40,26 @@ function stampCard(item: Element | null | undefined, key: string) {
   item.setAttribute(APPLY_HOST_ATTR, "1");
 }
 
-/** Google Forms often puts the red * / "Required" beside the heading, not inside it. */
+/** Google Forms / ATS often put the red * / "Required" / "Obligatoriskt" beside the heading. */
 export function isMarkedRequired(item: Element, heading: Element | null | undefined, label: string, control?: Element | null): boolean {
-  if (/required|\*/i.test(label)) return true;
-  if (heading && /required|\*/i.test(heading.textContent ?? "")) return true;
+  if (/required|obligatorisk|mandatory|pflichtfeld|erforderlich|\*/i.test(label)) return true;
+  if (heading && /required|obligatorisk|mandatory|pflichtfeld|erforderlich|\*/i.test(heading.textContent ?? "")) {
+    return true;
+  }
   if (control && (attr(control, "aria-required") === "true" || (control as HTMLInputElement).required)) return true;
 
   const header = heading?.parentElement ?? item;
-  if (header.querySelector?.('[aria-label*="Required" i], [aria-label*="required" i]')) return true;
+  if (header.querySelector?.('[aria-label*="Required" i], [aria-label*="required" i], [aria-label*="Obligatorisk" i]')) return true;
   const headerText = (header.textContent ?? "").slice(0, 160);
-  if (/\*/.test(headerText) || /\brequired\b/i.test(headerText)) return true;
+  if (/\*/.test(headerText) || /\b(?:required|obligatorisk|mandatory)\b/i.test(headerText)) return true;
 
   const blob = `${label} ${item.textContent ?? ""} ${attr(control ?? item, "aria-label")}`;
-  // Verified Google Forms email collection is always mandatory when shown.
   if (/record\s+.+\s+as the email to be included with my response/i.test(blob)) return true;
   return false;
 }
 
 function cleanQuestionText(value: string | null | undefined): string {
-  return (value ?? "").replace(/\s+/g, " ").replace(/\*+$/, "").trim().slice(0, 200);
+  return stripFormSyntaxDecorators((value ?? "").replace(/\s+/g, " ").trim()).slice(0, 200);
 }
 
 function looksLikeQuestionText(value: string): boolean {

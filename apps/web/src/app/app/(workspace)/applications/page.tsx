@@ -1,15 +1,18 @@
-import Link from "next/link";
 import { opportunityCategorySchema } from "@1apply/contracts";
 
-import { applicationStatusLabel, normalizeApplicationStatus } from "@/lib/application-workflow";
-import { APPLICATION_BOARD_COLUMNS, boardColumnForStatus } from "@/lib/dashboard";
+import {
+  ApplicationsTrackerBoard,
+  ApplicationsTrackerTable,
+} from "@/components/app/applications-tracker-table";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
-import { ApplicationCard } from "@/components/ui/product-cards";
+import { applicationStatusLabel, normalizeApplicationStatus } from "@/lib/application-workflow";
+import { toApplicationsTrackerRow, withNeedsYouFieldCount } from "@/lib/dashboard-display";
+import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 import { loadApplicationsWorkspace } from "@/server/workspace/queries";
 
 function numericFit(row: Awaited<ReturnType<typeof loadApplicationsWorkspace>>["applications"][number]) {
@@ -31,7 +34,10 @@ export default async function ApplicationsPage({
   }>;
 }) {
   const params = await searchParams;
-  const { applications } = await loadApplicationsWorkspace();
+  const [{ applications }, needsYouCounts] = await Promise.all([
+    loadApplicationsWorkspace(),
+    loadNeedsYouFieldCounts(),
+  ]);
   const query = (params.q ?? "").trim().toLowerCase();
   const status = (params.status ?? "").trim().toLowerCase();
   const type = (params.type ?? "").trim().toLowerCase();
@@ -69,6 +75,13 @@ export default async function ApplicationsPage({
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     });
 
+  const trackerRows = filtered.map((row) =>
+    withNeedsYouFieldCount(
+      toApplicationsTrackerRow(row),
+      needsYouCounts.fieldCountByApplicationId[row.id] ?? 0,
+    ),
+  );
+
   return (
     <WorkspaceMain>
       <PageHeader
@@ -78,7 +91,7 @@ export default async function ApplicationsPage({
         actions={<ButtonLink href="/app/opportunities">New opportunity</ButtonLink>}
       />
       {applications.length === 0 ? (
-        <div className="mt-10">
+        <div className="mt-10" data-tour="applications-board">
           <EmptyState
             eyebrow="Empty"
             title="No applications to track"
@@ -86,7 +99,7 @@ export default async function ApplicationsPage({
           />
         </div>
       ) : (
-        <>
+        <div data-tour="applications-board">
           <Card className="mt-8 p-5">
             <form className="grid gap-4 lg:grid-cols-6">
               <Field label="Search" htmlFor="q">
@@ -95,7 +108,18 @@ export default async function ApplicationsPage({
               <Field label="Status" htmlFor="status">
                 <Select id="status" name="status" defaultValue={params.status ?? ""}>
                   <option value="">All</option>
-                  {["saved", "analyzing", "ready_to_apply", "in_progress", "review_required", "submitted", "under_review", "interview", "accepted", "rejected"].map((value) => (
+                  {[
+                    "saved",
+                    "analyzing",
+                    "ready_to_apply",
+                    "in_progress",
+                    "review_required",
+                    "submitted",
+                    "under_review",
+                    "interview",
+                    "accepted",
+                    "rejected",
+                  ].map((value) => (
                     <option key={value} value={value}>
                       {applicationStatusLabel(value as never)}
                     </option>
@@ -113,7 +137,12 @@ export default async function ApplicationsPage({
                 </Select>
               </Field>
               <Field label="Organization" htmlFor="organization">
-                <Input id="organization" name="organization" defaultValue={params.organization ?? ""} placeholder="Host name" />
+                <Input
+                  id="organization"
+                  name="organization"
+                  defaultValue={params.organization ?? ""}
+                  placeholder="Host name"
+                />
               </Field>
               <Field label="Fit" htmlFor="fit">
                 <Select id="fit" name="fit" defaultValue={params.fit ?? ""}>
@@ -137,7 +166,7 @@ export default async function ApplicationsPage({
                 </Select>
               </Field>
               <div className="lg:col-span-6 flex flex-wrap gap-2">
-                <Button type="submit">Apply filters</Button>
+                <SubmitButton>Apply filters</SubmitButton>
                 <ButtonLink href="/app/applications" variant="secondary">
                   Reset
                 </ButtonLink>
@@ -154,47 +183,22 @@ export default async function ApplicationsPage({
 
           {filtered.length === 0 ? (
             <div className="mt-8">
-              <EmptyState eyebrow="No match" title="No applications match these filters" body="Try clearing one or more filters to widen the list." />
+              <EmptyState
+                eyebrow="No match"
+                title="No applications match these filters"
+                body="Try clearing one or more filters to widen the list."
+              />
             </div>
           ) : view === "board" ? (
-            <div className="mt-8 grid gap-4 xl:grid-cols-3">
-              {APPLICATION_BOARD_COLUMNS.map((column) => {
-                const items = filtered.filter((row) => boardColumnForStatus(row.status) === column.id);
-                return (
-                  <section key={column.id} className="rounded-2xl border border-line bg-white p-4">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <h2 className="text-sm font-semibold">{column.title}</h2>
-                      <p className="font-mono text-xs text-ink-muted">{items.length}</p>
-                    </div>
-                    {items.length === 0 ? (
-                      <p className="mt-4 text-sm text-ink-muted">None in this column.</p>
-                    ) : (
-                      <ul className="mt-4 grid gap-3">
-                        {items.map((row) => (
-                          <li key={row.id}>
-                            <Link href={`/app/applications/${row.id}`} className="block">
-                              <ApplicationCard row={row} />
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                );
-              })}
+            <div className="mt-8">
+              <ApplicationsTrackerBoard rows={trackerRows} />
             </div>
           ) : (
-            <ul className="mt-8 grid max-w-4xl gap-4">
-              {filtered.map((row) => (
-                <li key={row.id}>
-                  <Link href={`/app/applications/${row.id}`} className="block">
-                    <ApplicationCard row={row} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-8">
+              <ApplicationsTrackerTable rows={trackerRows} />
+            </div>
           )}
-        </>
+        </div>
       )}
     </WorkspaceMain>
   );

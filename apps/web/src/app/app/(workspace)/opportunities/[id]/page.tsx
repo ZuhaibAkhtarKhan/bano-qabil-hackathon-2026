@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { FlashBanner } from "@/components/app/flash-banner";
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Field, Textarea } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -96,9 +96,9 @@ export default async function OpportunityDetailPage({
             {opportunity.raw_excerpt ? (
               <form action={reanalyzeOpportunity}>
                 <input type="hidden" name="opportunityId" value={opportunity.id} />
-                <Button type="submit" variant="secondary">
+                <SubmitButton variant="secondary" pendingText="Re-analyzing…">
                   Re-analyze stored content
-                </Button>
+                </SubmitButton>
               </form>
             ) : null}
           </div>
@@ -122,9 +122,9 @@ export default async function OpportunityDetailPage({
                   placeholder="Paste the full posting here…"
                 />
               </Field>
-              <Button type="submit" variant="secondary">
+              <SubmitButton variant="secondary" pendingText="Analyzing…">
                 Analyze pasted text
-              </Button>
+              </SubmitButton>
             </form>
           </Card>
         ) : null}

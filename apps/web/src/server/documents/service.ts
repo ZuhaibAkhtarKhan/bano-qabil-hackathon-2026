@@ -11,7 +11,7 @@ import {
 import { nextVersionLabel } from "@/lib/documents/versioning";
 import { logError } from "@/lib/log";
 import { documentStoragePath } from "@/infra/storage/documents";
-import { extractFromDocumentText } from "@/server/memory/extract-from-document";
+import { extractAndFillKitFromDocument } from "@/server/memory/fill-kit-blanks";
 import { indexDocumentVersionEmbeddings } from "@/services/embeddings";
 
 type UploadPayload = Awaited<ReturnType<typeof readValidatedUpload>>;
@@ -232,6 +232,147 @@ export async function setCurrentDocumentVersion(
     .eq("user_id", actor.userId);
 }
 
+/**
+ * Fully remove a vault document and every memory row derived from it.
+ * Storage objects, versions, resume sidecar, application attachments, and
+ * extracted evidence/facts are purged so deleted files never linger in Memory.
+ */
+export async function deleteOwnedDocument(
+  supabase: SupabaseClient,
+  actor: Actor,
+  documentId: string,
+): Promise<void> {
+  await assertOwnedDocument(supabase, actor, documentId);
+
+  const { data: versions } = await supabase
+    .from("document_versions")
+    .select("id, storage_path")
+    .eq("document_id", documentId)
+    .eq("user_id", actor.userId);
+
+  const versionIds = (versions ?? []).map((row) => String(row.id));
+  const storagePaths = (versions ?? [])
+    .map((row) => String(row.storage_path ?? ""))
+    .filter(Boolean);
+
+  const [{ data: evidenceRows }, { data: factRows }] = await Promise.all([
+    supabase
+      .from("evidence_items")
+      .select("id")
+      .eq("user_id", actor.userId)
+      .eq("source_document_id", documentId),
+    supabase
+      .from("profile_facts")
+      .select("id")
+      .eq("user_id", actor.userId)
+      .eq("source_document_id", documentId),
+  ]);
+
+  const evidenceIds = (evidenceRows ?? []).map((row) => String(row.id));
+  const factIds = (factRows ?? []).map((row) => String(row.id));
+
+  if (evidenceIds.length > 0) {
+    await supabase.from("answer_evidence").delete().in("evidence_id", evidenceIds);
+  }
+  await supabase.from("evidence_items").delete().eq("user_id", actor.userId).eq("source_document_id", documentId);
+
+  if (factIds.length > 0) {
+    const { data: conflicts } = await supabase
+      .from("memory_conflicts")
+      .select("id, fact_ids")
+      .eq("user_id", actor.userId);
+    const conflictIds = (conflicts ?? [])
+      .filter((row) => {
+        const ids = Array.isArray(row.fact_ids) ? row.fact_ids.map(String) : [];
+        return ids.some((id) => factIds.includes(id));
+      })
+      .map((row) => String(row.id));
+    if (conflictIds.length > 0) {
+      await supabase.from("memory_conflicts").delete().eq("user_id", actor.userId).in("id", conflictIds);
+    }
+  }
+  await supabase.from("profile_facts").delete().eq("user_id", actor.userId).eq("source_document_id", documentId);
+
+  await supabase.from("application_documents").delete().eq("user_id", actor.userId).eq("document_id", documentId);
+  await supabase.from("resume_matches").delete().eq("document_id", documentId);
+
+  await supabase
+    .from("documents")
+    .update({ current_version_id: null })
+    .eq("id", documentId)
+    .eq("user_id", actor.userId);
+
+  if (versionIds.length > 0) {
+    await supabase.from("document_versions").delete().eq("user_id", actor.userId).in("id", versionIds);
+  }
+
+  const { error } = await supabase.from("documents").delete().eq("id", documentId).eq("user_id", actor.userId);
+  if (error) throw new Error("DOCUMENT_DELETE_FAILED");
+
+  if (storagePaths.length > 0) {
+    const bucket = loadAppConfig().storageBucket;
+    await supabase.storage.from(bucket).remove(storagePaths);
+  }
+}
+
+/**
+ * Remove one version from a vault document. If it is the only version, the whole
+ * document is deleted. Application attachments for that version are detached;
+ * frozen submission snapshots keep their JSON history.
+ */
+export async function deleteOwnedDocumentVersion(
+  supabase: SupabaseClient,
+  actor: Actor,
+  versionId: string,
+): Promise<{ documentId: string; documentDeleted: boolean }> {
+  const version = await assertOwnedVersion(supabase, actor, versionId);
+  const documentId = version.document_id;
+
+  const { data: siblings } = await supabase
+    .from("document_versions")
+    .select("id, created_at")
+    .eq("document_id", documentId)
+    .eq("user_id", actor.userId)
+    .order("created_at", { ascending: false });
+
+  const remaining = (siblings ?? []).filter((row) => String(row.id) !== versionId);
+  if (remaining.length === 0) {
+    await deleteOwnedDocument(supabase, actor, documentId);
+    return { documentId, documentDeleted: true };
+  }
+
+  const document = await assertOwnedDocument(supabase, actor, documentId);
+  const wasCurrent = document.current_version_id === versionId;
+
+  if (wasCurrent) {
+    await supabase
+      .from("documents")
+      .update({ current_version_id: String(remaining[0]!.id) })
+      .eq("id", documentId)
+      .eq("user_id", actor.userId);
+  }
+
+  await supabase
+    .from("application_documents")
+    .delete()
+    .eq("user_id", actor.userId)
+    .eq("document_version_id", versionId);
+
+  const { error } = await supabase
+    .from("document_versions")
+    .delete()
+    .eq("id", versionId)
+    .eq("user_id", actor.userId);
+  if (error) throw new Error("VERSION_DELETE_FAILED");
+
+  if (version.storage_path) {
+    const bucket = loadAppConfig().storageBucket;
+    await supabase.storage.from(bucket).remove([version.storage_path]);
+  }
+
+  return { documentId, documentDeleted: false };
+}
+
 export async function processDocumentVersion(input: {
   supabase: SupabaseClient;
   userId: string;
@@ -241,12 +382,37 @@ export async function processDocumentVersion(input: {
   profileDisplayName: string | null;
   buffer: Buffer;
   mimeType: string;
-}): Promise<{ extracted: boolean; embedded: boolean; textExtracted: boolean }> {
+  fillKit?: boolean;
+}): Promise<{
+  extracted: boolean;
+  embedded: boolean;
+  textExtracted: boolean;
+  kitFilled: boolean;
+  remainingBlanks: number;
+  fieldsWritten: number;
+}> {
+  const fillKit = input.fillKit !== false;
+
+  if (!fillKit) {
+    await input.supabase.from("document_versions").update({ status: "ready" }).eq("id", input.versionId);
+    return {
+      extracted: false,
+      embedded: false,
+      textExtracted: false,
+      kitFilled: false,
+      remainingBlanks: 0,
+      fieldsWritten: 0,
+    };
+  }
+
   const extractedText = await extractDocumentText(input.buffer, input.mimeType);
   let extracted = false;
   let embedded = false;
+  let kitFilled = false;
+  let remainingBlanks = 0;
+  let fieldsWritten = 0;
 
-  if (extractedText) {
+  if (extractedText && fillKit) {
     const chunks = chunkDocumentText(extractedText);
     if (chunks.length > 0) {
       await input.supabase.from("document_chunks").insert(
@@ -259,7 +425,8 @@ export async function processDocumentVersion(input: {
       );
     }
 
-    const result = await extractFromDocumentText({
+    // Immediately after text extraction: force kit-fill from this document's full text.
+    const result = await extractAndFillKitFromDocument({
       supabase: input.supabase,
       userId: input.userId,
       documentId: input.documentId,
@@ -269,15 +436,20 @@ export async function processDocumentVersion(input: {
       profileDisplayName: input.profileDisplayName,
     });
     extracted = result.extracted;
+    kitFilled = Boolean(result.extracted);
+    remainingBlanks = "remainingBlanks" in result ? Number(result.remainingBlanks ?? 0) : 0;
+    fieldsWritten = "fieldsWritten" in result ? Number(result.fieldsWritten ?? 0) : kitFilled ? 1 : 0;
   }
 
-  try {
-    await indexDocumentVersionEmbeddings(input.supabase, input.userId, input.versionId);
-    embedded = true;
-  } catch {
-    logError("documents.embed_failed", { versionId: input.versionId });
+  if (fillKit && extractedText) {
+    try {
+      await indexDocumentVersionEmbeddings(input.supabase, input.userId, input.versionId);
+      embedded = true;
+    } catch {
+      logError("documents.embed_failed", { versionId: input.versionId });
+    }
   }
 
   await input.supabase.from("document_versions").update({ status: "ready" }).eq("id", input.versionId);
-  return { extracted, embedded, textExtracted: Boolean(extractedText) };
+  return { extracted, embedded, textExtracted: Boolean(extractedText), kitFilled, remainingBlanks, fieldsWritten };
 }

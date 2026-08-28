@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { documentExtractionSchema, tryGetAiProvider } from "@/infra/ai/openai";
+import { normalizeDocumentExtractionRaw } from "@/lib/kit-fill-normalize";
 import { logError } from "@/lib/log";
 import { wrapUntrustedDocumentContent } from "@/lib/opportunities/untrusted";
 import { heuristicExtractDocument } from "@/server/memory/heuristic-extract";
@@ -21,15 +22,17 @@ export async function extractFromDocumentText(input: {
 
   const persist = async (extracted: ExtractedDocument) => {
     const plan = planDocumentExtraction(extracted, existing);
+    const existingKeys = new Set(existing.map((row) => row.factKey));
+    const newEvidence = plan.evidence.filter((item) => !existingKeys.has(item.identityKey));
     const hasSignal =
-      plan.evidence.length > 0 || plan.facts.length > 0 || plan.skills.length > 0 || plan.links.length > 0;
-    if (!hasSignal) return { extracted: false as const };
-    await persistDocumentExtraction(input.supabase, {
+      newEvidence.length > 0 || plan.facts.length > 0 || plan.skills.length > 0 || plan.links.length > 0;
+    if (!hasSignal) return { extracted: false as const, fieldsWritten: 0 };
+    const result = await persistDocumentExtraction(input.supabase, {
       userId: input.userId,
       documentId: input.documentId,
       versionId: input.versionId,
       documentLabel: input.documentLabel,
-      evidence: plan.evidence,
+      evidence: newEvidence,
       facts: plan.facts,
       skills: plan.skills,
       links: plan.links,
@@ -41,7 +44,13 @@ export async function extractFromDocumentText(input: {
         locationCountry: extracted.locationCountry ?? null,
       },
     });
-    return { extracted: true as const, conflictCount: plan.conflicts.length };
+    const fieldsWritten =
+      result.insertedEvidenceIds.length + plan.facts.length + plan.skills.length + plan.links.length;
+    return {
+      extracted: fieldsWritten > 0,
+      conflictCount: plan.conflicts.length,
+      fieldsWritten,
+    };
   };
 
   const provider = tryGetAiProvider();
@@ -49,10 +58,10 @@ export async function extractFromDocumentText(input: {
     try {
       const raw = await provider.completeStructured({
         schemaName: "documentExtraction",
-        instruction: `Extract only facts the document states about ${input.profileDisplayName ?? "the applicant"}. Return JSON {displayName, headline, phone, locationCity, locationCountry, links:[{kind,url}], skills:[], evidence:[{title,kind,organization,situation,action,outcome,skills[],startDate,endDate,excerpt}]}. Map kinds to education, employment, project, leadership, volunteering, achievement, certification, or research. Include graduation/end years in endDate when present. Never invent employers, dates, skills, or outcomes. If unsure, omit the item.`,
+        instruction: `Extract profile data for ${input.profileDisplayName ?? "the applicant"} from the document. Be confident when the text clearly supports a field. Return JSON {displayName, headline, phone, locationCity, locationCountry, links:[{kind,url}], skills:[], evidence:[{title,kind,organization,situation,action,outcome,skills[],startDate,endDate,excerpt}]}. Read the entire document and map each entry to the correct kit section via kind: education, employment, project, leadership, volunteering, achievement, certification, or research. Include skills from dedicated skills sections AND technologies mentioned in jobs/projects. For CNIC, B-form, or identity documents, extract legal name, ID number, and address into displayName, phone, locationCity, locationCountry. Pull resume bullets into situation/action/outcome. Include graduation/end years in endDate. Do not fabricate facts absent from the text, but do include everything the document clearly contains.`,
         untrustedData: wrapUntrustedDocumentContent(input.extractedText, input.documentLabel),
       });
-      const parsed = documentExtractionSchema.safeParse(raw);
+      const parsed = documentExtractionSchema.safeParse(normalizeDocumentExtractionRaw(raw));
       if (parsed.success) {
         return persist(parsed.data);
       }

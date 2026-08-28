@@ -21,7 +21,6 @@ export async function loadDocumentDetail(documentId: string) {
         .select("chunk_index, content")
         .eq("document_version_id", document.current_version_id)
         .order("chunk_index", { ascending: true })
-        .limit(6)
     : { data: [] as Array<{ chunk_index: number; content: string }> };
 
   const { data: attachedApplications } = await supabase
@@ -57,7 +56,6 @@ export async function loadDocumentDetail(documentId: string) {
     snapshotUses,
     extractedPreview: (chunks ?? [])
       .map((chunk) => String(chunk.content ?? ""))
-      .join("\n\n")
-      .slice(0, 4000),
+      .join("\n\n"),
   };
 }

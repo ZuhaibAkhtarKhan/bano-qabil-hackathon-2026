@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPendingPacket,
   classifyRequiredDocumentLabel,
+  CNIC_PHARM_B_LABEL,
   kitStatus,
   matchVaultDocument,
   packetAnswerText,
@@ -24,6 +25,16 @@ describe("kit document matching", () => {
     expect(classifyRequiredDocumentLabel("B-Form of applicant")).toBe("family_document");
     expect(classifyRequiredDocumentLabel("Updated CV")).toBe("resume");
     expect(classifyRequiredDocumentLabel("Official transcript")).toBe("transcript");
+  });
+
+  it("matches custom-named other kit documents to application labels", () => {
+    const customVault = [
+      ...vault,
+      { id: "mot", type: "other", label: "Motivation letter", currentVersionId: "v5" },
+    ];
+    expect(requiredDocumentCovered("Motivation letter", [{ type: "other", label: "Motivation letter" }])).toBe(true);
+    expect(matchVaultDocument("Motivation letter", customVault)?.id).toBe("mot");
+    expect(requiredDocumentCovered("motivation letter", [{ type: "other", label: "Motivation letter" }])).toBe(true);
   });
 
   it("matches vault files to posting labels without requiring identical names", () => {
@@ -147,6 +158,6 @@ describe("kit status", () => {
       documents: [{ id: "r1", type: "resume", label: "CV", currentVersionId: "v1" }],
     });
     expect(status.ready).toBe(true);
-    expect(status.missing).toEqual(["university", "education", "CNIC", "B-form"]);
+    expect(status.missing).toEqual(["university", "education", CNIC_PHARM_B_LABEL]);
   });
 });

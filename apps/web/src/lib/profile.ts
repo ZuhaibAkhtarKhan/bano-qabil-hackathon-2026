@@ -8,7 +8,7 @@ import {
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
-import { hasConsent, onboardingComplete, skippedDocuments } from "@/lib/profile-state";
+import { hasConsent, onboardingComplete, skippedDocuments, skippedProfile } from "@/lib/profile-state";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import type { ProfileDetails, EvidenceRow } from "@/server/types";
 
@@ -138,6 +138,7 @@ export async function loadOnboardingState() {
   const hasIdentity = Boolean(profile.display_name?.trim());
   const consent = hasConsent(profile);
   const skipped = skippedDocuments(profile);
+  const skippedProf = skippedProfile(profile);
   const step = resolveOnboardingStep({
     hasConsent: consent,
     hasIdentity,
@@ -146,6 +147,7 @@ export async function loadOnboardingState() {
     documentCount: documentCount ?? 0,
     evidenceCount: evidenceCount ?? 0,
     skippedDocuments: skipped,
+    skippedProfile: skippedProf,
     onboardingCompleted: onboardingComplete(profile),
     storedStep: profile.onboarding_step,
   });

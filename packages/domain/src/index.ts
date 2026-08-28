@@ -5,6 +5,8 @@ export {
   evaluateRequirement,
   rankEvidenceForQuestion,
   rankResumes,
+  isWeakResumeFit,
+  RESUME_FIT_WEAK_THRESHOLD,
   tokenize,
   overlapScore,
   classifyRequirementKind,
@@ -36,6 +38,14 @@ export {
   type CandidateProfile,
 } from "./matching";
 
+export {
+  buildAutoResumeSelection,
+  inferOpportunityCategoryKeys,
+  type AutoResumeSelection,
+  type AutoResumeStrategy,
+  type CategorizedResume,
+} from "./resume-auto-select";
+
 export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
 
 export {
@@ -63,9 +73,11 @@ export {
   assertOwnedMemory,
   categoryFromKind,
   detectMemoryConflicts,
+  evidenceIdentityKey,
   memoryFactKey,
   normalizeFactValue,
   normalizeMemoryToken,
+  normalizeOrganizationToken,
   pickCanonicalFact,
   type ConflictCandidate,
   type DetectedConflict,
@@ -105,6 +117,7 @@ export {
   classifyPendingPacket,
   classifyRequiredDocumentLabel,
   classifyVaultDocument,
+  CNIC_PHARM_B_LABEL,
   kitStatus,
   matchVaultDocument,
   packetAnswerText,
@@ -118,6 +131,14 @@ export {
   type PendingPacketInput,
   type VaultDocument,
 } from "./kit";
+
+export {
+  RESUME_CATEGORY_PRESETS,
+  resolveResumeCategory,
+  resumeCategoryDisplayLabel,
+  type ResolvedResumeCategory,
+  type ResumeCategoryPresetKey,
+} from "./resume-categories";
 
 export {
   deduplicateDiscoveries,

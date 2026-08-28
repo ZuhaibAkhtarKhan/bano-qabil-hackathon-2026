@@ -64,6 +64,23 @@ describe("onboarding routing", () => {
     ).toBe("profile");
   });
 
+  it("lets users skip profile and continue to kit upload", () => {
+    expect(
+      resolveOnboardingStep({
+        hasConsent: true,
+        hasIdentity: false,
+        hasUniversity: false,
+        hasEducation: false,
+        documentCount: 0,
+        evidenceCount: 0,
+        skippedDocuments: false,
+        skippedProfile: true,
+        onboardingCompleted: false,
+        storedStep: "documents",
+      }),
+    ).toBe("documents");
+  });
+
   it("stays on kit upload until the user continues", () => {
     expect(
       resolveOnboardingStep({
@@ -106,7 +123,7 @@ describe("onboarding routing", () => {
       postAuthHref({
         onboardingCompleted: true,
         onboardingStep: "done",
-        kitMissing: ["CNIC", "B-form"],
+        kitMissing: ["CNIC/Pharm-B"],
       }),
     ).toBe("/app/memory?remind=kit");
   });
@@ -126,7 +143,7 @@ describe("onboarding routing", () => {
       postAuthHref({
         onboardingCompleted: false,
         onboardingStep: "consent",
-        kitMissing: ["university", "CNIC"],
+        kitMissing: ["university", "CNIC/Pharm-B"],
       }),
     ).toBe("/app/onboarding/consent");
   });
@@ -138,7 +155,7 @@ describe("onboarding routing", () => {
         preferences: { university: "NUST", educationSummary: "BS CS" },
         documents: [{ type: "resume", label: "CV" }],
       }),
-    ).toEqual(["CNIC", "B-form"]);
+    ).toEqual(["CNIC/Pharm-B"]);
   });
 
   it("stores consent without marking onboarding complete", () => {

@@ -25,6 +25,7 @@ export async function saveOnboardingProfile(formData: FormData) {
   const preferences = mergeWorkspacePreferences((existing?.preferences as Record<string, unknown> | null) ?? {}, {
     university,
     educationSummary,
+    onboardingSkippedProfile: false,
   });
 
   const { error } = await supabase
@@ -47,6 +48,33 @@ export async function saveOnboardingProfile(formData: FormData) {
 
   if (error) {
     logError("onboarding.profile_save_failed", { code: error.code });
+    redirect("/app/onboarding/profile?error=save");
+  }
+
+  revalidatePath("/app/onboarding");
+  revalidatePath("/app/memory");
+  redirect("/app/onboarding/documents");
+}
+
+export async function skipOnboardingProfile() {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/sign-in?next=/app/onboarding/profile");
+
+  const { data: existing } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
+  const preferences = mergeWorkspacePreferences((existing?.preferences as Record<string, unknown> | null) ?? {}, {
+    onboardingSkippedProfile: true,
+  });
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ onboarding_step: "documents", preferences })
+    .eq("id", user.id);
+
+  if (error) {
+    logError("onboarding.skip_profile_failed", { code: error.code });
     redirect("/app/onboarding/profile?error=save");
   }
 

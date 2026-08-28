@@ -11,14 +11,17 @@ import { APPLICATION_LIFECYCLE_ACTIONS } from "@/lib/application-lifecycle";
 import { normalizeApplicationStatus } from "@/lib/application-workflow";
 import { logError } from "@/lib/log";
 import type { ProfileMemoryField } from "@/lib/needs-you";
-import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
+import { isNeedsYouSystemNoise } from "@/lib/needs-you";
+import { joinNeedsYouMultiValues } from "@/lib/needs-you-field-kinds";
+import { readValidatedUpload, UploadValidationError, IMAGE_UPLOAD_MIME_TYPES } from "@/lib/documents/upload-security";
 import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";
 import { requireWorkspace } from "@/server/auth/require-workspace";
-import { processDocumentVersion } from "@/server/documents/service";
+import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { redirectWith } from "@/server/http/flash";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
+import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
@@ -71,16 +74,18 @@ async function storeMemoryValue(input: {
   const value = input.value.trim();
   if (!value) return;
 
-  const field = input.profileField ?? "supporting_detail";
+  const isProfileField = Boolean(input.profileField);
+  const category = isProfileField ? "personal" : "answers";
+  const field = input.profileField ?? "saved_answer";
   const factKey = memoryFactKey({
-    category: "personal",
+    category,
     title: input.label.slice(0, 80) || field,
-    field: field,
+    field,
   });
 
   await input.supabase.from("profile_facts").insert({
     user_id: input.userId,
-    category: "personal",
+    category,
     fact_type: field,
     fact_key: factKey,
     value: { text: value, label: input.label },
@@ -107,6 +112,9 @@ async function continueApplicationInBackground(input: {
   userId: string;
   applicationId: string;
   questionIds?: string[];
+  /** Eligibility/review prompts the user already answered (do not re-queue). */
+  satisfiedPrompts?: string[];
+  scope?: "memory" | "application";
 }) {
   const { data: application } = await input.supabase
     .from("applications")
@@ -128,7 +136,12 @@ async function continueApplicationInBackground(input: {
 
   await recordApplicationEvent(input.supabase, input.actor, input.applicationId, "needs_you.resolved", {
     questionIds: input.questionIds ?? [],
+    scope: input.scope ?? "memory",
   });
+
+  const satisfied = new Set(
+    (input.satisfiedPrompts ?? []).map((item) => item.trim().toLowerCase()).filter(Boolean),
+  );
 
   try {
     await runOwnedJob(
@@ -151,11 +164,15 @@ async function continueApplicationInBackground(input: {
         const review = eligibility
           .filter(
             (item) =>
-              item.state === "unclear" ||
-              item.state === "not_met" ||
-              item.state === "not_evaluated" ||
-              item.state === "partial",
+              item.requirementId !== "none" &&
+              !isNeedsYouSystemNoise(String(item.explanation ?? "")) &&
+              !isNeedsYouSystemNoise(String(item.requirementText ?? "")) &&
+              (item.state === "unclear" ||
+                item.state === "not_met" ||
+                item.state === "not_evaluated" ||
+                item.state === "partial"),
           )
+          .filter((item) => !satisfied.has(String(item.explanation ?? "").trim().toLowerCase()))
           .map((item) => ({
             user_id: input.userId,
             application_id: input.applicationId,
@@ -199,7 +216,9 @@ async function continueApplicationInBackground(input: {
           input.actor,
           input.applicationId,
           "Application continued",
-          "Your new Application Memory was applied. Eligibility and drafts were refreshed in the background.",
+          input.scope === "application"
+            ? "This application was updated for this packet only. Application Memory was not changed."
+            : "Your new Application Memory was applied. Eligibility and drafts were refreshed in the background.",
           "intelligence.updated",
         );
       },
@@ -215,122 +234,235 @@ async function continueApplicationInBackground(input: {
   }
 }
 
-export async function resolveNeedsYouMemory(formData: FormData) {
+async function applyValueToApplication(input: {
+  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"];
+  userId: string;
+  applicationId: string;
+  label: string;
+  value: string;
+  mappingId?: string | null;
+  questionId?: string | null;
+  answerId?: string | null;
+  reviewItemId?: string | null;
+  scope: "memory" | "application";
+}) {
+  const value = input.value.trim();
+  if (!value) return;
+  const source =
+    input.scope === "memory" ? "Application Memory (Needs You)" : "Needs You (this application only)";
+
+  if (input.reviewItemId) {
+    await input.supabase
+      .from("review_items")
+      .update({ resolved: true })
+      .eq("id", input.reviewItemId)
+      .eq("user_id", input.userId);
+  }
+
+  if (input.mappingId) {
+    await input.supabase
+      .from("field_mappings")
+      .update({
+        value: value.slice(0, 4000),
+        source,
+        confidence: 1,
+        excluded_by_default: false,
+      })
+      .eq("id", input.mappingId)
+      .eq("user_id", input.userId);
+  } else if (!input.questionId) {
+    // Application-scoped fill for eligibility / missing facts without a mapping row.
+    const fieldKey = `needs_you:${input.label.trim().toLowerCase().slice(0, 80).replace(/\s+/g, "_")}`;
+    const { data: existing } = await input.supabase
+      .from("field_mappings")
+      .select("id")
+      .eq("application_id", input.applicationId)
+      .eq("user_id", input.userId)
+      .eq("field_key", fieldKey)
+      .maybeSingle();
+
+    if (existing?.id) {
+      await input.supabase
+        .from("field_mappings")
+        .update({
+          value: value.slice(0, 4000),
+          label: input.label.slice(0, 200),
+          source,
+          confidence: 1,
+          excluded_by_default: false,
+        })
+        .eq("id", existing.id);
+    } else {
+      await input.supabase.from("field_mappings").insert({
+        user_id: input.userId,
+        application_id: input.applicationId,
+        field_key: fieldKey,
+        label: input.label.slice(0, 200) || "Application fact",
+        value: value.slice(0, 4000),
+        source,
+        confidence: 1,
+        excluded_by_default: false,
+        sensitive: false,
+      });
+    }
+  }
+
+  if (input.questionId) {
+    if (input.answerId) {
+      await input.supabase
+        .from("application_answers")
+        .update({
+          user_edited_text: value,
+          approved_text: value,
+          state: "approved",
+          missing_facts: [],
+          warnings: [],
+        })
+        .eq("id", input.answerId)
+        .eq("user_id", input.userId);
+    } else {
+      await input.supabase.from("application_answers").insert({
+        user_id: input.userId,
+        application_id: input.applicationId,
+        question_id: input.questionId,
+        user_edited_text: value,
+        approved_text: value,
+        state: "approved",
+        missing_facts: [],
+        warnings: [],
+        evidence_ids: [],
+        claim_flags: [],
+        grounding_score: 0,
+        generation_count: 0,
+        model: null,
+      });
+    }
+  }
+}
+
+/**
+ * Shared resolver for Need You text questions.
+ * scope=memory → Application Memory + this application
+ * scope=application → this application only
+ */
+export async function resolveNeedsYouValue(formData: FormData) {
   const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
-  const value = String(formData.get("value") ?? "").trim();
+  const inputType = String(formData.get("inputType") ?? "").trim();
+  const multiValues = formData
+    .getAll("value")
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+  const value =
+    inputType === "multi-select" || multiValues.length > 1
+      ? joinNeedsYouMultiValues(multiValues)
+      : multiValues[0] ?? String(formData.get("value") ?? "").trim();
   const label = String(formData.get("label") ?? "Application fact").trim();
   const profileField = (String(formData.get("profileField") ?? "").trim() || null) as ProfileMemoryField | null;
   const reviewItemId = String(formData.get("reviewItemId") ?? "").trim() || null;
   const questionId = String(formData.get("questionId") ?? "").trim() || null;
+  const answerId = String(formData.get("answerId") ?? "").trim() || null;
   const mappingId = String(formData.get("mappingId") ?? "").trim() || null;
+  const detail = String(formData.get("detail") ?? "").trim();
+  const scopeRaw = String(formData.get("scope") ?? "memory").trim().toLowerCase();
+  const scope: "memory" | "application" = scopeRaw === "application" ? "application" : "memory";
 
   if (!applicationId || !value) {
     redirectWith(NEEDS_YOU, { error: "required" });
   }
 
-  await storeMemoryValue({
-    supabase,
-    userId: user.id,
-    label,
-    value,
-    profileField,
-  });
-
-  if (reviewItemId) {
-    await supabase.from("review_items").update({ resolved: true }).eq("id", reviewItemId).eq("user_id", user.id);
+  if (scope === "memory") {
+    await storeMemoryValue({
+      supabase,
+      userId: user.id,
+      label,
+      value,
+      profileField,
+    });
   }
 
-  if (mappingId) {
-    await supabase
-      .from("field_mappings")
-      .update({
-        value: value.slice(0, 4000),
-        source: "Application Memory (Needs You)",
-        confidence: 1,
-        excluded_by_default: false,
-      })
-      .eq("id", mappingId)
-      .eq("user_id", user.id);
-  }
-
-  await continueApplicationInBackground({
+  await applyValueToApplication({
     supabase,
-    actor,
     userId: user.id,
     applicationId,
-    questionIds: questionId ? [questionId] : [],
+    label,
+    value,
+    mappingId,
+    questionId,
+    answerId,
+    reviewItemId,
+    scope,
   });
+
+  // Clear internal review rows that should never appear in Need You.
+  const { data: staleReviews } = await supabase
+    .from("review_items")
+    .select("id, prompt")
+    .eq("application_id", applicationId)
+    .eq("user_id", user.id)
+    .eq("resolved", false);
+  for (const row of staleReviews ?? []) {
+    if (isNeedsYouSystemNoise(String(row.prompt ?? ""))) {
+      await supabase.from("review_items").update({ resolved: true }).eq("id", row.id);
+    }
+  }
+
+  // Re-run Fit / eligibility after the user edits a field that was blocking eligibility.
+  if (String(formData.get("eligibilityId") ?? "").trim()) {
+    const { data: application } = await supabase
+      .from("applications")
+      .select("opportunity_id")
+      .eq("id", applicationId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (application?.opportunity_id) {
+      try {
+        await evaluateApplicationIntelligence(
+          supabase,
+          actor,
+          applicationId,
+          String(application.opportunity_id),
+        );
+      } catch {
+        // Non-fatal — Need You still saved the answer.
+      }
+    }
+  }
+
+  // Do not re-run eligibility for ordinary answers — it re-queues internal “Review” rows.
+  await supabase
+    .from("applications")
+    .update({
+      next_action:
+        scope === "memory"
+          ? "Saved to Application Memory for this application"
+          : "Filled for this application only",
+    })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+
+  if (scope === "memory") {
+    scheduleRefreshOpenApplicationsFromKit(supabase, actor);
+  }
 
   revalidateNeedsYou(applicationId);
   redirectWith(NEEDS_YOU, { notice: "continued" });
 }
 
+/** @deprecated Prefer resolveNeedsYouValue — kept for any stale form posts. */
+export async function resolveNeedsYouMemory(formData: FormData) {
+  if (!formData.get("scope")) formData.set("scope", "memory");
+  return resolveNeedsYouValue(formData);
+}
+
+/** @deprecated Prefer resolveNeedsYouValue */
 export async function resolveNeedsYouAnswer(formData: FormData) {
-  const { user, supabase, actor } = await requireWorkspace();
-  const applicationId = String(formData.get("applicationId") ?? "");
-  const questionId = String(formData.get("questionId") ?? "");
-  const answerId = String(formData.get("answerId") ?? "").trim() || null;
-  const text = String(formData.get("value") ?? "").trim();
-
-  if (!applicationId || !questionId || !text) {
-    redirectWith(NEEDS_YOU, { error: "required" });
+  if (!formData.get("scope")) formData.set("scope", "memory");
+  if (!formData.get("label")) {
+    const questionId = String(formData.get("questionId") ?? "");
+    formData.set("label", questionId ? "Application answer" : "Application answer");
   }
-
-  // Persist the answer content into memory so future applications can reuse it.
-  const { data: question } = await supabase
-    .from("opportunity_questions")
-    .select("prompt")
-    .eq("id", questionId)
-    .maybeSingle();
-
-  await storeMemoryValue({
-    supabase,
-    userId: user.id,
-    label: String(question?.prompt ?? "Application answer"),
-    value: text,
-    profileField: null,
-  });
-
-  if (answerId) {
-    await supabase
-      .from("application_answers")
-      .update({
-        user_edited_text: text,
-        approved_text: text,
-        state: "approved",
-        missing_facts: [],
-        warnings: [],
-      })
-      .eq("id", answerId)
-      .eq("user_id", user.id);
-  } else {
-    await supabase.from("application_answers").insert({
-      user_id: user.id,
-      application_id: applicationId,
-      question_id: questionId,
-      user_edited_text: text,
-      approved_text: text,
-      state: "approved",
-      missing_facts: [],
-      warnings: [],
-      evidence_ids: [],
-      claim_flags: [],
-      grounding_score: 0,
-      generation_count: 0,
-      model: null,
-    });
-  }
-
-  await continueApplicationInBackground({
-    supabase,
-    actor,
-    userId: user.id,
-    applicationId,
-  });
-
-  revalidateNeedsYou(applicationId);
-  redirectWith(NEEDS_YOU, { notice: "continued" });
+  return resolveNeedsYouValue(formData);
 }
 
 export async function resolveNeedsYouDocument(formData: FormData) {
@@ -338,6 +470,8 @@ export async function resolveNeedsYouDocument(formData: FormData) {
   const applicationId = String(formData.get("applicationId") ?? "");
   const documentId = String(formData.get("documentId") ?? "").trim();
   const requiredLabel = String(formData.get("requiredLabel") ?? "").trim() || "Supporting document";
+  const mappingId = String(formData.get("mappingId") ?? "").trim() || null;
+  const uploadKind = String(formData.get("uploadKind") ?? "document").trim().toLowerCase() === "image" ? "image" : "document";
   const file = formData.get("file");
 
   if (!applicationId) {
@@ -346,6 +480,7 @@ export async function resolveNeedsYouDocument(formData: FormData) {
 
   let resolvedDocumentId = documentId;
   let versionId: string | null = null;
+  let uploadedMime: string | null = null;
 
   if (file instanceof File && file.size > 0) {
     let upload;
@@ -357,6 +492,8 @@ export async function resolveNeedsYouDocument(formData: FormData) {
       });
     }
 
+    uploadedMime = upload.mimeType;
+    const isImage = IMAGE_UPLOAD_MIME_TYPES.has(upload.mimeType) || uploadKind === "image";
     const newDocumentId = crypto.randomUUID();
     const newVersionId = crypto.randomUUID();
     const storagePath = documentStoragePath({
@@ -388,7 +525,7 @@ export async function resolveNeedsYouDocument(formData: FormData) {
       file_hash: upload.fileHash,
       mime_type: upload.mimeType,
       byte_size: upload.buffer.length,
-      status: "processing",
+      status: isImage ? "ready" : "processing",
     });
     await supabase.from("documents").update({ current_version_id: newVersionId }).eq("id", newDocumentId);
 
@@ -396,20 +533,21 @@ export async function resolveNeedsYouDocument(formData: FormData) {
       documentId: newDocumentId,
       versionId: newVersionId,
       source: "needs_you",
+      uploadKind,
     });
 
-    await runOwnedJob(supabase, { actor, type: "document_extract", inputRef: newVersionId }, async () => {
-      await processDocumentVersion({
+    if (!isImage) {
+      scheduleDocumentVersionProcessing({
         supabase,
+        actor,
         userId: user.id,
         documentId: newDocumentId,
         versionId: newVersionId,
         documentLabel: requiredLabel,
         profileDisplayName: profile.display_name,
-        buffer: upload.buffer,
-        mimeType: upload.mimeType,
+        fillKit: true,
       });
-    });
+    }
 
     resolvedDocumentId = newDocumentId;
     versionId = newVersionId;
@@ -441,11 +579,53 @@ export async function resolveNeedsYouDocument(formData: FormData) {
     document_version_id: versionId,
   });
 
+  if (mappingId && versionId) {
+    await supabase
+      .from("field_mappings")
+      .update({
+        value: versionId.slice(0, 4000),
+        source: uploadKind === "image" ? "Needs You image" : "Needs You document",
+        confidence: 1,
+        excluded_by_default: false,
+        meta: {
+          documentId: resolvedDocumentId,
+          versionId,
+          uploadKind,
+          ...(uploadedMime ? { mimeType: uploadedMime } : {}),
+        },
+      })
+      .eq("id", mappingId)
+      .eq("user_id", user.id)
+      .eq("application_id", applicationId);
+  }
+
   await recordApplicationEvent(supabase, actor, applicationId, "document.attached", {
     documentId: resolvedDocumentId,
     versionId,
     source: "needs_you",
+    uploadKind,
   });
+
+  if (String(formData.get("eligibilityId") ?? "").trim()) {
+    const { data: application } = await supabase
+      .from("applications")
+      .select("opportunity_id")
+      .eq("id", applicationId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (application?.opportunity_id) {
+      try {
+        await evaluateApplicationIntelligence(
+          supabase,
+          actor,
+          applicationId,
+          String(application.opportunity_id),
+        );
+      } catch {
+        // Non-fatal — document is still attached.
+      }
+    }
+  }
 
   await continueApplicationInBackground({
     supabase,
@@ -459,27 +639,128 @@ export async function resolveNeedsYouDocument(formData: FormData) {
   redirectWith(NEEDS_YOU, { notice: "continued" });
 }
 
-export async function dismissNeedsYouReview(formData: FormData) {
+function parseNeedsYouDeadlineInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Date.parse(trimmed);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
+
+/** Save application deadline when LLM/ingest could not extract one. */
+export async function resolveNeedsYouDeadline(formData: FormData) {
   const { user, supabase, actor } = await requireWorkspace();
-  const applicationId = String(formData.get("applicationId") ?? "");
-  const reviewItemId = String(formData.get("reviewItemId") ?? "");
-  if (!applicationId || !reviewItemId) {
+  const applicationId = String(formData.get("applicationId") ?? "").trim();
+  const deadlineAt = parseNeedsYouDeadlineInput(String(formData.get("deadline") ?? ""));
+  const timezone = String(formData.get("timezone") ?? "").trim() || null;
+
+  if (!applicationId || !deadlineAt) {
     redirectWith(NEEDS_YOU, { error: "required" });
   }
 
-  await supabase
-    .from("review_items")
-    .update({ resolved: true })
-    .eq("id", reviewItemId)
-    .eq("user_id", user.id);
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id, opportunity_id")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!application) {
+    redirectWith(NEEDS_YOU, { error: "not_found" });
+  }
 
-  await continueApplicationInBackground({
-    supabase,
-    actor,
-    userId: user.id,
-    applicationId,
+  const { error } = await supabase
+    .from("applications")
+    .update({ deadline_at: deadlineAt, deadline_timezone: timezone })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+  if (error) {
+    redirectWith(NEEDS_YOU, { error: "save" });
+  }
+
+  if (application.opportunity_id) {
+    await supabase
+      .from("opportunities")
+      .update({ deadline_at: deadlineAt })
+      .eq("id", application.opportunity_id)
+      .eq("user_id", user.id);
+  }
+
+  await recordApplicationEvent(supabase, actor, applicationId, "deadline.set", {
+    deadlineAt,
+    timezone,
+    source: "needs_you",
   });
 
   revalidateNeedsYou(applicationId);
-  redirectWith(NEEDS_YOU, { notice: "continued" });
+  redirectWith(NEEDS_YOU, { notice: "saved" });
+}
+
+/**
+ * Draft a Needs You text answer from Application Memory (same grounding path as
+ * application answers / extension AI draft).
+ */
+export async function generateNeedsYouDraftAction(formData: FormData): Promise<{
+  error: string | null;
+  draft: string | null;
+}> {
+  const { supabase, actor } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "").trim();
+  const questionId = String(formData.get("questionId") ?? "").trim();
+  const label = String(formData.get("label") ?? "").trim();
+  const detail = String(formData.get("detail") ?? "").trim();
+  const toneRaw = String(formData.get("tone") ?? "formal").trim();
+  const tone =
+    toneRaw === "enthusiastic" || toneRaw === "concise" || toneRaw === "detailed" ? toneRaw : "formal";
+
+  if (!applicationId || (!questionId && !label)) {
+    return { error: "required", draft: null };
+  }
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("id", applicationId)
+    .eq("user_id", actor.userId)
+    .maybeSingle();
+  if (!application) return { error: "not_found", draft: null };
+
+  try {
+    if (questionId) {
+      const result = await generateAnswer(supabase, actor, {
+        applicationId,
+        questionId,
+        intent: "draft",
+        tone,
+      });
+      const draft = String(result.text ?? "").trim();
+      if (!draft) {
+        return {
+          error: result.warnings?.includes("INSUFFICIENT_EVIDENCE") ? "no_evidence" : "empty",
+          draft: null,
+        };
+      }
+      revalidateNeedsYou(applicationId);
+      return { error: null, draft };
+    }
+
+    const { generateGroundedAiDraft } = await import("@/server/extension/enrich-ai-answers");
+    const question = detail ? `${label}\n\nContext: ${detail}` : label;
+    const result = await generateGroundedAiDraft({
+      supabase,
+      actor,
+      applicationId,
+      question,
+    });
+    const draft = String(result.draft ?? "").trim();
+    if (!draft) return { error: "empty", draft: null };
+    return { error: null, draft };
+  } catch (error) {
+    logError("needs_you.generate_draft_failed", {
+      applicationId,
+      message: error instanceof Error ? error.message : "unknown",
+    });
+    const message = error instanceof Error ? error.message : "unknown";
+    if (message === "AI_UNAVAILABLE") return { error: "ai_unavailable", draft: null };
+    return { error: "generate_failed", draft: null };
+  }
 }
