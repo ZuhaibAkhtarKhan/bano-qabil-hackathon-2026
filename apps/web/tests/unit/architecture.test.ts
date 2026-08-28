@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { toJobLifecycle } from "@1apply/contracts";
 
 import { loadAppConfig } from "@/config/env";
+import { resolveChatProvider } from "@/infra/ai/openai";
 import { documentStoragePath } from "@/infra/storage/documents";
 
 describe("configuration", () => {
@@ -31,6 +32,22 @@ describe("configuration", () => {
     expect(config.groqConfigured).toBe(true);
     expect(config.aiConfigured).toBe(true);
     expect(config.openaiConfigured).toBe(false);
+    expect(config.aiChatProvider).toBe("auto");
+  });
+
+  it("prefers Groq for interactive chat in auto mode", () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    vi.stubEnv("OPENAI_API_KEY", "gemini-key");
+    const config = loadAppConfig({
+      GROQ_API_KEY: "gsk_test",
+      OPENAI_API_KEY: "gemini-key",
+      OPENAI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
+      AI_CHAT_PROVIDER: "auto",
+    });
+    const interactive = resolveChatProvider(config, "groundedDraft");
+    expect(interactive.provider).toBe("groq");
+    const heavy = resolveChatProvider(config, "opportunityExtraction");
+    expect(heavy.provider).toBe("openai");
   });
 });
 

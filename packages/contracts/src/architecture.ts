@@ -21,6 +21,7 @@ export const envSchema = z.object({
   CALENDAR_SYNC_ENABLED: z.enum(["true", "false"]).optional(),
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().optional(),
+  AI_CHAT_PROVIDER: z.enum(["auto", "groq", "gemini"]).optional(),
 });
 
 export const skillRecordSchema = z.object({

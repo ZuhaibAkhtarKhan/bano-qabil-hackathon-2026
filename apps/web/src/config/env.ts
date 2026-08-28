@@ -7,6 +7,7 @@ export type AppConfig = {
   supabaseServiceRoleKeyConfigured: boolean;
   openaiConfigured: boolean;
   groqConfigured: boolean;
+  aiChatProvider: "auto" | "groq" | "gemini";
   aiConfigured: boolean;
   openaiBaseUrl: string;
   openaiModel: string;
@@ -53,6 +54,7 @@ export function loadAppConfig(source: Record<string, string | undefined> = proce
     CALENDAR_SYNC_ENABLED: emptyToUndefined(source.CALENDAR_SYNC_ENABLED),
     GROQ_API_KEY: emptyToUndefined(source.GROQ_API_KEY),
     GROQ_MODEL: emptyToUndefined(source.GROQ_MODEL),
+    AI_CHAT_PROVIDER: emptyToUndefined(source.AI_CHAT_PROVIDER) as "auto" | "groq" | "gemini" | undefined,
   });
 
   const openaiKey = parsed.OPENAI_API_KEY ?? "";
@@ -66,6 +68,7 @@ export function loadAppConfig(source: Record<string, string | undefined> = proce
     supabaseServiceRoleKeyConfigured: !looksLikeSecretPlaceholder(parsed.SUPABASE_SERVICE_ROLE_KEY),
     openaiConfigured,
     groqConfigured,
+    aiChatProvider: parsed.AI_CHAT_PROVIDER ?? "auto",
     aiConfigured: openaiConfigured || groqConfigured,
     openaiBaseUrl: (parsed.OPENAI_BASE_URL ?? GEMINI_BASE_URL).replace(/\/$/, ""),
     openaiModel: parsed.OPENAI_MODEL ?? DEFAULT_GEMINI_CHAT_MODEL,

@@ -1,3 +1,5 @@
+declare const __EXTENSION_APP_BASE_URL__: string;
+
 declare const chrome: {
   runtime: {
     id: string;

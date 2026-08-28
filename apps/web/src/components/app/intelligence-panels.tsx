@@ -1,4 +1,4 @@
-import { eligibilityLabel } from "@1apply/domain";
+import { eligibilityLabel, computeResumeKeywordGaps } from "@1apply/domain";
 import Link from "next/link";
 
 import { SubmitButton } from "@/components/ui/button";
@@ -221,6 +221,24 @@ export function EligibilityPanel({ data }: { data: Workspace }) {
 
 export function ResumeMatchPanel({ data }: { data: Workspace }) {
   const documents = new Map(data.documents.map((item) => [item.id, item]));
+  const recommended =
+    data.resumeMatches.find((item) => item.recommended) ?? data.resumeMatches[0] ?? null;
+  const postingText = [
+    data.opportunity?.title,
+    data.opportunity?.raw_excerpt,
+    ...data.requirements.map((item) => item.text),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const resumeText = [
+    recommended?.label,
+    recommended?.explanation,
+    ...(recommended?.strengths ?? []),
+    ...data.evidence.flatMap((item) => [item.title, ...(item.skills ?? [])]),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const keywordGaps = postingText.trim() ? computeResumeKeywordGaps(postingText, resumeText) : null;
 
   return (
     <section id="resumes" className="mt-8 scroll-mt-8">
@@ -285,6 +303,27 @@ export function ResumeMatchPanel({ data }: { data: Workspace }) {
             })}
           </ul>
         )}
+        {keywordGaps && keywordGaps.gaps.length > 0 ? (
+          <div className="mt-6 rounded-2xl border border-dashed border-line bg-canvas p-4">
+            <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-muted">Keyword gaps</p>
+            <p className="mt-2 text-sm text-ink-muted">
+              Posting terms compared to your recommended resume and verified memory. {keywordGaps.matchRate}% overlap —
+              add missing terms only when they are true.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {keywordGaps.matched.slice(0, 8).map((term) => (
+                <StatusPill key={term} tone="mint">
+                  {term}
+                </StatusPill>
+              ))}
+              {keywordGaps.missing.slice(0, 10).map((term) => (
+                <StatusPill key={term} tone="sand">
+                  missing: {term}
+                </StatusPill>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </Card>
     </section>
   );
