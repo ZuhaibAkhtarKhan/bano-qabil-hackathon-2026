@@ -32,7 +32,7 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 }
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const DEFAULT_GEMINI_CHAT_MODEL = "gemini-2.0-flash";
+const DEFAULT_GEMINI_CHAT_MODEL = "gemini-3.1-flash-lite";
 const DEFAULT_GEMINI_EMBEDDING_MODEL = "gemini-embedding-001";
 
 export function loadAppConfig(source: Record<string, string | undefined> = process.env): AppConfig {
