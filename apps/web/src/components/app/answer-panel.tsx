@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 import { answerSemanticStatus } from "@/lib/status";
 import { approveAnswerAction, editAnswerAction, generateAnswerAction, rejectAnswerAction } from "@/server/answers/actions";
 import { addQuestion } from "@/server/applications/actions";
-import { Button } from "@/components/ui/button";
+import { useReportActionPending } from "@/components/ui/action-progress";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/field";
 import { SemanticBadge } from "@/components/ui/status-pill";
@@ -179,6 +180,7 @@ export function AnswerPanel({
   previousSuggestions: PreviousAnswerSuggestion[];
 }) {
   const [isPending, startTransition] = useTransition();
+  useReportActionPending(isPending);
   const [editMode, setEditMode] = useState(false);
   const [editText, setEditText] = useState("");
   const [tone, setTone] = useState<"formal" | "enthusiastic" | "concise" | "detailed">("formal");
@@ -242,6 +244,11 @@ export function AnswerPanel({
         </div>
         {answer && <SemanticBadge status={status} />}
       </div>
+      {answer && answer.state !== "approved" && displayText ? (
+        <p className="text-xs text-ink-muted">
+          Suggestion only. Keep it, edit it, or ignore it. If you opted in to prepare-and-send, this is the packet text that freezes at the deadline unless you change it.
+        </p>
+      ) : null}
 
       {/* Live drafting status */}
       {isPending && (
@@ -372,9 +379,9 @@ export function AnswerPanel({
             <option value="detailed">Detailed</option>
           </select>
 
-          <Button type="submit" size="sm" variant="secondary" disabled={isPending}>
-            {isPending ? "Generating…" : answer ? "Regenerate" : "Generate"}
-          </Button>
+          <SubmitButton size="sm" variant="secondary" disabled={isPending} pending={isPending} pendingText="Generating…">
+            {answer ? "Regenerate" : "Generate"}
+          </SubmitButton>
         </form>
 
         {/* Edit */}
@@ -400,15 +407,10 @@ export function AnswerPanel({
               disabled={isPending}
               className="bg-emerald-600 text-white hover:bg-emerald-700"
             >
-              Approve
+              {isPending ? "Saving…" : "Keep this suggestion"}
             </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={handleReject}
-              disabled={isPending}
-            >
-              Reject
+            <Button size="sm" variant="danger" onClick={handleReject} disabled={isPending}>
+              {isPending ? "Working…" : "Reject"}
             </Button>
           </>
         )}
@@ -483,9 +485,9 @@ export function AnswersSection({
               <option value="characters">characters</option>
             </Select>
           </Field>
-          <Button type="submit" variant="secondary">
+          <SubmitButton variant="secondary">
             Add question
-          </Button>
+          </SubmitButton>
         </form>
       </Card>
     </div>

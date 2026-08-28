@@ -1,12 +1,10 @@
 import { opportunityCategorySchema } from "@1apply/contracts";
 import { computeDeadlineInfo, type RankedDiscovery } from "@1apply/domain";
 
-import { Button, ButtonLink, SubmitButton } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { ScoreIndicator } from "@/components/ui/data";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { StatusPill } from "@/components/ui/status-pill";
 import { queueDiscoveryRequest, saveDiscoveredOpportunity } from "@/server/opportunities/actions";
+import { cn } from "@/lib/cn";
 
 const TYPE_LABELS: Record<string, string> = {
   job: "Job",
@@ -33,13 +31,8 @@ export function DiscoveryPanel({
   summary: string | null;
 }) {
   return (
-    <Card id="discovery" className="mt-6 max-w-5xl scroll-mt-24 p-6">
-      <h2 className="font-display text-2xl">Discover opportunities</h2>
-      <p className="mt-1 text-sm text-ink-muted">
-        Natural-language search over live public job boards, sourced program pages, and your saved opportunities. Listings keep their source URL.
-        Fit Index is a preview from verified Application Memory — nothing is invented.
-      </p>
-      <form action={queueDiscoveryRequest} className="mt-4 grid gap-4">
+    <div id="discovery" className="scroll-mt-24 rounded-2xl border border-line bg-[#fafbf8]/50 p-4 sm:p-5">
+      <form action={queueDiscoveryRequest} className="grid gap-4">
         <Field label="What are you looking for?" htmlFor="discovery-query">
           <Textarea
             id="discovery-query"
@@ -65,16 +58,18 @@ export function DiscoveryPanel({
           <Field label="Location filter" htmlFor="filter-location">
             <Input id="filter-location" name="filterLocation" placeholder="Pakistan" />
           </Field>
-          <label className="flex items-end gap-2 pb-2 text-sm">
-            <input type="checkbox" name="filterRemote" className="h-4 w-4" />
+          <label className="flex items-end gap-2 pb-2 text-sm text-ink">
+            <input type="checkbox" name="filterRemote" className="h-4 w-4 rounded border-line" />
             Remote OK
           </label>
         </div>
-        <SubmitButton pendingText="Searching & ranking in real time…">Search and rank</SubmitButton>
+        <SubmitButton pendingText="Searching & ranking…">Search and rank</SubmitButton>
       </form>
+
       {summary ? <p className="mt-4 text-sm text-ink-muted">{summary}</p> : null}
+
       {results.length > 0 ? (
-        <ul className="mt-6 grid gap-4">
+        <ul className="mt-4 grid gap-2.5">
           {results.map((item) => (
             <li key={item.canonicalUrl}>
               <DiscoveryResultCard item={item} />
@@ -82,74 +77,95 @@ export function DiscoveryPanel({
           ))}
         </ul>
       ) : null}
-    </Card>
+    </div>
   );
 }
 
 function DiscoveryResultCard({ item }: { item: RankedDiscovery }) {
   const deadline = computeDeadlineInfo(item.deadlineAt, null);
+  const fitTone =
+    item.fitPreview == null
+      ? "muted"
+      : item.fitPreview >= 75
+        ? "mint"
+        : item.fitPreview >= 50
+          ? "sand"
+          : "coral";
+
   return (
-    <Card as="article" className="border-line p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-medium">{item.title}</h3>
-          <p className="mt-1 text-sm text-ink-muted">
-            {item.organization ?? "Unknown host"} · {item.category.replace(/_/g, " ")}
+    <article className="rounded-2xl border border-line bg-white px-3.5 py-3 transition-colors hover:bg-[#fafbf8]/60">
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white text-xs font-semibold text-ink">
+          {(item.organization?.trim().charAt(0) || item.title.charAt(0) || "?").toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium leading-tight text-ink">
+              {item.organization ?? "Unknown host"}
+            </p>
+            <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-700">
+              {item.provider.replace(/_/g, " ")}
+            </span>
+            {item.alreadySaved ? (
+              <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                Saved
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 truncate text-xs text-ink-muted">{item.title}</p>
+          <p className="mt-1 text-[11px] text-ink-muted">
+            {item.category.replace(/_/g, " ")}
             {item.location ? ` · ${item.location}` : ""}
             {item.remote ? " · remote" : ""}
-            {item.alreadySaved ? " · already saved" : ""}
+            {" · "}
+            {item.deadlineAt ? deadline.label : "No deadline listed"}
           </p>
+          <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink-muted">{item.excerpt}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+            <span className={cn("font-medium", fitTone === "mint" ? "text-emerald-700" : fitTone === "sand" ? "text-amber-800" : fitTone === "coral" ? "text-rose-700" : undefined)}>
+              Fit preview · {item.fitPreview == null ? "—" : Math.round(item.fitPreview)}
+            </span>
+            <span>
+              Rank {item.rank} · relevance {item.relevance}
+            </span>
+            <a
+              href={item.sourceUrl}
+              className="truncate font-medium text-ink hover:underline"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Source
+            </a>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {item.alreadySaved && item.opportunityId ? (
+              <>
+                <ButtonLink href={`/app/opportunities/${item.opportunityId}`} size="sm" variant="secondary">
+                  Open analysis
+                </ButtonLink>
+                <ButtonLink href="/app/applications" size="sm" variant="ghost">
+                  Applications
+                </ButtonLink>
+              </>
+            ) : (
+              <form action={saveDiscoveredOpportunity}>
+                <input type="hidden" name="sourceUrl" value={item.sourceUrl} />
+                <input type="hidden" name="title" value={item.title} />
+                <input type="hidden" name="organization" value={item.organization ?? ""} />
+                <input type="hidden" name="excerpt" value={item.excerpt} />
+                <input type="hidden" name="category" value={item.category} />
+                <input type="hidden" name="location" value={item.location ?? ""} />
+                <div className="flex flex-wrap gap-2">
+                  <SubmitButton size="sm">Save opportunity</SubmitButton>
+                  <SubmitButton size="sm" variant="secondary">
+                    Analyze opportunity
+                  </SubmitButton>
+                </div>
+              </form>
+            )}
+          </div>
         </div>
-        <StatusPill tone="muted">{item.provider.replace(/_/g, " ")}</StatusPill>
       </div>
-      <p className="mt-3 text-sm">{item.excerpt}</p>
-      <p className="mt-2 text-xs text-ink-muted">
-        Source:{" "}
-        <a href={item.sourceUrl} className="underline" target="_blank" rel="noreferrer">
-          {item.sourceUrl}
-        </a>
-      </p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-[8rem_minmax(0,1fr)]">
-        <ScoreIndicator score={item.fitPreview} label="Fit preview" />
-        <div className="grid gap-1 text-sm">
-          <p>
-            Rank {item.rank} · relevance {item.relevance}
-            {item.eligibilityPreview !== null ? ` · eligibility ${item.eligibilityPreview}` : ""}
-          </p>
-          <p className="text-ink-muted">
-            Deadline: {item.deadlineAt ? deadline.label : "Not published on this source card"}
-          </p>
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {item.alreadySaved && item.opportunityId ? (
-          <>
-            <ButtonLink href={`/app/opportunities/${item.opportunityId}`} size="sm" variant="secondary">
-              Open analysis
-            </ButtonLink>
-            <ButtonLink href="/app/applications" size="sm" variant="ghost">
-              Applications
-            </ButtonLink>
-          </>
-        ) : (
-          <form action={saveDiscoveredOpportunity}>
-            <input type="hidden" name="sourceUrl" value={item.sourceUrl} />
-            <input type="hidden" name="title" value={item.title} />
-            <input type="hidden" name="organization" value={item.organization ?? ""} />
-            <input type="hidden" name="excerpt" value={item.excerpt} />
-            <input type="hidden" name="category" value={item.category} />
-            <input type="hidden" name="location" value={item.location ?? ""} />
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" size="sm">
-                Save opportunity
-              </Button>
-              <Button type="submit" size="sm" variant="secondary">
-                Analyze opportunity
-              </Button>
-            </div>
-          </form>
-        )}
-      </div>
-    </Card>
+    </article>
   );
 }

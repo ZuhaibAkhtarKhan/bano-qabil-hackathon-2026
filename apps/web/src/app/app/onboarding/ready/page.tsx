@@ -3,7 +3,7 @@ import Link from "next/link";
 import { finishOnboarding } from "@/app/app/actions";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { MetricCard } from "@/components/ui/card";
 import { Notice } from "@/components/ui/feedback";
 import { ERRORS } from "@/server/http/flash";
@@ -20,8 +20,8 @@ export default async function OnboardingReadyPage({
   return (
     <OnboardingShell
       eyebrow="Onboarding"
-      title="Application Memory ready"
-      body="Your workspace is prepared. Verified evidence powers Fit Index and grounded drafts. You can add an opportunity whenever you are ready."
+      title="Your kit is ready"
+      body="Dashboard is home: it shows what needs you before a deadline. Add a posting only when you have a URL. Do not hunt across extra editors for the same facts."
       step="ready"
     >
       {errorMessage ? (
@@ -38,19 +38,19 @@ export default async function OnboardingReadyPage({
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <form action={finishOnboarding}>
-          <Button type="submit" className="w-full">
-            Enter workspace
-          </Button>
+          <SubmitButton className="w-full">
+            Enter dashboard
+          </SubmitButton>
         </form>
         <ButtonLink href="/app/opportunities" variant="secondary" className="w-full">
-          Add first opportunity
+          Add a posting
         </ButtonLink>
       </div>
 
       <p className="mt-6 text-sm text-ink-muted">
         Need to adjust facts?{" "}
         <Link className="underline" href="/app/memory">
-          Open Application Memory
+          Open your kit
         </Link>
         . Extraction never equals verification — keep reviewing as you go.
       </p>

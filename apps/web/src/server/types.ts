@@ -44,7 +44,7 @@ export type ProfileFactRow = {
   category: string;
   fact_type: string;
   fact_key: string | null;
-  value: { text?: string } | Record<string, unknown>;
+  value: { text?: string; label?: string } | Record<string, unknown>;
   source: string | null;
   source_document_id: string | null;
   source_version_id: string | null;

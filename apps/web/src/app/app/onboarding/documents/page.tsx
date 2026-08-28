@@ -1,11 +1,18 @@
 import { skipOnboardingDocuments } from "@/app/app/actions";
+import { continueOnboardingReview } from "@/server/onboarding/actions";
+import { uploadOnboardingKitDocument } from "@/server/onboarding/upload";
 import { ensureOnboardingStep } from "@/lib/onboarding";
+import { loadOnboardingState } from "@/lib/profile";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
-import { Button } from "@/components/ui/button";
-import { Field, FileUpload, Input } from "@/components/ui/field";
-import { Notice } from "@/components/ui/feedback";
-import { uploadOnboardingResume } from "@/server/onboarding/upload";
-import { ERRORS, FLASH } from "@/server/http/flash";
+import { KitDocumentUploadForm, UploadSubmitButton } from "@/components/app/kit-document-upload-form";
+import { ResumeAwareUploadForm } from "@/components/app/resume-aware-upload-form";
+import { UploadFeedback } from "@/components/app/upload-feedback";
+import { UseInKitField } from "@/components/app/use-in-kit-field";
+import { SubmitButton } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/field";
+import { CNIC_PHARM_B_LABEL, kitStatus } from "@1apply/domain";
+import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
+import { loadResumeCatalog } from "@/server/resumes/queries";
 
 export default async function OnboardingDocumentsPage({
   searchParams,
@@ -13,46 +20,89 @@ export default async function OnboardingDocumentsPage({
   searchParams: Promise<{ notice?: string; error?: string }>;
 }) {
   await ensureOnboardingStep("documents");
+  const state = await loadOnboardingState();
   const { notice, error } = await searchParams;
-  const noticeMessage = notice && notice in FLASH ? FLASH[notice as keyof typeof FLASH] : null;
-  const errorMessage = error && error in ERRORS ? ERRORS[error as keyof typeof ERRORS] : null;
+  const prefs = parseWorkspacePreferences(state?.profile.preferences ?? {});
+  const kit = kitStatus({
+    displayName: state?.profile.display_name,
+    university: prefs.university,
+    educationSummary: prefs.educationSummary,
+    documents: state?.documents ?? [],
+  });
+  const resumeCatalog = await loadResumeCatalog().catch(() => []);
 
   return (
     <OnboardingShell
       eyebrow="Onboarding"
-      title="Upload your resume"
-      body="Text and Markdown resumes can be parsed immediately. PDF and DOCX are stored safely — add facts manually or re-upload as .txt for extraction."
+      title="Your kit"
+      body={`Upload what you have — resume by category and optional ${CNIC_PHARM_B_LABEL}. Nothing here is required to continue; skip any file and fill it later in Your kit.`}
       step="documents"
     >
-      {noticeMessage ? (
-        <div className="mb-6">
-          <Notice tone="mint">{noticeMessage}</Notice>
-        </div>
-      ) : null}
-      {errorMessage ? (
-        <div className="mb-6">
-          <Notice tone="coral">{errorMessage}</Notice>
-        </div>
-      ) : null}
+      <UploadFeedback notice={notice} error={error} />
 
-      <form action={uploadOnboardingResume} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
-        <Field label="Label" htmlFor="resume-label">
-          <Input id="resume-label" name="label" defaultValue="Primary resume" required />
-        </Field>
-        <FileUpload
-          id="resume-file"
-          label="Resume file"
-          accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
-          hint="TXT or MD extracts education, projects, experience, skills, and certifications as unverified evidence."
-        />
-        <Button type="submit">Upload and extract</Button>
-      </form>
+      <p className="mb-4 mt-6 text-sm text-ink-muted">
+        In kit: {kit.hasResume ? "resume ready" : "resume missing"} · {CNIC_PHARM_B_LABEL}{" "}
+        {kit.hasCnicPharmB ? "ready" : "optional — not uploaded yet"}.
+      </p>
 
-      <form action={skipOnboardingDocuments} className="mt-4">
-        <Button type="submit" variant="ghost">
-          Skip for now — I will add evidence manually
-        </Button>
-      </form>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 rounded-2xl border border-line bg-white p-6">
+          <h2 className="text-base font-medium">Resume / CV</h2>
+          <p className="text-sm text-ink-muted">
+            Optional. Pick a category to remember this resume. Matching still scores every resume with AI — category is
+            not a job filter.
+          </p>
+          <ResumeAwareUploadForm action={uploadOnboardingKitDocument} mode="kit" submitLabel="Upload resume" />
+          {resumeCatalog.length > 0 ? (
+            <ul className="mt-2 grid gap-2 text-sm text-ink-muted">
+              {resumeCatalog.map((group) => (
+                <li key={group.documentId}>
+                  {group.categoryLabel} · current {group.currentVersionLabel ?? "v1"} · {group.versions.length} version
+                  {group.versions.length === 1 ? "" : "s"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        <KitDocumentUploadForm
+          action={uploadOnboardingKitDocument}
+          className="grid gap-4 rounded-2xl border border-line bg-white p-6"
+          showUseInKit={false}
+        >
+          <h2 className="text-base font-medium">{CNIC_PHARM_B_LABEL}</h2>
+          <p className="text-sm text-ink-muted">
+            Optional. Choose CNIC or Pharm-B — either one is enough. Skip if you do not have it yet.
+          </p>
+          <Field label="Document type" htmlFor="onboarding-id-doc-type">
+            <Select id="onboarding-id-doc-type" name="type" defaultValue="identity_document">
+              <option value="identity_document">CNIC</option>
+              <option value="family_document">Pharm-B</option>
+            </Select>
+          </Field>
+          <input type="hidden" name="label" value={CNIC_PHARM_B_LABEL} />
+          <Field label="File" htmlFor="onboarding-id-doc-file">
+            <Input
+              id="onboarding-id-doc-file"
+              name="file"
+              type="file"
+              required
+              accept=".txt,.md,.pdf,.docx,text/plain,application/pdf"
+            />
+          </Field>
+          <UseInKitField defaultChecked />
+          <UploadSubmitButton size="md">Upload</UploadSubmitButton>
+        </KitDocumentUploadForm>
+      </div>
+
+      <div className="mt-6 flex flex-wrap gap-3">
+        <form action={continueOnboardingReview}>
+          <SubmitButton>Continue to review</SubmitButton>
+        </form>
+        <form action={skipOnboardingDocuments}>
+          <SubmitButton variant="ghost">Skip for now — remind me next sign-in</SubmitButton>
+        </form>
+      </div>
     </OnboardingShell>
   );
 }

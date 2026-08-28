@@ -9,7 +9,8 @@ import { runOwnedJob } from "@/infra/jobs/runner";
 import {
   APPLICATION_LIFECYCLE_ACTIONS,
 } from "@/lib/application-lifecycle";
-import { detectProfileMemoryField } from "@/lib/needs-you";
+import { detectProfileMemoryField, isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
+import { scheduleRefreshOpenApplicationsFromKit, refreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { logError } from "@/lib/log";
 import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";
@@ -119,6 +120,7 @@ async function upsertFieldMappings(
           confidence: 1,
           excluded_by_default: false,
           label: (field.label || field.fieldKey).slice(0, 180),
+          ...(field.fieldType ? { field_type: field.fieldType } : {}),
         })
         .eq("id", existing.id)
         .eq("user_id", userId);
@@ -136,6 +138,9 @@ async function upsertFieldMappings(
       confidence: 1,
       excluded_by_default: false,
       sensitive: false,
+      ...(field.fieldType ? { field_type: field.fieldType } : {}),
+      options: [],
+      meta: {},
     });
   }
 }
@@ -145,19 +150,31 @@ async function countNeedsYouGaps(
   userId: string,
   applicationId: string,
 ): Promise<number> {
-  const [{ count: reviewCount }, { data: mappings }] = await Promise.all([
-    supabase
-      .from("review_items")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("application_id", applicationId)
-      .eq("resolved", false),
-    supabase
-      .from("field_mappings")
-      .select("value, confidence, excluded_by_default")
-      .eq("user_id", userId)
-      .eq("application_id", applicationId),
-  ]);
+  const [{ count: reviewCount }, { data: mappings }, { data: application }, { data: answers }] =
+    await Promise.all([
+      supabase
+        .from("review_items")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("application_id", applicationId)
+        .eq("resolved", false),
+      supabase
+        .from("field_mappings")
+        .select("value, confidence, excluded_by_default")
+        .eq("user_id", userId)
+        .eq("application_id", applicationId),
+      supabase
+        .from("applications")
+        .select("opportunity_id")
+        .eq("id", applicationId)
+        .eq("user_id", userId)
+        .maybeSingle(),
+      supabase
+        .from("application_answers")
+        .select("question_id, state, approved_text, user_edited_text, missing_facts")
+        .eq("user_id", userId)
+        .eq("application_id", applicationId),
+    ]);
 
   const mappingGaps = (mappings ?? []).filter(
     (row) =>
@@ -166,7 +183,30 @@ async function countNeedsYouGaps(
       Boolean(row.excluded_by_default),
   ).length;
 
-  return (reviewCount ?? 0) + mappingGaps;
+  let questionGaps = 0;
+  if (application?.opportunity_id) {
+    const { data: questions } = await supabase
+      .from("opportunity_questions")
+      .select("id, prompt")
+      .eq("opportunity_id", application.opportunity_id)
+      .eq("user_id", userId);
+    const answerByQ = new Map((answers ?? []).map((row) => [String(row.question_id), row]));
+    for (const question of questions ?? []) {
+      const prompt = String(question.prompt ?? "");
+      if (isStructuredFormFieldPrompt(prompt)) continue;
+      const answer = answerByQ.get(String(question.id));
+      const text = answer
+        ? String(answer.approved_text || answer.user_edited_text || "").trim()
+        : "";
+      const missing = Array.isArray(answer?.missing_facts)
+        ? (answer?.missing_facts as string[]).filter(Boolean)
+        : [];
+      const approved = Boolean(answer?.approved_text) || String(answer?.state ?? "") === "approved";
+      if (!answer || !text || !approved || missing.length > 0) questionGaps += 1;
+    }
+  }
+
+  return (reviewCount ?? 0) + mappingGaps + questionGaps;
 }
 
 export async function markFillStarted(
@@ -223,10 +263,13 @@ async function continueAfterFillStop(
         const review = eligibility
           .filter(
             (item) =>
-              item.state === "unclear" ||
-              item.state === "not_met" ||
-              item.state === "not_evaluated" ||
-              item.state === "partial",
+              item.requirementId !== "none" &&
+              !isNeedsYouSystemNoise(String(item.explanation ?? "")) &&
+              !isNeedsYouSystemNoise(String(item.requirementText ?? "")) &&
+              (item.state === "unclear" ||
+                item.state === "not_met" ||
+                item.state === "not_evaluated" ||
+                item.state === "partial"),
           )
           .map((item) => ({
             user_id: actor.userId,
@@ -241,12 +284,14 @@ async function continueAfterFillStop(
 
         const { data: questions } = await supabase
           .from("opportunity_questions")
-          .select("id")
+          .select("id, prompt")
           .eq("opportunity_id", opportunityId)
           .eq("required", true)
           .limit(8);
 
         for (const question of questions ?? []) {
+          const prompt = String(question.prompt ?? "");
+          if (isStructuredFormFieldPrompt(prompt)) continue;
           try {
             await generateAnswer(supabase, actor, {
               applicationId,
@@ -468,7 +513,29 @@ export async function endFillSession(input: {
     await continueAfterFillStop(supabase, actor, applicationId, application.opportunity_id);
   }
 
+  // Rematch kit into any remaining gaps before final status / count.
+  await refreshOpenApplicationsFromKit(supabase, actor).catch((error) => {
+    logError("fill_lifecycle.kit_refresh_after_stop_failed", {
+      applicationId,
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  });
+
   const needsYouCount = await countNeedsYouGaps(supabase, actor.userId, applicationId);
+  if (application.status !== "submitted") {
+    await supabase
+      .from("applications")
+      .update({
+        status: needsYouCount > 0 ? "review_required" : "in_progress",
+        next_action:
+          needsYouCount > 0
+            ? APPLICATION_LIFECYCLE_ACTIONS.NEEDS_YOU
+            : APPLICATION_LIFECYCLE_ACTIONS.STOPPED_CONTINUING,
+      })
+      .eq("id", applicationId)
+      .eq("user_id", actor.userId);
+  }
+
   const { data: refreshed } = await supabase
     .from("applications")
     .select("status, next_action")

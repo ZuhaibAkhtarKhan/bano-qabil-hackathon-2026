@@ -16,6 +16,11 @@ import {
 } from "@/lib/opportunities/untrusted";
 import { opportunityExtractionSchema, tryGetAiProvider } from "@/infra/ai/openai";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
+import { autoAttachMatchingDocuments } from "@/server/applications/attach-kit";
+import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
+import { draftSuggestedAnswersForApplication } from "@/server/answers/generate";
+import { runOwnedJob } from "@/infra/jobs/runner";
+import { isStructuredFormFieldPrompt } from "@/lib/needs-you";
 
 type Extraction = z.infer<typeof opportunityExtractionSchema>;
 
@@ -147,6 +152,7 @@ export async function persistOpportunityAnalysis(input: {
   applicationId: string;
   extracted: Extraction;
   source: OpportunitySource;
+  actor?: Actor;
 }) {
   const category = opportunityCategorySchema.safeParse(input.extracted.category);
   const deadlineAt = parseDeadline(input.extracted.deadline);
@@ -199,27 +205,32 @@ export async function persistOpportunityAnalysis(input: {
   }
 
   if (input.extracted.questions.length > 0) {
-    const questionRows = input.extracted.questions.slice(0, 20).map((item, index) => ({
-      user_id: input.userId,
-      opportunity_id: input.opportunityId,
-      prompt: item.prompt.slice(0, 1000),
-      limit_value: item.limitValue,
-      limit_unit: item.limitUnit,
-      sort_order: index,
-      source: input.source,
-    }));
-    await input.supabase.from("opportunity_questions").insert(questionRows);
-    await input.supabase.from("application_questions").insert(
-      questionRows.map((item, index) => ({
+    const essayQuestions = input.extracted.questions
+      .filter((item) => !isStructuredFormFieldPrompt(item.prompt))
+      .slice(0, 20);
+    if (essayQuestions.length > 0) {
+      const questionRows = essayQuestions.map((item, index) => ({
         user_id: input.userId,
-        application_id: input.applicationId,
-        prompt: item.prompt,
-        limit_value: item.limit_value,
-        limit_unit: item.limit_unit,
+        opportunity_id: input.opportunityId,
+        prompt: item.prompt.slice(0, 1000),
+        limit_value: item.limitValue,
+        limit_unit: item.limitUnit,
         sort_order: index,
         source: input.source,
-      })),
-    );
+      }));
+      await input.supabase.from("opportunity_questions").insert(questionRows);
+      await input.supabase.from("application_questions").insert(
+        questionRows.map((item, index) => ({
+          user_id: input.userId,
+          application_id: input.applicationId,
+          prompt: item.prompt,
+          limit_value: item.limit_value,
+          limit_unit: item.limit_unit,
+          sort_order: index,
+          source: input.source,
+        })),
+      );
+    }
   }
 
   if (input.extracted.requiredDocuments.length > 0) {
@@ -231,6 +242,28 @@ export async function persistOpportunityAnalysis(input: {
         required: item.required,
       })),
     );
+  }
+
+  if (input.actor) {
+    await autoAttachMatchingDocuments(input.supabase, input.actor, input.applicationId, input.opportunityId);
+    try {
+      await runOwnedJob(
+        input.supabase,
+        { actor: input.actor, type: "answer_draft", inputRef: input.applicationId },
+        async () => {
+          await draftSuggestedAnswersForApplication(
+            input.supabase,
+            input.actor!,
+            input.applicationId,
+            input.opportunityId,
+          );
+        },
+      );
+    } catch {
+      // Suggestions are optional. Analysis still succeeds without them.
+    }
+    // Rematch Application Memory into answers / mappings after analysis.
+    scheduleRefreshOpenApplicationsFromKit(input.supabase, input.actor);
   }
 }
 
@@ -303,6 +336,7 @@ export async function runOpportunityAnalysisJob(input: {
     applicationId: input.applicationId,
     extracted,
     source: input.source,
+    actor: input.actor,
   });
   await evaluateApplicationIntelligence(input.supabase, input.actor, input.applicationId, input.opportunityId);
   return { status: "ready" as const };

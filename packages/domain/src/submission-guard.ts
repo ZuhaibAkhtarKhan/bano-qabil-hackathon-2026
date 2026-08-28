@@ -115,7 +115,7 @@ export function evaluateSubmissionGuard(input: SubmissionInput): SubmissionGuard
       Boolean(input.resumeMatchRecommended),
       input.resumeMatchRecommended
         ? "A recommended resume has been selected."
-        : "No resume recommendation found. Run Fit Index analysis first.",
+        : "No resume on file yet — upload a categorized resume in Memory.",
       false,
     ),
   );

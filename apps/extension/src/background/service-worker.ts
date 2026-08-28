@@ -70,6 +70,8 @@ type FillSession = {
 const FILL_SESSION_KEY = "fillSession";
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
 const autoFillInFlight = new Set<number>();
+/** Bumped on Stop so in-flight continueFillOnTab aborts and cannot resurrect the session. */
+let fillHaltGeneration = 0;
 
 async function activeTab(): Promise<chrome.tabs.Tab> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -160,6 +162,8 @@ async function applyMappingsToTab(input: {
   applicationId: string;
   mappings: Mapping[];
   highlightKeys?: string[];
+  /** True when the user explicitly clicked Fill — clears a prior Stop. */
+  resumeFill?: boolean;
 }) {
   const mappings = input.mappings.filter(
     (item) => item.approvalState !== "blocked" && !item.sensitive && item.memoryPath !== "Blocked",
@@ -173,6 +177,7 @@ async function applyMappingsToTab(input: {
     applicationId: input.applicationId,
     highlightKeys,
     autoContinue: true,
+    resumeFill: Boolean(input.resumeFill),
     mappings: mappings.map((item) => {
       const versionId = item.attachment?.versionId || item.proposedValue;
       const file = versionId ? files.get(versionId) : undefined;
@@ -213,6 +218,7 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
   if (autoFillInFlight.has(tabId)) return { ok: false, reason: "busy" };
   const session = await loadFillSession();
   if (!session) return { ok: false, reason: "no-session" };
+  const haltAtStart = fillHaltGeneration;
 
   const tab = await chrome.tabs.get(tabId);
   let origin: string;
@@ -226,12 +232,16 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
 
   autoFillInFlight.add(tabId);
   try {
+    if (fillHaltGeneration !== haltAtStart) return { ok: false, reason: "stopped" };
     await ensureHostAccess(origin).catch(() => undefined);
     await ensureContentScript(tabId);
 
     // Next-step UIs (Google Forms) often paint fields after the click; retry briefly.
     let inventory: InventoryResponse | null = null;
     for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (fillHaltGeneration !== haltAtStart || !(await loadFillSession())) {
+        return { ok: false, reason: "stopped" };
+      }
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
       try {
         inventory = await sendToTab<InventoryResponse>(tabId, { type: "INVENTORY" });
@@ -241,12 +251,20 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
       if (inventory?.fields?.length) break;
     }
     if (!inventory?.fields?.length) return { ok: false, reason: "no-fields" };
+    if (fillHaltGeneration !== haltAtStart || !(await loadFillSession())) {
+      return { ok: false, reason: "stopped" };
+    }
 
     const plan = await createFillPlan({
       applicationId: session.applicationId,
       origin,
       fields: inventory.fields,
+      hazards: inventory.hazards,
     });
+
+    if (fillHaltGeneration !== haltAtStart || !(await loadFillSession())) {
+      return { ok: false, reason: "stopped" };
+    }
 
     const result = (await applyMappingsToTab({
       tabId,
@@ -254,7 +272,12 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
       applicationId: session.applicationId,
       mappings: plan.mappings as Mapping[],
       highlightKeys: inventory.fields.map((field) => field.key),
-    })) as { filled?: Array<{ filled?: boolean }> };
+      resumeFill: false,
+    })) as { filled?: Array<{ filled?: boolean }>; stopped?: boolean };
+
+    if (fillHaltGeneration !== haltAtStart || result.stopped || !(await loadFillSession())) {
+      return { ok: false, reason: "stopped" };
+    }
 
     await saveFillSession({
       ...session,
@@ -278,9 +301,20 @@ async function clearFillSession(
   reason: "stopped" | "tab_closed" | "origin_left" = "stopped",
 ): Promise<void> {
   const session = await loadFillSession();
-  if (!session) return;
+  if (!session) {
+    fillHaltGeneration += 1;
+    if (tabId != null) {
+      try {
+        await sendToTab(tabId, { type: "STOP_AUTO_CONTINUE" });
+      } catch {
+        // Tab may already be gone.
+      }
+    }
+    return;
+  }
   if (tabId != null && session.tabId !== tabId) return;
 
+  fillHaltGeneration += 1;
   await syncFillSessionEnd(session, reason);
 
   await chrome.storage.local.remove(FILL_SESSION_KEY);
@@ -400,14 +434,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === "STOP_FILL_SESSION") {
+      fillHaltGeneration += 1;
       const session = await loadFillSession();
       if (session) {
         await syncFillSessionEnd(session, "stopped");
       }
       await chrome.storage.local.remove(FILL_SESSION_KEY);
-      if (session?.tabId) {
+      const tabId = session?.tabId ?? (await activeTab().catch(() => null))?.id;
+      if (tabId) {
         try {
-          await sendToTab(session.tabId, { type: "STOP_AUTO_CONTINUE" });
+          await sendToTab(tabId, { type: "STOP_AUTO_CONTINUE" });
         } catch {
           // Ignore closed tabs.
         }
@@ -490,6 +526,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applicationId: String(message.applicationId),
         origin: String(message.origin ?? ""),
         fields: message.fields as unknown[],
+        hazards: message.hazards,
       });
     }
 
@@ -510,6 +547,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const applicationId = String(message.applicationId ?? "");
       const fillSessionId = message.fillSessionId ? String(message.fillSessionId) : undefined;
       if (applicationId) {
+        fillHaltGeneration += 1;
         await saveFillSession({
           applicationId,
           origin,
@@ -526,6 +564,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applicationId,
         mappings: message.mappings as Mapping[],
         highlightKeys: Array.isArray(message.highlightKeys) ? (message.highlightKeys as string[]) : undefined,
+        resumeFill: true,
       });
     }
 

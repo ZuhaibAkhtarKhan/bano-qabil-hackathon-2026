@@ -34,8 +34,10 @@ export {
 
 export {
   RESUME_FOCUSES,
+  RESUME_FIT_WEAK_THRESHOLD,
   classifyOpportunityFocus,
   classifyResumeFocus,
+  isWeakResumeFit,
   rankResumes,
   type RankedResume,
   type ResumeFocusId,

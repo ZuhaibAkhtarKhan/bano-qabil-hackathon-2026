@@ -5,7 +5,7 @@ import type { Actor } from "@/auth/actor";
 import { loadAppConfig } from "@/config/env";
 import {
   chunkDocumentText,
-  extractTextFromBuffer,
+  extractDocumentText,
   type readValidatedUpload,
 } from "@/lib/documents/upload-security";
 import { nextVersionLabel } from "@/lib/documents/versioning";
@@ -224,7 +224,7 @@ export async function processDocumentVersion(input: {
   buffer: Buffer;
   mimeType: string;
 }): Promise<{ extracted: boolean; embedded: boolean; textExtracted: boolean }> {
-  const extractedText = extractTextFromBuffer(input.buffer, input.mimeType);
+  const extractedText = await extractDocumentText(input.buffer, input.mimeType);
   let extracted = false;
   let embedded = false;
 

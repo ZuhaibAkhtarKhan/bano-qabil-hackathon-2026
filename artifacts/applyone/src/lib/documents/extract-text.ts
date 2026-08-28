@@ -1,69 +1,8 @@
-import { inflateRawSync, inflateSync } from "node:zlib";
+import { inflateRawSync } from "node:zlib";
 
-const MAX_TEXT = 80_000;
+import { extractPdfTextWithAi, PDF_MAX_TEXT } from "@/lib/documents/extract-pdf-ai";
 
-function decodePdfString(raw: string): string {
-  return raw
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\(\d{1,3})/g, (_, oct: string) => String.fromCharCode(parseInt(oct, 8)));
-}
-
-function stringsFromPdfContent(content: string): string {
-  const parts: string[] = [];
-  const literal = /\((?:\\.|[^\\)])*\)/g;
-  for (const match of content.matchAll(literal)) {
-    parts.push(decodePdfString(match[0].slice(1, -1)));
-  }
-  const hex = /<([0-9A-Fa-f\s]+)>/g;
-  for (const match of content.matchAll(hex)) {
-    const hexes = (match[1] ?? "").replace(/\s+/g, "");
-    if (hexes.length % 2 !== 0) continue;
-    const chars: string[] = [];
-    for (let i = 0; i < hexes.length; i += 2) {
-      chars.push(String.fromCharCode(parseInt(hexes.slice(i, i + 2), 16)));
-    }
-    parts.push(chars.join(""));
-  }
-  return parts.join(" ").replace(/\s+/g, " ").trim();
-}
-
-function inflatePdfStream(bytes: Buffer): string | null {
-  try {
-    return inflateSync(bytes).toString("latin1");
-  } catch {
-    try {
-      return inflateRawSync(bytes).toString("latin1");
-    } catch {
-      return null;
-    }
-  }
-}
-
-export function extractPdfText(buffer: Buffer): string | null {
-  const source = buffer.toString("latin1");
-  if (source.includes("/Encrypt")) return null;
-
-  const chunks: string[] = [];
-  const uncompressed = stringsFromPdfContent(source);
-  if (uncompressed) chunks.push(uncompressed);
-
-  const streamPattern = /stream\r?\n([\s\S]*?)endstream/g;
-  for (const match of source.matchAll(streamPattern)) {
-    const payload = Buffer.from(match[1] ?? "", "latin1");
-    const inflated = inflatePdfStream(payload);
-    if (!inflated) continue;
-    const text = stringsFromPdfContent(inflated);
-    if (text) chunks.push(text);
-  }
-
-  const joined = chunks.join(" ").replace(/\s+/g, " ").trim();
-  return joined ? joined.slice(0, MAX_TEXT) : null;
-}
+const MAX_TEXT = PDF_MAX_TEXT;
 
 function zipEntry(buffer: Buffer, fileName: string): Buffer | null {
   let offset = 0;
@@ -100,15 +39,48 @@ export function extractDocxText(buffer: Buffer): string | null {
   }
 }
 
+/** PDF text extraction via the configured OpenAI-compatible vision/document API. */
+export async function extractPdfText(
+  buffer: Buffer,
+  options?: { fileName?: string },
+): Promise<string | null> {
+  return extractPdfTextWithAi(buffer, options);
+}
+
+async function extractDocxWithMammoth(buffer: Buffer): Promise<string | null> {
+  try {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer });
+    const cleaned = String(result.value ?? "").replace(/\s+/g, " ").trim();
+    return cleaned ? cleaned.slice(0, MAX_TEXT) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractTextFromBuffer(buffer: Buffer, mimeType: string): string | null {
   if (mimeType === "text/plain" || mimeType === "text/markdown" || mimeType === "text/x-markdown") {
     return buffer.toString("utf8").slice(0, MAX_TEXT);
   }
-  if (mimeType === "application/pdf") {
-    return extractPdfText(buffer);
-  }
   if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     return extractDocxText(buffer);
   }
+  if (mimeType === "application/pdf") {
+    return null;
+  }
   return null;
+}
+
+export async function extractDocumentText(
+  buffer: Buffer,
+  mimeType: string,
+  options?: { fileName?: string },
+): Promise<string | null> {
+  if (mimeType === "application/pdf") {
+    return extractPdfText(buffer, options);
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    return (await extractDocxWithMammoth(buffer)) ?? extractDocxText(buffer);
+  }
+  return extractTextFromBuffer(buffer, mimeType);
 }

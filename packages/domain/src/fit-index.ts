@@ -2,6 +2,7 @@ import { eligibilityFactorScore } from "./eligibility";
 import {
   eligibleEvidence,
   evidenceBlob,
+  verifiedFacts,
   verifiedSkills,
   type EligibilityContext,
   type EligibilityVerdict,
@@ -119,12 +120,27 @@ export function computeFitIndex(input: FitIndexInput): FitIndexResult {
     .filter((item) => item.kind === "employment" || item.kind === "leadership" || item.kind === "volunteering")
     .map(evidenceBlob)
     .join(" ");
-  const educationCorpus = usable
-    .filter((item) => item.kind === "education" || item.kind === "certification")
-    .map(evidenceBlob)
+  const educationFacts = verifiedFacts(input.context?.facts)
+    .filter((item) => item.category === "education" || /university|college|school|degree|education/i.test(item.value))
+    .map((item) => item.value)
+    .join(" ");
+  const educationCorpus = [
+    usable
+      .filter((item) => item.kind === "education" || item.kind === "certification")
+      .map(evidenceBlob)
+      .join(" "),
+    educationFacts,
+  ]
+    .filter(Boolean)
     .join(" ");
   const projectCorpus = usable
-    .filter((item) => item.kind === "project" || item.kind === "achievement" || item.kind === "research")
+    .filter(
+      (item) =>
+        item.kind === "project" ||
+        item.kind === "achievement" ||
+        item.kind === "research" ||
+        item.kind === "leadership",
+    )
     .map(evidenceBlob)
     .join(" ");
 

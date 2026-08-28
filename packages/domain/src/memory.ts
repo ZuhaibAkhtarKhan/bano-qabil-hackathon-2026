@@ -10,6 +10,7 @@ export const MEMORY_SECTIONS: Array<{ id: MemoryCategory; label: string }> = [
   { id: "certifications", label: "Certifications" },
   { id: "leadership", label: "Leadership" },
   { id: "research", label: "Research" },
+  { id: "answers", label: "Saved answers" },
   { id: "links", label: "Links" },
   { id: "supporting", label: "Supporting Evidence" },
 ];
@@ -38,6 +39,36 @@ export function normalizeMemoryToken(value: string | null | undefined): string {
     .slice(0, 80);
 }
 
+/** Soft-normalize orgs so "Personal" / "Personal Project" / null and "Udemy" / "Jonas (Udemy)" collide. */
+export function normalizeOrganizationToken(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw || /^(personal(\s+project)?|self|myself|n\/?a|unknown|none|-|—|–)$/i.test(raw)) {
+    return "personal";
+  }
+  if (/\budemy\b/i.test(raw)) return "udemy";
+  if (/\bedx\b|\bharvard\b/i.test(raw)) return "edx";
+  if (/\bcoursera\b/i.test(raw)) return "coursera";
+  if (/\bicpc\b/i.test(raw)) return "icpc";
+  return normalizeMemoryToken(raw) || "personal";
+}
+
+/**
+ * Stable identity for kit evidence rows (ignores title vs end_year field splits).
+ * Used to prevent duplicate inserts across fill passes / documents.
+ */
+export function evidenceIdentityKey(input: {
+  kind: string;
+  title: string;
+  organization?: string | null;
+}): string {
+  const category = categoryFromKind(input.kind);
+  return [
+    category,
+    normalizeOrganizationToken(input.organization),
+    normalizeMemoryToken(input.title) || "item",
+  ].join(":");
+}
+
 export function memoryFactKey(input: {
   category: MemoryCategory;
   organization?: string | null;
@@ -46,7 +77,7 @@ export function memoryFactKey(input: {
 }): string {
   return [
     input.category,
-    normalizeMemoryToken(input.organization) || "unknown",
+    normalizeOrganizationToken(input.organization),
     normalizeMemoryToken(input.title) || "item",
     normalizeMemoryToken(input.field) || "value",
   ].join(":");

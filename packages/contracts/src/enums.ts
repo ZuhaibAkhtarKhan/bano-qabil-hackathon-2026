@@ -9,8 +9,23 @@ export const documentTypeSchema = z.enum([
   "certificate",
   "portfolio",
   "supporting_document",
+  "identity_document",
+  "family_document",
   "other",
 ]);
+
+export const DOCUMENT_TYPE_LABELS: Record<z.infer<typeof documentTypeSchema>, string> = {
+  resume: "Resume / CV",
+  resume_variant: "Resume variant",
+  cover_letter: "Cover letter",
+  transcript: "Transcript",
+  certificate: "Certificate",
+  portfolio: "Portfolio",
+  supporting_document: "Supporting document",
+  identity_document: "CNIC / national ID",
+  family_document: "B-form / family document",
+  other: "Other application document",
+};
 export const documentVersionStatusSchema = z.enum([
   "uploading",
   "ready",
@@ -124,6 +139,7 @@ export const memoryCategorySchema = z.enum([
   "research",
   "links",
   "supporting",
+  "answers",
 ]);
 
 export const extractionStatusSchema = z.enum(["manual", "extracted", "user_edited"]);

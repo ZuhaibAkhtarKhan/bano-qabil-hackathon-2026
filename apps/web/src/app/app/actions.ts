@@ -2,9 +2,11 @@
 
 import { consentInputSchema, consentUpdateFields } from "@1apply/contracts";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { logError, logInfo } from "@/lib/log";
+import { KIT_REMINDED_COOKIE } from "@/lib/post-auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { safeOnboardingReturn } from "@/lib/auth-errors";
 import { revokeToken } from "@/server/integrations/google-oauth";
@@ -37,6 +39,8 @@ export async function signOut() {
     await recordAuditEvent(supabase, "auth.sign_out", {});
   }
   await supabase.auth.signOut();
+  const jar = await cookies();
+  jar.delete(KIT_REMINDED_COOKIE);
   logInfo("auth.sign_out");
   redirect("/");
 }
@@ -118,12 +122,12 @@ export async function finishOnboarding() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, terms_accepted_at, ai_processing_accepted_at")
+    .select("display_name, terms_accepted_at, ai_processing_accepted_at, preferences")
     .eq("id", user.id)
     .maybeSingle();
 
-  if (!profile?.terms_accepted_at || !profile.ai_processing_accepted_at || !profile.display_name?.trim()) {
-    redirect("/app/onboarding/profile?error=required");
+  if (!profile?.terms_accepted_at || !profile.ai_processing_accepted_at) {
+    redirect("/app/onboarding/consent?error=required");
   }
 
   const now = new Date().toISOString();

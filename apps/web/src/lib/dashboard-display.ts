@@ -12,7 +12,7 @@ export function applicationTableMeta(status: string, nextAction: string | null) 
       !/review analyzed requirements/i.test(action));
 
   if (needsYou) {
-    return { filter: "needs_you" as const, statusLabel: "Needs you", statusTone: "coral" as const };
+    return { filter: "needs_you" as const, statusLabel: "Need you", statusTone: "coral" as const };
   }
   if (action === APPLICATION_LIFECYCLE_ACTIONS.FILLING) {
     return { filter: "in_flight" as const, statusLabel: "Filling", statusTone: "teal" as const };
@@ -93,6 +93,74 @@ export function companyFromOpportunity(opportunity: {
 export function sourceLabelFromOpportunity(opportunity: { source?: string | null } | null) {
   if (opportunity?.source === "extension") return "Extension";
   return null;
+}
+
+export type ApplicationsTrackerRowInput = {
+  id: string;
+  status: string;
+  next_action: string | null;
+  submitted_at: string | null;
+  updated_at: string;
+  opportunities:
+    | {
+        title?: string | null;
+        organization?: string | null;
+        source_url?: string | null;
+        canonical_url?: string | null;
+        source?: string | null;
+      }
+    | Array<{
+        title?: string | null;
+        organization?: string | null;
+        source_url?: string | null;
+        canonical_url?: string | null;
+        source?: string | null;
+      }>
+    | null;
+  requiredDocumentLabels?: string[];
+  attachedDocumentLabels?: string[];
+};
+
+/** Map an application list row into the shared tracker table shape (dashboard + /app/applications). */
+export function toApplicationsTrackerRow(row: ApplicationsTrackerRowInput) {
+  const opportunity = Array.isArray(row.opportunities) ? row.opportunities[0] ?? null : row.opportunities;
+  const company = companyFromOpportunity(opportunity);
+  const meta = applicationTableMeta(row.status, row.next_action);
+  const docs = dashboardDocumentStatuses({
+    requiredLabels: row.requiredDocumentLabels ?? [],
+    attachedLabels: row.attachedDocumentLabels ?? [],
+  });
+  return {
+    id: row.id,
+    href: `/app/applications/${row.id}`,
+    company,
+    role: opportunity?.title?.trim() || "Untitled opportunity",
+    resume: docs.resume,
+    cover: docs.cover,
+    statusLabel: meta.statusLabel,
+    statusTone: meta.statusTone,
+    filter: meta.filter,
+    appliedLabel: relativeTimeLabel(row.submitted_at, row.updated_at),
+    initial: company.slice(0, 2).toUpperCase(),
+    sourceLabel: sourceLabelFromOpportunity(opportunity),
+    needsYouCount: 0,
+  };
+}
+
+/** Attach Need You field counts and classify the row for dashboard filters / board. */
+export function withNeedsYouFieldCount<T extends ReturnType<typeof toApplicationsTrackerRow>>(
+  row: T,
+  needsYouCount: number,
+): T {
+  const count = Math.max(0, needsYouCount);
+  if (count <= 0) return { ...row, needsYouCount: 0 };
+  return {
+    ...row,
+    needsYouCount: count,
+    filter: "needs_you",
+    statusLabel: "Need you",
+    statusTone: "coral",
+  };
 }
 
 export type DashboardDocStatus = "Not required" | "Missing" | "Ready";

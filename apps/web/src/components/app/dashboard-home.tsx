@@ -4,6 +4,10 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, HelpCircle, Search } from "lucide-react";
 
+import {
+  ApplicationsTrackerTable,
+  type ApplicationsTrackerRow,
+} from "@/components/app/applications-tracker-table";
 import { useRealtime } from "@/components/app/realtime-provider";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
@@ -19,19 +23,29 @@ export type DashboardMatch = {
   sourceLabel: string | null;
 };
 
-export type DashboardApplicationRow = {
-  id: string;
-  href: string;
-  company: string;
-  role: string;
-  resume: string;
-  cover: string;
-  statusLabel: string;
-  statusTone: "mint" | "teal" | "coral" | "sand" | "muted";
+export type DashboardApplicationRow = ApplicationsTrackerRow & {
   filter: "all" | "in_flight" | "needs_you" | "failed" | "skipped";
-  appliedLabel: string;
-  initial: string;
-  sourceLabel: string | null;
+};
+
+export type DashboardKitProps = {
+  ready: boolean;
+  missing: string[];
+  showCard: boolean;
+};
+
+export type DashboardLaneProps = {
+  needsYou: number;
+  sendsAtDeadline: number;
+  waitingHost: number;
+  prepareAndSendIfSilent: boolean;
+  needsYouPreview: Array<{
+    id: string;
+    title: string;
+    host: string;
+    deadlineLabel: string;
+    summary: string;
+    href: string;
+  }>;
 };
 
 const CARD_TONES = {
@@ -39,14 +53,6 @@ const CARD_TONES = {
   mint: "border-emerald-200/80 bg-[#eef8f1]",
   violet: "border-violet-200/80 bg-[#f3f0fb]",
   coral: "border-rose-200/80 bg-[#fbf0f0]",
-} as const;
-
-const STATUS_DOT = {
-  mint: "bg-emerald-500",
-  teal: "bg-cyan-500",
-  coral: "bg-rose-500",
-  sand: "bg-amber-500",
-  muted: "bg-zinc-400",
 } as const;
 
 const FILTERS = [
@@ -60,9 +66,15 @@ const FILTERS = [
 export function DashboardHome({
   matches,
   applications,
+  displayName = null,
+  kit,
+  lanes,
 }: {
   matches: DashboardMatch[];
   applications: DashboardApplicationRow[];
+  displayName?: string | null;
+  kit?: DashboardKitProps;
+  lanes?: DashboardLaneProps;
 }) {
   const { unreadCount } = useRealtime();
   const [query, setQuery] = useState("");
@@ -120,16 +132,25 @@ export function DashboardHome({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return applications.filter((row) => {
-      if (filter !== "all" && row.filter !== filter) return false;
+      if (filter === "needs_you") {
+        if (!(row.needsYouCount > 0 || row.filter === "needs_you")) return false;
+      } else if (filter !== "all" && row.filter !== filter) {
+        return false;
+      }
       if (!q) return true;
       return `${row.company} ${row.role} ${row.statusLabel} ${row.sourceLabel ?? ""}`.toLowerCase().includes(q);
     });
   }, [applications, filter, query]);
 
   return (
-    <div className="min-h-full bg-white">
+    <div className="min-h-full bg-white" data-tour="page-dashboard">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-6 lg:px-8">
-        <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
+          {displayName ? (
+            <p className="truncate text-xs text-ink-muted">Welcome back, {displayName}</p>
+          ) : null}
+        </div>
         <label className="mx-auto hidden max-w-md flex-1 sm:block">
           <span className="sr-only">Search applications</span>
           <span className="relative block">
@@ -144,6 +165,9 @@ export function DashboardHome({
           </span>
         </label>
         <div className="ml-auto flex items-center gap-2">
+          <ButtonLink href="/app/opportunities" size="sm">
+            Add a posting
+          </ButtonLink>
           <Link
             href="/app/notifications"
             className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-ink-muted hover:text-ink"
@@ -165,13 +189,83 @@ export function DashboardHome({
       </header>
 
       <div className="space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+        {kit?.showCard ? (
+          <section className="rounded-2xl border border-amber-200/80 bg-[#faf6e8] p-5" aria-labelledby="kit-heading">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Your kit</p>
+            <h2 id="kit-heading" className="mt-1 text-base font-semibold tracking-tight text-ink">
+              Upload once, reuse everywhere
+            </h2>
+            <p className="mt-1.5 text-sm text-ink-muted">
+              Name, university, resume, CNIC, and B-form live in one place. Missing:{" "}
+              {kit.missing.join(", ") || "nothing"}.
+            </p>
+            <div className="mt-4">
+              <ButtonLink href="/app/memory" size="sm">
+                Open your kit
+              </ButtonLink>
+            </div>
+          </section>
+        ) : null}
+
+        {lanes ? (
+          <section aria-labelledby="packet-lanes-heading">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="packet-lanes-heading" className="text-base font-semibold tracking-tight text-ink">
+                Packets needing attention
+              </h2>
+              <Link href="/app/needs-you" className="text-sm font-medium text-ink-muted hover:text-ink">
+                Open Need You →
+              </Link>
+            </div>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Needs you</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.needsYou}</dd>
+                <p className="mt-1 text-xs text-ink-muted">Missing facts, docs, or answers</p>
+              </div>
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Sends at deadline</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.sendsAtDeadline}</dd>
+                <p className="mt-1 text-xs text-ink-muted">
+                  {lanes.prepareAndSendIfSilent
+                    ? "Silence will freeze the packet"
+                    : "Turn on in Settings to auto-freeze"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Waiting on host</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.waitingHost}</dd>
+                <p className="mt-1 text-xs text-ink-muted">CAPTCHA, signature, or payment</p>
+              </div>
+            </dl>
+            {lanes.needsYouPreview.length > 0 ? (
+              <ul className="mt-3 grid gap-2">
+                {lanes.needsYouPreview.map((packet) => (
+                  <li key={packet.id}>
+                    <Link
+                      href={packet.href}
+                      className="block rounded-2xl border border-line bg-white px-4 py-3 hover:bg-[#fafbf8]/60"
+                    >
+                      <p className="text-sm font-medium text-ink">{packet.title}</p>
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        {packet.host} · {packet.deadlineLabel}
+                      </p>
+                      <p className="mt-1 text-xs text-ink-muted">{packet.summary}</p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
+
         <section ref={matchesRef} aria-labelledby="top-matches-heading">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 id="top-matches-heading" className="text-base font-semibold tracking-tight text-ink">
               Top job matches
             </h2>
             <Link href="/app/opportunities" className="text-sm font-medium text-ink-muted hover:text-ink">
-              Browse jobs →
+              Add a posting →
             </Link>
           </div>
 
@@ -180,8 +274,8 @@ export function DashboardHome({
               <EmptyState
                 eyebrow="Matches"
                 title="No opportunities yet"
-                body="Save a page from the extension or add an opportunity here — matches and applications show up in one pipeline."
-                actions={<ButtonLink href="/app/opportunities">Add opportunity</ButtonLink>}
+                body="Save a page from the extension or add a posting here — matches and applications show up in one pipeline."
+                actions={<ButtonLink href="/app/opportunities">Add a posting</ButtonLink>}
               />
             </div>
           ) : (
@@ -247,84 +341,19 @@ export function DashboardHome({
                 title={applications.length === 0 ? "No applications yet" : "No matches for this filter"}
                 body={
                   applications.length === 0
-                    ? "Save a job page from the extension or create an opportunity on the site. Both land in this list."
+                    ? "Save a job page from the extension or add a posting on the site. Both land in this list."
                     : "Try another filter or clear the search."
                 }
                 actions={
                   applications.length === 0 ? (
-                    <ButtonLink href="/app/opportunities">Add opportunity</ButtonLink>
+                    <ButtonLink href="/app/opportunities">Add a posting</ButtonLink>
                   ) : undefined
                 }
               />
             </div>
           ) : (
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-line">
-              <table className="w-full min-w-[720px] table-fixed text-left text-sm">
-                <thead className="border-b border-line bg-[#fafbf8] text-[11px] uppercase tracking-wider text-ink-muted">
-                  <tr>
-                    <th className="w-[36%] px-4 py-3 font-medium">Position</th>
-                    <th className="w-[11%] px-4 py-3 font-medium">Resume</th>
-                    <th className="w-[13%] px-4 py-3 font-medium">Cover letter</th>
-                    <th className="w-[22%] px-4 py-3 font-medium">Status</th>
-                    <th className="w-[18%] px-4 py-3 font-medium">Applied</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row) => (
-                    <tr key={row.id} className="border-b border-line last:border-b-0 hover:bg-[#fafbf8]/60">
-                      <td className="px-4 py-3.5">
-                        <Link href={row.href} className="flex items-center gap-3">
-                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white text-xs font-semibold text-ink">
-                            {row.initial}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-medium leading-tight text-ink">{row.company}</span>
-                              {row.sourceLabel ? (
-                                <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                                  {row.sourceLabel}
-                                </span>
-                              ) : null}
-                            </span>
-                            <span className="block truncate text-xs text-ink-muted">{row.role}</span>
-                          </span>
-                        </Link>
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-3.5 text-xs",
-                          row.resume === "Ready"
-                            ? "text-emerald-700"
-                            : row.resume === "Missing"
-                              ? "text-rose-700"
-                              : "text-ink-muted",
-                        )}
-                      >
-                        {row.resume}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-3.5 text-xs",
-                          row.cover === "Ready"
-                            ? "text-emerald-700"
-                            : row.cover === "Missing"
-                              ? "text-rose-700"
-                              : "text-ink-muted",
-                        )}
-                      >
-                        {row.cover}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink">
-                          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[row.statusTone])} aria-hidden="true" />
-                          <span className="truncate">{row.statusLabel}</span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs text-ink-muted">{row.appliedLabel}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-4">
+              <ApplicationsTrackerTable rows={filtered} />
             </div>
           )}
         </section>

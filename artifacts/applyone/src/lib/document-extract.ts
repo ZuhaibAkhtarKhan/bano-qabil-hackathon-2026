@@ -10,14 +10,7 @@ export async function extractDocumentText(file: File): Promise<string> {
     return result.value;
   }
   if (mime === "application/pdf" || file.name.endsWith(".pdf")) {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-    const pages = await Promise.all(Array.from({ length: document.numPages }, async (_, index) => {
-      const page = await document.getPage(index + 1);
-      const content = await page.getTextContent();
-      return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
-    }));
-    return pages.join("\n\n");
+    throw new Error("PDF text extraction runs on the server via AI. Upload through the document pipeline.");
   }
   throw new Error("Use PDF, DOCX, TXT, or Markdown files.");
 }

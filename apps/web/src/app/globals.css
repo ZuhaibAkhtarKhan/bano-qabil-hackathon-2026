@@ -576,6 +576,16 @@ body {
   }
 }
 
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 /* Engine bars + How it works (Nominal-style sticky scroll) */
 .engine-bars-band {
@@ -1272,6 +1282,23 @@ body {
 
 .dashboard-live-dot {
   animation: dashboard-live-pulse 1.4s ease-in-out infinite;
+}
+
+.tour-spotlight {
+  box-shadow: 0 0 0 9999px rgb(14 14 14 / 0.42);
+  outline: 4px solid color-mix(in srgb, var(--color-sand) 55%, transparent);
+  outline-offset: 2px;
+  animation: tour-spotlight-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes tour-spotlight-pulse {
+  0%,
+  100% {
+    outline-width: 4px;
+  }
+  50% {
+    outline-width: 8px;
+  }
 }
 
 @keyframes dashboard-live-pulse {

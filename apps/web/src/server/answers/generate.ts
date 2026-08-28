@@ -6,6 +6,7 @@ import {
   finalizeGroundedDraft,
   groundingScore,
   lengthWarnings,
+  packetAnswerText,
   parsePersona,
   rankEvidenceForAnswer,
   suggestPreviousAnswers,
@@ -17,6 +18,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Actor } from "@/auth/actor";
 import { getAiProvider, groundedDraftModelSchema } from "@/infra/ai/openai";
 import { logError } from "@/lib/log";
+import { isStructuredFormFieldPrompt } from "@/lib/needs-you";
+import { resolveKitValueForLabel } from "@/server/applications/refresh-from-kit";
+import { loadMemoryCatalog } from "@/server/extension/memory-catalog";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import type { EvidenceRow } from "@/server/types";
 
@@ -347,4 +351,93 @@ export async function generateAnswer(
     groundingScore: gScore,
     state,
   };
+}
+
+export async function draftSuggestedAnswersForApplication(
+  supabase: SupabaseClient,
+  actor: Actor,
+  applicationId: string,
+  opportunityId: string,
+) {
+  const [{ data: questions }, { data: answers }] = await Promise.all([
+    supabase
+      .from("opportunity_questions")
+      .select("id, prompt")
+      .eq("opportunity_id", opportunityId)
+      .order("sort_order", { ascending: true })
+      .limit(20),
+    supabase
+      .from("application_answers")
+      .select("question_id, original_ai_text, user_edited_text, approved_text")
+      .eq("application_id", applicationId),
+  ]);
+
+  const answered = new Set(
+    (answers ?? [])
+      .filter((row) =>
+        Boolean(
+          packetAnswerText({
+            approvedText: (row.approved_text as string | null) ?? null,
+            userEditedText: (row.user_edited_text as string | null) ?? null,
+            originalAiText: (row.original_ai_text as string | null) ?? null,
+          }),
+        ),
+      )
+      .map((row) => String(row.question_id)),
+  );
+
+  const catalog = await loadMemoryCatalog(supabase, actor, applicationId);
+  let drafted = 0;
+
+  for (const question of questions ?? []) {
+    const questionId = String(question.id);
+    if (answered.has(questionId)) continue;
+    const prompt = String(question.prompt ?? "").trim();
+    if (!prompt) continue;
+
+    // Prefer Application Memory for contact/profile and any kit-resolvable prompt.
+    const fromKit = resolveKitValueForLabel(prompt, catalog);
+    if (fromKit?.value) {
+      const { error } = await supabase.from("application_answers").insert({
+        user_id: actor.userId,
+        application_id: applicationId,
+        question_id: questionId,
+        state: "approved",
+        original_ai_text: fromKit.value.slice(0, 8000),
+        user_edited_text: fromKit.value.slice(0, 8000),
+        approved_text: fromKit.value.slice(0, 8000),
+        evidence_ids: [],
+        claim_flags: [],
+        missing_facts: [],
+        warnings: [],
+        grounding_score: fromKit.confidence,
+        model: "kit-direct",
+        generation_count: 0,
+      });
+      if (!error) {
+        drafted += 1;
+        answered.add(questionId);
+      }
+      continue;
+    }
+
+    // Structured fields without kit data wait for Need You / fill — not essay AI.
+    if (isStructuredFormFieldPrompt(prompt)) continue;
+
+    const { isAiConfigured } = await import("@/infra/ai/openai");
+    if (!isAiConfigured()) continue;
+
+    try {
+      await generateAnswer(supabase, actor, {
+        applicationId,
+        questionId,
+        intent: "draft",
+        tone: "formal",
+      });
+      drafted += 1;
+    } catch {
+      continue;
+    }
+  }
+  return drafted;
 }

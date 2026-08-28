@@ -13,7 +13,7 @@ import { runOwnedJob } from "@/server/jobs/runner";
 import { processDocumentVersion } from "@/server/documents/service";
 import { resolveMemoryConflict, syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { recordAuditEvent } from "@/server/audit";
-import { extractTextFromBuffer } from "@/lib/documents/extract-text";
+import { extractDocumentText } from "@/lib/documents/extract-text";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 
 const MEMORY = "/app/memory";
@@ -358,7 +358,7 @@ export async function uploadMemoryDocument(formData: FormData) {
       await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
     }
 
-    const extractedText = extractTextFromBuffer(upload.buffer, upload.mimeType);
+    const extractedText = await extractDocumentText(upload.buffer, upload.mimeType);
     if (extractedText) notice = "extracted";
     else notice = "binary_stored";
 

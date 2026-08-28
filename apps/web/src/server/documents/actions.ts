@@ -7,20 +7,23 @@ import { documentTypeSchema } from "@1apply/contracts";
 
 import { createDocumentReadUrl } from "@/infra/storage/documents";
 import { logError } from "@/lib/log";
-import { extractDocumentText } from "@/lib/documents/extract-text";
+import { parseUseInKit, uploadQueuedNotice } from "@/lib/document-upload-options";
 import { readValidatedUpload, UploadValidationError } from "@/lib/documents/upload-security";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import {
   addDocumentVersion,
   assertOwnedVersion,
   createDocumentWithVersion,
-  processDocumentVersion,
+  deleteOwnedDocument,
+  deleteOwnedDocumentVersion,
   setCurrentDocumentVersion,
 } from "@/server/documents/service";
+import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
 import { redirectWith } from "@/server/http/flash";
-import { runOwnedJob } from "@/infra/jobs/runner";
-import { reindexUserRetrievalCorpus } from "@/services/embeddings";
+import { rethrowNavigationError } from "@/server/http/navigation-errors";
 import { recordAuditEvent } from "@/server/audit";
+import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
+import { categoryFromFormData, ingestCategorizedResume } from "@/server/resumes/upload";
 
 const DOCUMENTS = "/app/documents";
 
@@ -35,50 +38,14 @@ function mapUploadError(error: unknown): "required" | "upload" {
   return "upload";
 }
 
-async function runVersionJobs(input: {
-  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"];
-  actor: Awaited<ReturnType<typeof requireWorkspace>>["actor"];
-  userId: string;
-  profileDisplayName: string | null;
-  documentId: string;
-  versionId: string;
-  label: string;
-  buffer: Buffer;
-  mimeType: string;
-}) {
-  await runOwnedJob(
-    input.supabase,
-    { actor: input.actor, type: "document_extract", inputRef: input.versionId },
-    async () => {
-      await processDocumentVersion({
-        supabase: input.supabase,
-        userId: input.userId,
-        documentId: input.documentId,
-        versionId: input.versionId,
-        documentLabel: input.label,
-        profileDisplayName: input.profileDisplayName,
-        buffer: input.buffer,
-        mimeType: input.mimeType,
-      });
-    },
-  );
-
-  await runOwnedJob(
-    input.supabase,
-    { actor: input.actor, type: "embedding_index", inputRef: input.versionId },
-    async () => {
-      await reindexUserRetrievalCorpus(input.supabase, input.userId);
-    },
-  );
-}
-
 export async function uploadDocument(formData: FormData) {
   const { user, profile, supabase, actor } = await requireWorkspace();
   const file = formData.get("file");
   const label = String(formData.get("label") ?? "").trim();
   const typeParsed = documentTypeSchema.safeParse(String(formData.get("type") ?? "other"));
+  const useInKit = parseUseInKit(formData);
 
-  if (!(file instanceof File) || !label || !typeParsed.success) {
+  if (!(file instanceof File) || !typeParsed.success) {
     redirectWith(DOCUMENTS, { error: "required" });
   }
 
@@ -87,6 +54,37 @@ export async function uploadDocument(formData: FormData) {
     upload = await readValidatedUpload(file);
   } catch (error) {
     redirectWith(DOCUMENTS, { error: mapUploadError(error) });
+  }
+
+  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
+    const category = categoryFromFormData(formData);
+    if (!category) redirectWith(DOCUMENTS, { error: "required" });
+    let result;
+    try {
+      result = await ingestCategorizedResume({
+        supabase,
+        actor,
+        userId: user.id,
+        profileDisplayName: profile.display_name,
+        upload,
+        category,
+        source: "documents",
+        fillKit: useInKit,
+      });
+    } catch (error) {
+      rethrowNavigationError(error);
+      redirectWith(DOCUMENTS, { error: "upload" });
+    }
+    if (result.duplicate) redirectWith(DOCUMENTS, { notice: "duplicate_file" });
+    revalidatePath("/app");
+    revalidatePath(DOCUMENTS);
+    revalidatePath("/app/memory");
+    revalidatePath("/app/resumes");
+    redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
+  }
+
+  if (!label) {
+    redirectWith(DOCUMENTS, { error: "required" });
   }
 
   let documentId: string;
@@ -105,32 +103,32 @@ export async function uploadDocument(formData: FormData) {
     }
     documentId = created.documentId;
     versionId = created.versionId;
-  } catch {
+  } catch (error) {
+    rethrowNavigationError(error);
     redirectWith(DOCUMENTS, { error: "upload" });
   }
 
   await recordAuditEvent(supabase, "document.uploaded", { documentId, versionId });
 
-  if (typeParsed.data === "resume" || typeParsed.data === "resume_variant") {
-    await supabase.from("resumes").upsert({ document_id: documentId, user_id: user.id }, { onConflict: "document_id" });
-  }
-
-  await runVersionJobs({
+  scheduleDocumentVersionProcessing({
     supabase,
     actor,
     userId: user.id,
-    profileDisplayName: profile.display_name,
     documentId,
     versionId,
-    label,
-    buffer: upload.buffer,
-    mimeType: upload.mimeType,
+    documentLabel: label,
+    profileDisplayName: profile.display_name,
+    fillKit: useInKit,
   });
+
+  if (!useInKit) {
+    await autoAttachKitAcrossOpenApplications(supabase, actor);
+  }
 
   revalidatePath("/app");
   revalidatePath(DOCUMENTS);
   revalidatePath("/app/memory");
-  redirectWith(DOCUMENTS, { notice: (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored" });
+  redirectWith(DOCUMENTS, { notice: uploadQueuedNotice(useInKit) });
 }
 
 export async function uploadDocumentVersion(formData: FormData) {
@@ -138,6 +136,7 @@ export async function uploadDocumentVersion(formData: FormData) {
   const documentId = String(formData.get("documentId") ?? "");
   const file = formData.get("file");
   const setAsCurrent = String(formData.get("setAsCurrent") ?? "true") !== "false";
+  const useInKit = parseUseInKit(formData);
 
   if (!documentId || !(file instanceof File)) {
     redirectWith(DOCUMENTS, { error: "required" });
@@ -172,26 +171,26 @@ export async function uploadDocumentVersion(formData: FormData) {
       redirectWith(documentPath(documentId), { notice: "duplicate_file" });
     }
     versionId = created.versionId;
-  } catch {
+  } catch (error) {
+    rethrowNavigationError(error);
     redirectWith(documentPath(documentId), { error: "upload" });
   }
 
-  await runVersionJobs({
+  scheduleDocumentVersionProcessing({
     supabase,
     actor,
     userId: user.id,
-    profileDisplayName: profile.display_name,
     documentId,
     versionId,
-    label: document.label,
-    buffer: upload.buffer,
-    mimeType: upload.mimeType,
+    documentLabel: document.label,
+    profileDisplayName: profile.display_name,
+    fillKit: useInKit,
   });
 
   revalidatePath(DOCUMENTS);
   revalidatePath(documentPath(documentId));
   revalidatePath("/app/memory");
-  redirectWith(documentPath(documentId), { notice: (await extractDocumentText(upload.buffer, upload.mimeType)) ? "extracted" : "binary_stored" });
+  redirectWith(documentPath(documentId), { notice: uploadQueuedNotice(useInKit) });
 }
 
 export async function setCurrentVersion(formData: FormData) {
@@ -209,6 +208,79 @@ export async function setCurrentVersion(formData: FormData) {
   revalidatePath(DOCUMENTS);
   revalidatePath(documentPath(documentId));
   redirectWith(documentPath(documentId), { notice: "version_selected" });
+}
+
+export async function deleteDocument(formData: FormData) {
+  const { supabase, actor } = await requireWorkspace();
+  const documentId = String(formData.get("documentId") ?? "").trim();
+  const returnToRaw = String(formData.get("returnTo") ?? DOCUMENTS).trim();
+  const returnTo =
+    returnToRaw.startsWith("/app/documents") || returnToRaw.startsWith("/app/resumes") || returnToRaw.startsWith("/app/memory")
+      ? returnToRaw
+      : DOCUMENTS;
+
+  if (!documentId) redirectWith(returnTo, { error: "required" });
+
+  try {
+    await deleteOwnedDocument(supabase, actor, documentId);
+    await recordAuditEvent(supabase, "document.deleted", { documentId });
+  } catch (error) {
+    logError("documents.delete_failed", { documentId, error: String(error) });
+    redirectWith(returnTo, { error: "save" });
+  }
+
+  revalidatePath("/app");
+  revalidatePath(DOCUMENTS);
+  revalidatePath("/app/resumes");
+  revalidatePath("/app/memory");
+  revalidatePath("/app/applications");
+  revalidatePath("/app/needs-you");
+  redirectWith(returnTo, { notice: "document_deleted" });
+}
+
+export async function deleteDocumentVersion(formData: FormData) {
+  const { supabase, actor } = await requireWorkspace();
+  const versionId = String(formData.get("versionId") ?? "").trim();
+  const returnToRaw = String(formData.get("returnTo") ?? DOCUMENTS).trim();
+  const returnTo =
+    returnToRaw.startsWith("/app/documents") || returnToRaw.startsWith("/app/resumes") || returnToRaw.startsWith("/app/memory")
+      ? returnToRaw
+      : DOCUMENTS;
+
+  if (!versionId) redirectWith(returnTo, { error: "required" });
+
+  let documentId = "";
+  let documentDeleted = false;
+  try {
+    const result = await deleteOwnedDocumentVersion(supabase, actor, versionId);
+    documentId = result.documentId;
+    documentDeleted = result.documentDeleted;
+    await recordAuditEvent(supabase, documentDeleted ? "document.deleted" : "document.version_deleted", {
+      documentId,
+      versionId,
+    });
+  } catch (error) {
+    logError("documents.version_delete_failed", { versionId, error: String(error) });
+    redirectWith(returnTo, { error: "save" });
+  }
+
+  revalidatePath("/app");
+  revalidatePath(DOCUMENTS);
+  revalidatePath("/app/resumes");
+  revalidatePath("/app/memory");
+  revalidatePath("/app/applications");
+  revalidatePath("/app/needs-you");
+  if (documentId) revalidatePath(documentPath(documentId));
+
+  if (documentDeleted) {
+    const listReturn =
+      returnTo.startsWith("/app/resumes") || returnTo.startsWith("/app/memory") || returnTo === DOCUMENTS
+        ? returnTo
+        : DOCUMENTS;
+    redirectWith(listReturn, { notice: "document_deleted" });
+  }
+
+  redirectWith(returnTo, { notice: "version_deleted" });
 }
 
 export async function downloadDocumentVersion(formData: FormData) {

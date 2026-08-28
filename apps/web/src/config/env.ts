@@ -30,6 +30,10 @@ function emptyToUndefined(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+const DEFAULT_GEMINI_CHAT_MODEL = "gemini-2.0-flash";
+const DEFAULT_GEMINI_EMBEDDING_MODEL = "gemini-embedding-001";
+
 export function loadAppConfig(source: Record<string, string | undefined> = process.env): AppConfig {
   const parsed = envSchema.parse({
     NEXT_PUBLIC_APP_URL: emptyToUndefined(source.NEXT_PUBLIC_APP_URL) ?? "http://localhost:3000",
@@ -63,11 +67,11 @@ export function loadAppConfig(source: Record<string, string | undefined> = proce
     openaiConfigured,
     groqConfigured,
     aiConfigured: openaiConfigured || groqConfigured,
-    openaiBaseUrl: (parsed.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
-    openaiModel: parsed.OPENAI_MODEL ?? "gpt-4o-mini",
-    groqModel: parsed.GROQ_MODEL ?? "openai/gpt-oss-20b",
+    openaiBaseUrl: (parsed.OPENAI_BASE_URL ?? GEMINI_BASE_URL).replace(/\/$/, ""),
+    openaiModel: parsed.OPENAI_MODEL ?? DEFAULT_GEMINI_CHAT_MODEL,
+    groqModel: parsed.GROQ_MODEL ?? "llama-3.3-70b-versatile",
     embeddingProvider: parsed.EMBEDDING_PROVIDER ?? "openai-compatible",
-    embeddingModel: parsed.EMBEDDING_MODEL ?? "text-embedding-3-small",
+    embeddingModel: parsed.EMBEDDING_MODEL ?? DEFAULT_GEMINI_EMBEDDING_MODEL,
     storageBucket: parsed.STORAGE_BUCKET ?? "application-documents",
     extensionOrigin: parsed.NEXT_PUBLIC_EXTENSION_ORIGIN ?? null,
     googleOAuthConfigured:
@@ -86,6 +90,8 @@ export const STORAGE_PREFIX: Record<string, string> = {
   certificate: "certificates",
   portfolio: "portfolios",
   supporting_document: "supporting",
+  identity_document: "identity",
+  family_document: "family",
   other: "supporting",
 };
 

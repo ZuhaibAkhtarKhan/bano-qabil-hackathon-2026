@@ -1,7 +1,14 @@
 import type { ExperienceKind, MemoryCategory } from "@1apply/contracts";
-import { categoryFromKind, detectMemoryConflicts, memoryFactKey, type ConflictCandidate } from "@1apply/domain";
+import {
+  categoryFromKind,
+  detectMemoryConflicts,
+  evidenceIdentityKey,
+  memoryFactKey,
+  type ConflictCandidate,
+} from "@1apply/domain";
 
 import { mapExtractedEvidenceKind, uniqueSkillNames } from "@/lib/extraction";
+import { normalizeEvidenceDate } from "@/lib/kit-fill-normalize";
 
 export type ExtractedDocument = {
   displayName: string | null;
@@ -38,8 +45,9 @@ export type PlannedEvidence = {
   endDate: string | null;
   excerpt: string | null;
   factKey: string;
+  identityKey: string;
   extractionStatus: "extracted";
-  verificationStatus: "unverified";
+  verificationStatus: "verified";
 };
 
 export type PlannedScalarFact = {
@@ -47,38 +55,125 @@ export type PlannedScalarFact = {
   factKey: string;
   value: string;
   extractionStatus: "extracted";
-  verificationStatus: "unverified";
+  verificationStatus: "verified";
 };
+
+export function isSubstantiveExtractedEvidence(item: {
+  title: string;
+  organization?: string | null;
+  situation?: string | null;
+  action?: string | null;
+  outcome?: string | null;
+  excerpt?: string | null;
+}): boolean {
+  const title = item.title.trim();
+  if (!title) return false;
+  if (
+    /^(education|experience|employment|skills|projects|certifications|achievements|leadership|research|work experience|professional experience|technical skills|contact|summary|profile)$/i.test(
+      title,
+    )
+  ) {
+    return false;
+  }
+  const org = String(item.organization ?? "").trim();
+  if (org) return true;
+  if (item.situation?.trim() || item.action?.trim() || item.outcome?.trim() || item.excerpt?.trim()) {
+    return true;
+  }
+  return title.length > 6;
+}
+
+function richnessScore(item: {
+  organization?: string | null;
+  situation?: string | null;
+  action?: string | null;
+  outcome?: string | null;
+  skills?: string[] | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  excerpt?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}): number {
+  let score = 0;
+  if (item.organization?.trim()) score += 2;
+  if (item.situation?.trim()) score += 2;
+  if (item.action?.trim()) score += 2;
+  if (item.outcome?.trim()) score += 2;
+  if (item.startDate || item.start_date) score += 1;
+  if (item.endDate || item.end_date) score += 1;
+  if (item.excerpt?.trim()) score += 1;
+  score += Math.min(item.skills?.length ?? 0, 4);
+  return score;
+}
+
+/** Deduplicate planned evidence within one extraction batch (keep richest). */
+export function dedupePlannedEvidence<
+  T extends {
+    kind: string;
+    title: string;
+    organization: string | null;
+    identityKey?: string;
+  },
+>(items: T[]): T[] {
+  const best = new Map<string, T>();
+  for (const item of items) {
+    const key =
+      item.identityKey ??
+      evidenceIdentityKey({ kind: item.kind, title: item.title, organization: item.organization });
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, item);
+      continue;
+    }
+    if (richnessScore(item) > richnessScore(prev)) best.set(key, item);
+  }
+  return [...best.values()];
+}
 
 export function planDocumentExtraction(
   extracted: ExtractedDocument,
   existingFacts: ConflictCandidate[],
 ) {
-  const evidence: PlannedEvidence[] = extracted.evidence.slice(0, 20).map((item) => {
-    const kind = mapExtractedEvidenceKind(item.kind);
-    const category = categoryFromKind(kind);
-    return {
-      title: item.title.slice(0, 180),
-      kind,
-      category,
-      organization: item.organization,
-      situation: item.situation,
-      action: item.action,
-      outcome: item.outcome,
-      skills: item.skills.slice(0, 16),
-      startDate: item.startDate ?? null,
-      endDate: item.endDate ?? null,
-      excerpt: item.excerpt ?? null,
-      factKey: memoryFactKey({
+  const mapped = extracted.evidence
+    .filter((item) => isSubstantiveExtractedEvidence(item))
+    .slice(0, 48)
+    .map((item) => {
+      const kind = mapExtractedEvidenceKind(item.kind);
+      const category = categoryFromKind(kind);
+      const startDate = normalizeEvidenceDate(item.startDate);
+      const endDate = normalizeEvidenceDate(item.endDate);
+      const identityKey = evidenceIdentityKey({
+        kind,
+        title: item.title,
+        organization: item.organization,
+      });
+      return {
+        title: item.title.slice(0, 180),
+        kind,
         category,
         organization: item.organization,
-        title: item.title,
-        field: item.endDate ? "end_year" : "title",
-      }),
-      extractionStatus: "extracted",
-      verificationStatus: "unverified",
-    };
-  });
+        situation: item.situation ?? item.excerpt ?? null,
+        action: item.action,
+        outcome: item.outcome,
+        skills: item.skills.slice(0, 16),
+        startDate,
+        endDate,
+        excerpt: item.excerpt ?? null,
+        // Always "title" so endDate presence doesn't create a second evidence row.
+        factKey: memoryFactKey({
+          category,
+          organization: item.organization,
+          title: item.title,
+          field: "title",
+        }),
+        identityKey,
+        extractionStatus: "extracted" as const,
+        verificationStatus: "verified" as const,
+      };
+    });
+
+  const evidence: PlannedEvidence[] = dedupePlannedEvidence(mapped);
 
   const facts: PlannedScalarFact[] = [];
   if (extracted.displayName?.trim()) {
@@ -87,7 +182,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "display_name", title: "identity" }),
       value: extracted.displayName.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
   if (extracted.headline?.trim()) {
@@ -96,7 +191,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "headline", title: "identity" }),
       value: extracted.headline.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
   if (extracted.phone?.trim()) {
@@ -105,7 +200,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "phone", title: "identity" }),
       value: extracted.phone.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
 
@@ -121,7 +216,7 @@ export function planDocumentExtraction(
       }),
       value: item.endDate,
       extractionStatus: "extracted",
-      verificationStatus: "unverified",
+      verificationStatus: "verified",
     });
   }
 

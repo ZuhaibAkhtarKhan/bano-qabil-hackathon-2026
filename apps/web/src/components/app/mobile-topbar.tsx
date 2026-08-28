@@ -8,13 +8,19 @@ import { Menu } from "lucide-react";
 import { signOut } from "@/app/app/actions";
 import { Wordmark } from "@/components/brand/wordmark";
 import { WORKSPACE_NAV, isNavActive } from "@/components/app/nav";
-import { Button } from "@/components/ui/button";
+import { Button, SubmitButton } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/overlays";
 import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
 
-export function MobileTopbar({ email }: { email: string }) {
+export function MobileTopbar({
+  email,
+  needsYouApplicationCount = 0,
+}: {
+  email: string;
+  needsYouApplicationCount?: number;
+}) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const { unreadCount } = useRealtime();
@@ -29,6 +35,7 @@ export function MobileTopbar({ email }: { email: string }) {
           type="button"
           variant="secondary"
           size="sm"
+          data-tour="nav-menu"
           aria-expanded={open}
           aria-controls="workspace-menu"
           aria-label="Open workspace menu"
@@ -37,9 +44,9 @@ export function MobileTopbar({ email }: { email: string }) {
         >
           <Menu className="h-4 w-4" aria-hidden="true" />
           Menu
-          {unreadCount > 0 && (
+          {(unreadCount > 0 || needsYouApplicationCount > 0) && (
             <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-sand px-1 font-mono text-[9px] font-bold text-ink-base">
-              {unreadCount > 9 ? "9+" : unreadCount}
+              {unreadCount > 0 ? (unreadCount > 9 ? "9+" : unreadCount) : needsYouApplicationCount > 9 ? "9+" : needsYouApplicationCount}
             </span>
           )}
         </Button>
@@ -54,10 +61,12 @@ export function MobileTopbar({ email }: { email: string }) {
                 {section.items.map((item) => {
                   const active = isNavActive(pathname, item.href);
                   const isNotifications = item.href === "/app/notifications";
+                  const isNeedsYou = item.href === "/app/needs-you";
                   return (
                     <li key={item.href}>
                       <Link
                         href={item.href}
+                        data-tour={item.tourId}
                         aria-current={active ? "page" : undefined}
                         className={cn(
                           "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm",
@@ -66,6 +75,19 @@ export function MobileTopbar({ email }: { email: string }) {
                         onClick={() => setOpen(false)}
                       >
                         <span>{item.label}</span>
+                        {isNeedsYou ? (
+                          <span
+                            className={cn(
+                              "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold",
+                              needsYouApplicationCount > 0
+                                ? "bg-coral-soft text-coral-text"
+                                : "bg-canvas text-ink-muted",
+                            )}
+                            aria-label={`${needsYouApplicationCount} applications need input`}
+                          >
+                            {needsYouApplicationCount > 99 ? "99+" : needsYouApplicationCount}
+                          </span>
+                        ) : null}
                         {isNotifications && unreadCount > 0 && (
                           <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sand px-1.5 font-mono text-[10px] font-bold text-ink-base">
                             {unreadCount}
@@ -80,9 +102,9 @@ export function MobileTopbar({ email }: { email: string }) {
           ))}
         </nav>
         <form action={signOut} className="mt-8">
-          <Button type="submit" variant="secondary">
+          <SubmitButton variant="secondary">
             Sign out
-          </Button>
+          </SubmitButton>
         </form>
       </Drawer>
     </div>

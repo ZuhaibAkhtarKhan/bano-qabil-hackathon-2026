@@ -1,4 +1,5 @@
 import type { ApplicationStatus } from "@1apply/contracts";
+import { requiredDocumentCovered } from "@1apply/domain";
 
 export type NormalizedApplicationStatus =
   | "saved"
@@ -133,9 +134,11 @@ export function computeApplicationCompleteness(input: {
   }
 
   for (const label of input.requiredDocuments) {
-    if (!input.attachedDocumentLabels.some((item) => item.toLowerCase() === label.toLowerCase())) {
-      remaining.push(label);
-    }
+    const covered = requiredDocumentCovered(
+      label,
+      input.attachedDocumentLabels.map((item) => ({ type: "other", label: item })),
+    );
+    if (!covered) remaining.push(label);
   }
 
   if (input.requiredQuestions > input.approvedAnswers) {

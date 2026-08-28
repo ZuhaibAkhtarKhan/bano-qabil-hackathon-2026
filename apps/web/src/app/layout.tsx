@@ -1,9 +1,8 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
-import { Suspense } from "react";
 
-import { NavigationProgress } from "@/components/ui/navigation-progress";
+import { AppClientShell } from "@/components/app/app-client-shell";
 
 import "./globals.css";
 
@@ -49,10 +48,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className={`${geist.variable} ${geistMono.variable} ${instrument.variable} font-sans antialiased`}>
-        <Suspense fallback={null}>
-          <NavigationProgress />
-        </Suspense>
-        {children}
+        <AppClientShell>{children}</AppClientShell>
       </body>
     </html>
   );

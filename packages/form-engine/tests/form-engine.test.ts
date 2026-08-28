@@ -152,6 +152,48 @@ describe("mapping confidence", () => {
     expect(mapping?.showChip).toBe(true);
   });
 
+  it("does not autofill commitment Yes/No from kit skills containing the substring no", () => {
+    const document = documentFrom(`
+      <div role="listitem">
+        <div role="heading" id="i33">This role needs 4-5 hours a day, part-time. Can you commit to that consistently?</div>
+        <label><input type="radio" name="commit" value="Yes" /> Yes</label>
+        <label><input type="radio" name="commit" value="No" /> No</label>
+      </div>
+      <div role="listitem">
+        <div role="heading" id="i44">Are you currently a university student?</div>
+        <label><input type="radio" name="student" value="Yes" /> Yes</label>
+        <label><input type="radio" name="student" value="No" /> No</label>
+      </div>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Skills → Kit",
+        source: "Your kit",
+        value: "Technology",
+        aliases: ["skills"],
+      },
+      {
+        path: "Skills → Kit",
+        source: "Your kit",
+        value: "Innovation",
+        aliases: ["skills"],
+      },
+      {
+        path: "Education → Institution",
+        source: "Your kit",
+        value: "NUST",
+        aliases: ["university"],
+      },
+    ];
+    const mappings = mapFields(inventoryFromDocument(document), catalog);
+    const commit = mappings.find((item) => /commit/i.test(item.label));
+    const student = mappings.find((item) => /student/i.test(item.label));
+    expect(commit?.proposedValue || "").toBe("");
+    expect(commit?.excludedByDefault).toBe(true);
+    expect(student?.proposedValue || "").toBe("");
+    expect(student?.excludedByDefault).toBe(true);
+  });
+
   it("auto-maps required sole confirmation checkboxes only", () => {
     const document = documentFrom(`
       <div role="listitem">

@@ -318,7 +318,7 @@ Run in the Supabase SQL editor (this repo has no local migration runner).
 
 1. Upload validated (size ≤ 8 MB, MIME vs extension, magic bytes for PDF/DOCX).
 2. Object stored under the user prefix; `documents` + `document_versions` rows created.
-3. `extractTextFromBuffer`: UTF-8 for text; PDF text operators + Flate streams; DOCX `word/document.xml`. Encrypted PDFs and image-only scans return no text.
+3. `extractDocumentText`: UTF-8 for text; PDF via the configured OpenAI-compatible document API (structured resume-style plain text); DOCX via mammoth / `word/document.xml`. Encrypted PDFs and unreadable scans return no text when AI is unavailable or extraction fails.
 4. Chunks written; optional embeddings.
 5. If AI is configured, structured extraction runs on `<untrusted_document_content>…`.
 6. Facts/evidence persist as **unverified**. User verifies, rejects, or excludes from AI.

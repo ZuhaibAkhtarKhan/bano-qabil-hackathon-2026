@@ -16,6 +16,7 @@ export type NavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
+  tourId: string;
 };
 
 export type NavSection = {
@@ -24,33 +25,34 @@ export type NavSection = {
   items: NavItem[];
 };
 
+/** Union of saadia kit nav + zuhaib memory/integrations/Need You entries. */
 export const WORKSPACE_NAV: NavSection[] = [
   {
     id: "operate",
     label: "Operate",
     items: [
-      { href: "/app", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/app/needs-you", label: "Need You", icon: HandHelping },
-      { href: "/app/opportunities", label: "Opportunities", icon: FolderSearch },
-      { href: "/app/applications", label: "Applications", icon: BriefcaseBusiness },
+      { href: "/app", label: "Dashboard", icon: LayoutDashboard, tourId: "nav-dashboard" },
+      { href: "/app/needs-you", label: "Need You", icon: HandHelping, tourId: "nav-needs-you" },
+      { href: "/app/opportunities", label: "Add a posting", icon: FolderSearch, tourId: "nav-posting" },
+      { href: "/app/applications", label: "Applications", icon: BriefcaseBusiness, tourId: "nav-applications" },
     ],
   },
   {
-    id: "memory",
-    label: "Memory",
+    id: "kit",
+    label: "Your kit",
     items: [
-      { href: "/app/memory", label: "Application Memory", icon: Library },
-      { href: "/app/documents", label: "Documents", icon: Files },
-      { href: "/app/resumes", label: "Resumes", icon: FileBadge },
+      { href: "/app/memory", label: "Your kit", icon: Library, tourId: "nav-kit" },
+      { href: "/app/documents", label: "Documents", icon: Files, tourId: "nav-documents" },
+      { href: "/app/resumes", label: "Resumes", icon: FileBadge, tourId: "nav-resumes" },
     ],
   },
   {
     id: "account",
     label: "Account",
     items: [
-      { href: "/app/notifications", label: "Notifications", icon: Bell },
-      { href: "/app/integrations", label: "Integrations", icon: Link2 },
-      { href: "/app/settings", label: "Settings", icon: Settings },
+      { href: "/app/notifications", label: "Notifications", icon: Bell, tourId: "nav-notifications" },
+      { href: "/app/integrations", label: "Integrations", icon: Link2, tourId: "nav-integrations" },
+      { href: "/app/settings", label: "Settings", icon: Settings, tourId: "nav-settings" },
     ],
   },
 ];

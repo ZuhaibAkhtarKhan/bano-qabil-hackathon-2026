@@ -5,16 +5,42 @@ const KIND_ALIASES: Record<string, ExperienceKind> = {
   job: "employment",
   experience: "employment",
   role: "employment",
+  internship: "employment",
+  intern: "employment",
   school: "education",
   degree: "education",
   university: "education",
+  bachelor: "education",
+  bachelors: "education",
+  masters: "education",
+  phd: "education",
+  coursework: "education",
   award: "achievement",
   honors: "achievement",
+  honour: "achievement",
+  contest: "achievement",
+  competition: "achievement",
+  hackathon: "achievement",
   cert: "certification",
   certificate: "certification",
+  course: "certification",
+  coursera: "certification",
+  udemy: "certification",
+  edx: "certification",
   volunteer: "volunteering",
+  volunteering: "volunteering",
   lead: "leadership",
+  club: "leadership",
+  ambassador: "leadership",
   research: "research",
+  paper: "research",
+  projects: "project",
+  education: "education",
+  employment: "employment",
+  project: "project",
+  achievement: "achievement",
+  certification: "certification",
+  leadership: "leadership",
 };
 
 export function mapExtractedEvidenceKind(value: string | null | undefined): ExperienceKind {
@@ -30,8 +56,14 @@ export function uniqueSkillNames(values: Array<string | null | undefined>) {
   for (const value of values) {
     const name = value?.trim();
     if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
+    // Collapse "DSA" / "Data Structures and Algorithms (DSA)" style near-duplicates.
+    const key = name
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/[^a-z0-9+#./]+/g, " ")
+      .trim()
+      .replace(/\s+/g, " ");
+    if (!key || seen.has(key)) continue;
     seen.add(key);
     names.push(name.slice(0, 80));
   }

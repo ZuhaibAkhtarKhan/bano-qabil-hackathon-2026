@@ -6,11 +6,20 @@ import { usePathname } from "next/navigation";
 import { signOut } from "@/app/app/actions";
 import { Wordmark } from "@/components/brand/wordmark";
 import { WORKSPACE_NAV, isNavActive } from "@/components/app/nav";
+import { SubmitButton } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
 
-export function AppSidebar({ email, displayName }: { email: string; displayName: string | null }) {
+export function AppSidebar({
+  email,
+  displayName,
+  needsYouApplicationCount = 0,
+}: {
+  email: string;
+  displayName: string | null;
+  needsYouApplicationCount?: number;
+}) {
   const pathname = usePathname();
   const { unreadCount } = useRealtime();
 
@@ -27,13 +36,15 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
           <div key={section.id}>
             <p className="px-3 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-muted">{section.label}</p>
             <ul className="mt-2 grid gap-1">
-              {section.items.map(({ href, label, icon: Icon }) => {
+              {section.items.map(({ href, label, icon: Icon, tourId }) => {
                 const active = isNavActive(pathname, href);
                 const isNotifications = href === "/app/notifications";
+                const isNeedsYou = href === "/app/needs-you";
                 return (
                   <li key={href}>
                     <Link
                       href={href}
+                      data-tour={tourId}
                       aria-current={active ? "page" : undefined}
                       className={cn(
                         "flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 text-sm",
@@ -44,6 +55,19 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
                         <Icon className="h-4 w-4" aria-hidden="true" />
                         {label}
                       </div>
+                      {isNeedsYou ? (
+                        <span
+                          className={cn(
+                            "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold",
+                            needsYouApplicationCount > 0
+                              ? "bg-coral-soft text-coral-text"
+                              : "bg-canvas text-ink-muted",
+                          )}
+                          aria-label={`${needsYouApplicationCount} applications need input`}
+                        >
+                          {needsYouApplicationCount > 99 ? "99+" : needsYouApplicationCount}
+                        </span>
+                      ) : null}
                       {isNotifications && unreadCount > 0 && (
                         <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sand px-1.5 font-mono text-[10px] font-bold text-ink-base transition-all animate-in zoom-in-50">
                           {unreadCount > 99 ? "99+" : unreadCount}
@@ -61,9 +85,9 @@ export function AppSidebar({ email, displayName }: { email: string; displayName:
         <p className="truncate text-sm font-medium">{displayName ?? "Applicant"}</p>
         <p className="truncate text-xs text-ink-muted">{email}</p>
         <form action={signOut}>
-          <button type="submit" className="mt-3 text-sm text-ink-muted hover:text-ink">
+          <SubmitButton variant="ghost" size="sm" className="mt-3 px-0 text-ink-muted hover:text-ink" pendingText="Signing out…">
             Sign out
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </aside>
