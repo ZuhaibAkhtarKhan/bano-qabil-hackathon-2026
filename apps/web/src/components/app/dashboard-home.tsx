@@ -3,15 +3,13 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, HelpCircle, Search } from "lucide-react";
-import { currentGuideStep, type GuideStep } from "@1apply/domain";
 
 import {
   ApplicationsTrackerTable,
   type ApplicationsTrackerRow,
 } from "@/components/app/applications-tracker-table";
 import { useRealtime } from "@/components/app/realtime-provider";
-import { skipWorkspaceGuide } from "@/server/memory/actions";
-import { ButtonLink, SubmitButton } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { cn } from "@/lib/cn";
 
@@ -33,11 +31,6 @@ export type DashboardKitProps = {
   ready: boolean;
   missing: string[];
   showCard: boolean;
-};
-
-export type DashboardGuideProps = {
-  dismissed: boolean;
-  steps: GuideStep[];
 };
 
 export type DashboardLaneProps = {
@@ -75,14 +68,12 @@ export function DashboardHome({
   applications,
   displayName = null,
   kit,
-  guide,
   lanes,
 }: {
   matches: DashboardMatch[];
   applications: DashboardApplicationRow[];
   displayName?: string | null;
   kit?: DashboardKitProps;
-  guide?: DashboardGuideProps;
   lanes?: DashboardLaneProps;
 }) {
   const { unreadCount } = useRealtime();
@@ -93,8 +84,6 @@ export function DashboardHome({
   const targetProgressRef = useRef(0);
   const smoothProgressRef = useRef(0);
   const rafRef = useRef<number | null>(null);
-  const guideNext = guide && !guide.dismissed ? currentGuideStep(guide.steps) : null;
-  const guideLater = guideNext && guide ? guide.steps.filter((step) => step.id !== guideNext.id) : [];
 
   useLayoutEffect(() => {
     const node = matchesRef.current;
@@ -154,7 +143,7 @@ export function DashboardHome({
   }, [applications, filter, query]);
 
   return (
-    <div className="min-h-full bg-white">
+    <div className="min-h-full bg-white" data-tour="page-dashboard">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 sm:px-6 lg:px-8">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold tracking-tight text-ink">Dashboard</h1>
@@ -200,41 +189,6 @@ export function DashboardHome({
       </header>
 
       <div className="space-y-8 px-4 py-6 sm:px-6 lg:px-8">
-        {guideNext ? (
-          <section className="rounded-2xl border border-line bg-[#fafbf8] p-5" aria-labelledby="guide-heading">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Next step</p>
-            <h2 id="guide-heading" className="mt-1 text-base font-semibold tracking-tight text-ink">
-              {guideNext.title}
-            </h2>
-            <p className="mt-1.5 text-sm text-ink-muted">{guideNext.body}</p>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <ButtonLink href={guideNext.href} size="sm">
-                {guideNext.cta}
-              </ButtonLink>
-              <form action={skipWorkspaceGuide}>
-                <SubmitButton variant="ghost" size="sm">
-                  Skip tutorial
-                </SubmitButton>
-              </form>
-            </div>
-            {guideLater.length > 0 ? (
-              <ol className="mt-4 grid gap-1.5 text-xs text-ink-muted">
-                {guideLater.map((step, index) => (
-                  <li key={step.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span>
-                      Then {index + 2}: {step.title}
-                      {step.optional ? " (optional)" : ""}
-                    </span>
-                    <Link className="font-medium text-ink hover:underline" href={step.href}>
-                      {step.cta}
-                    </Link>
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-          </section>
-        ) : null}
-
         {kit?.showCard ? (
           <section className="rounded-2xl border border-amber-200/80 bg-[#faf6e8] p-5" aria-labelledby="kit-heading">
             <p className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Your kit</p>

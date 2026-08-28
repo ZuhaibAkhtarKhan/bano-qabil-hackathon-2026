@@ -74,7 +74,7 @@ export default async function SettingsPage({
           </form>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Prepare and send if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
             Off by default. When on, Dashboard shows the packet that will freeze at the deadline unless you edit.

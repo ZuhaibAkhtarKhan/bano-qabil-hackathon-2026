@@ -91,10 +91,6 @@ export default async function DashboardPage() {
           missing: kit.missing,
           showCard: showKitCard,
         }}
-        guide={{
-          dismissed: guideDismissed,
-          steps: guideSteps,
-        }}
         lanes={{
           needsYou: lanes.needsYou.length,
           sendsAtDeadline: lanes.sendsAtDeadline.length,

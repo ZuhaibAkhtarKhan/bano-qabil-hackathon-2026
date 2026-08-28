@@ -91,7 +91,7 @@ export default async function ApplicationsPage({
         actions={<ButtonLink href="/app/opportunities">New opportunity</ButtonLink>}
       />
       {applications.length === 0 ? (
-        <div className="mt-10">
+        <div className="mt-10" data-tour="applications-board">
           <EmptyState
             eyebrow="Empty"
             title="No applications to track"
@@ -99,7 +99,7 @@ export default async function ApplicationsPage({
           />
         </div>
       ) : (
-        <>
+        <div data-tour="applications-board">
           <Card className="mt-8 p-5">
             <form className="grid gap-4 lg:grid-cols-6">
               <Field label="Search" htmlFor="q">
@@ -198,7 +198,7 @@ export default async function ApplicationsPage({
               <ApplicationsTrackerTable rows={trackerRows} />
             </div>
           )}
-        </>
+        </div>
       )}
     </WorkspaceMain>
   );

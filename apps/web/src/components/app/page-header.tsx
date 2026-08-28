@@ -5,14 +5,19 @@ export function PageHeader({
   title,
   body,
   actions,
+  tourId,
 }: {
   eyebrow: string;
   title: string;
   body?: string;
   actions?: ReactNode;
+  tourId?: string;
 }) {
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div
+      data-tour={tourId}
+      className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"
+    >
       <div className="max-w-2xl">
         <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">{eyebrow}</p>
         <h1 className="mt-3 font-display text-4xl leading-tight sm:text-5xl">{title}</h1>

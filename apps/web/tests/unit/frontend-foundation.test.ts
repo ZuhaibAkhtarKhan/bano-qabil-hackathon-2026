@@ -4,6 +4,7 @@ import { dashboardBuckets } from "@/lib/dashboard";
 import { SEMANTIC_STATUS, answerSemanticStatus, evidenceSemanticStatus } from "@/lib/status";
 import { WORKSPACE_NAV } from "@/components/app/nav";
 import { currentGuideStep, nextGuideSteps } from "@1apply/domain";
+import { currentTourBeat, tourTargetIds } from "@/lib/workspace-tour";
 import type { ApplicationListRow } from "@/server/types";
 
 function application(partial: Partial<ApplicationListRow> & Pick<ApplicationListRow, "id" | "status">): ApplicationListRow {
@@ -89,10 +90,14 @@ describe("workspace navigation", () => {
     const hrefs = WORKSPACE_NAV.flatMap((section) => section.items.map((item) => item.href));
     expect(hrefs).toEqual([
       "/app",
+      "/app/needs-you",
       "/app/opportunities",
       "/app/applications",
       "/app/memory",
+      "/app/documents",
+      "/app/resumes",
       "/app/notifications",
+      "/app/integrations",
       "/app/settings",
     ]);
   });
@@ -109,5 +114,40 @@ describe("skippable go-here guide", () => {
     });
     expect(steps.map((step) => step.id)).toEqual(["kit", "posting"]);
     expect(currentGuideStep(steps)?.cta).toBe("Go to Your kit");
+  });
+
+  it("includes Need You when applications are waiting on input", () => {
+    const steps = nextGuideSteps({
+      kitMissing: [],
+      opportunityCount: 1,
+      applicationCount: 2,
+      needsYouCount: 2,
+      prepareAndSendIfSilent: true,
+    });
+    expect(currentGuideStep(steps)).toMatchObject({ id: "packet", href: "/app/needs-you" });
+  });
+});
+
+describe("workspace tour targets", () => {
+  it("points at sidebar kit first, then kit uploads once you are on Your kit", () => {
+    expect(tourTargetIds("kit", "/app")).toEqual(["nav-kit", "nav-menu", "kit-uploads", "kit-identity"]);
+    expect(tourTargetIds("kit", "/app/memory")).toEqual(["kit-uploads", "kit-identity", "nav-kit", "nav-menu"]);
+    expect(tourTargetIds("posting", "/app")).toEqual(["nav-posting", "nav-menu", "posting-url"]);
+    expect(tourTargetIds("posting", "/app/opportunities")).toEqual(["posting-url", "nav-posting", "nav-menu"]);
+    expect(tourTargetIds("packet", "/app")).toEqual(["nav-needs-you", "nav-menu", "needs-you-queue"]);
+    expect(tourTargetIds("packet", "/app/needs-you")).toEqual(["needs-you-queue", "nav-needs-you", "nav-menu"]);
+  });
+
+  it("starts with a home highlight on dashboard until welcome is seen", () => {
+    const steps = nextGuideSteps({
+      kitMissing: ["CNIC"],
+      opportunityCount: 0,
+      applicationCount: 0,
+      needsYouCount: 0,
+      prepareAndSendIfSilent: false,
+    });
+    expect(currentTourBeat({ dismissed: false, steps, pathname: "/app", seenWelcome: false })?.id).toBe("welcome");
+    expect(currentTourBeat({ dismissed: false, steps, pathname: "/app", seenWelcome: true })?.id).toBe("kit");
+    expect(currentTourBeat({ dismissed: true, steps, pathname: "/app", seenWelcome: false })).toBeNull();
   });
 });

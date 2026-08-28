@@ -58,12 +58,14 @@ export default async function OpportunitiesPage({
         }
         rows={rows}
         urlForm={
-          <form action={ingestOpportunityUrl} className="grid max-w-xl gap-4">
-            <Field label="Opportunity URL" htmlFor="opportunity-url" hint="Public http(s) URLs only.">
-              <Input id="opportunity-url" name="url" type="url" required placeholder="https://" />
-            </Field>
-            <SubmitButton pendingText="Fetching & analyzing…">Fetch and analyze</SubmitButton>
-          </form>
+          <div data-tour="posting-url">
+            <form action={ingestOpportunityUrl} className="grid max-w-xl gap-4">
+              <Field label="Opportunity URL" htmlFor="opportunity-url" hint="Public http(s) URLs only.">
+                <Input id="opportunity-url" name="url" type="url" required placeholder="https://" />
+              </Field>
+              <SubmitButton pendingText="Fetching & analyzing…">Fetch and analyze</SubmitButton>
+            </form>
+          </div>
         }
         manualForm={
           <form action={createManualOpportunity} className="grid gap-4 lg:grid-cols-2">

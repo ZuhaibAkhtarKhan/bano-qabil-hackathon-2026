@@ -15,6 +15,7 @@ import { requireWorkspace } from "@/server/auth/require-workspace";
 import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { syncDeadlineReminders } from "@/server/applications/reminders";
+import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import type { PendingPacket } from "@/lib/dashboard";
 import {
@@ -234,11 +235,13 @@ export async function loadWorkspaceGuide() {
     return { dismissed: true as const, steps: [], next: null };
   }
 
-  const [{ data: kitDocuments }, { count: opportunityCount }, { count: applicationCount }] = await Promise.all([
-    supabase.from("documents").select("type, label").eq("user_id", profile.id),
-    supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
-    supabase.from("applications").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
-  ]);
+  const [{ data: kitDocuments }, { count: opportunityCount }, { count: applicationCount }, needsYouCounts] =
+    await Promise.all([
+      supabase.from("documents").select("type, label").eq("user_id", profile.id),
+      supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+      supabase.from("applications").select("id", { count: "exact", head: true }).eq("user_id", profile.id),
+      loadNeedsYouFieldCounts(),
+    ]);
 
   const kit = kitStatus({
     displayName: profile.display_name,
@@ -250,7 +253,7 @@ export async function loadWorkspaceGuide() {
     kitMissing: kit.missing,
     opportunityCount: opportunityCount ?? 0,
     applicationCount: applicationCount ?? 0,
-    needsYouCount: 0,
+    needsYouCount: needsYouCounts.applicationCount,
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
   });
 

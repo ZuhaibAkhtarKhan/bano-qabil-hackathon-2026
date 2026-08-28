@@ -36,7 +36,7 @@ export function AppSidebar({
           <div key={section.id}>
             <p className="px-3 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-muted">{section.label}</p>
             <ul className="mt-2 grid gap-1">
-              {section.items.map(({ href, label, icon: Icon }) => {
+              {section.items.map(({ href, label, icon: Icon, tourId }) => {
                 const active = isNavActive(pathname, href);
                 const isNotifications = href === "/app/notifications";
                 const isNeedsYou = href === "/app/needs-you";
@@ -44,6 +44,7 @@ export function AppSidebar({
                   <li key={href}>
                     <Link
                       href={href}
+                      data-tour={tourId}
                       aria-current={active ? "page" : undefined}
                       className={cn(
                         "flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 text-sm",

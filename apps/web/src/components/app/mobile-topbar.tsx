@@ -35,6 +35,7 @@ export function MobileTopbar({
           type="button"
           variant="secondary"
           size="sm"
+          data-tour="nav-menu"
           aria-expanded={open}
           aria-controls="workspace-menu"
           aria-label="Open workspace menu"
@@ -65,6 +66,7 @@ export function MobileTopbar({
                     <li key={item.href}>
                       <Link
                         href={item.href}
+                        data-tour={item.tourId}
                         aria-current={active ? "page" : undefined}
                         className={cn(
                           "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm",

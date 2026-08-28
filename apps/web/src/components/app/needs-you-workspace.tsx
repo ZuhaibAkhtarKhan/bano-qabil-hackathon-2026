@@ -364,7 +364,7 @@ export function NeedsYouWorkspace({ data }: { data: NeedsYouQueue }) {
 
   if (data.items.length === 0) {
     return (
-      <div className="mt-10">
+      <div className="mt-10" data-tour="needs-you-queue">
         <EmptyState
           eyebrow="Caught up"
           title="Nothing needs you right now"
@@ -375,7 +375,7 @@ export function NeedsYouWorkspace({ data }: { data: NeedsYouQueue }) {
   }
 
   return (
-    <div className="mt-8 grid gap-6">
+    <div className="mt-8 grid gap-6" data-tour="needs-you-queue">
       <div className="flex flex-wrap gap-2">
         <StatusPill tone="coral">{data.counts.total} waiting</StatusPill>
         <StatusPill tone="muted">

@@ -90,7 +90,7 @@ export function MemoryWorkspace({
   });
 
   const personalPanel = (
-    <form action={updateIdentity} className="grid gap-4">
+    <form action={updateIdentity} className="grid gap-4" data-tour="kit-identity">
       {hiddenSection}
       <Field label="Name" htmlFor="displayName">
           <Input id="displayName" name="displayName" defaultValue={data.profile.display_name ?? ""} required />
@@ -387,7 +387,7 @@ export function MemoryWorkspace({
   const activeLabel = MEMORY_SECTIONS.find((item) => item.id === section)?.label ?? "Personal";
 
   const documentUploadBar = (
-    <Card className="p-4">
+    <Card className="p-4" data-tour="kit-uploads">
       <p className="text-xs text-ink-muted">
         Resume {kit.hasResume ? "ready" : "missing"} · {CNIC_PHARM_B_LABEL}{" "}
         {kit.hasCnicPharmB ? "ready" : "missing"}. Name other documents exactly as application forms ask — we match
