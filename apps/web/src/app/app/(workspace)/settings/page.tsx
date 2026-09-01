@@ -7,6 +7,7 @@ import { Button, SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { isAiConfigured } from "@/infra/ai/openai";
+import { describeAiStatus } from "@/infra/ai/status";
 import { getCurrentUserAndProfile } from "@/lib/profile";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -20,6 +21,7 @@ export default async function SettingsPage({
   const { profile } = await getCurrentUserAndProfile();
   const { notice, error } = await searchParams;
   const aiReady = isAiConfigured();
+  const aiStatus = describeAiStatus();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const prefs = parseWorkspacePreferences(profile?.preferences ?? {});
 
@@ -40,12 +42,14 @@ export default async function SettingsPage({
                 Signed in as <strong>{profile?.email}</strong>
               </p>
             </div>
-            <StatusPill tone={aiReady ? "mint" : "muted"}>{aiReady ? "Provider ready" : "Not configured"}</StatusPill>
+            <StatusPill tone={aiReady ? "mint" : "muted"}>
+              {aiReady ? `${aiStatus.chatProvider} ready` : "Not configured"}
+            </StatusPill>
           </div>
           <p className="mt-3 text-sm text-ink-muted">
             {aiReady
-              ? "Server AI provider is configured. Drafts still require verified evidence."
-              : "Server AI provider is not configured — write answers from verified evidence yourself."}
+              ? `Server AI: ${aiStatus.chatProvider} (${aiStatus.chatModel ?? "model"}) in ${aiStatus.mode} mode. Drafts still require verified evidence.`
+              : "Set GROQ_API_KEY for fast demos or OPENAI_API_KEY (Gemini) for extraction + embeddings."}
           </p>
           <form action={signOut} className="mt-5">
             <SubmitButton variant="secondary">

@@ -5,6 +5,7 @@ import * as esbuild from "esbuild";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(root, "dist");
+const appBaseUrl = process.env.EXTENSION_APP_BASE_URL ?? "http://localhost:3000";
 
 mkdirSync(dist, { recursive: true });
 
@@ -23,6 +24,9 @@ await esbuild.build({
   outdir: dist,
   sourcemap: true,
   logLevel: "info",
+  define: {
+    __EXTENSION_APP_BASE_URL__: JSON.stringify(appBaseUrl),
+  },
 });
 
 for (const file of ["manifest.json", "src/popup/popup.html", "src/popup/popup.css", "src/options/options.html"]) {

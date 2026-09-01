@@ -1,4 +1,4 @@
-import { APP_BASE_URL, STORAGE_KEYS, appBaseUrl } from "../shared/messages";
+import { appOriginPattern, resolveAppBaseUrl } from "../shared/app-url";
 
 export type SessionState = {
   appBaseUrl: string;
@@ -6,27 +6,24 @@ export type SessionState = {
 
 export async function loadSession(): Promise<SessionState> {
   // Drop any legacy stored URL / JWT from older extension builds.
-  await chrome.storage.local.remove(["appBaseUrl", STORAGE_KEYS.deviceToken]);
-  return { appBaseUrl: appBaseUrl() };
+  await chrome.storage.local.remove(["deviceToken"]);
+  return { appBaseUrl: await resolveAppBaseUrl() };
 }
 
 export async function saveSession(_partial?: Partial<SessionState>): Promise<void> {
-  await chrome.storage.local.remove(["appBaseUrl", STORAGE_KEYS.deviceToken]);
+  await chrome.storage.local.remove(["deviceToken"]);
 }
 
-export function appOriginPattern(base = appBaseUrl()): string {
-  return `${new URL(base).origin}/*`;
-}
-
-export async function ensureAppHostPermission(base = appBaseUrl()): Promise<boolean> {
-  const origins = [appOriginPattern(base)];
+export async function ensureAppHostPermission(base?: string): Promise<boolean> {
+  const resolved = base ?? (await resolveAppBaseUrl());
+  const origins = [appOriginPattern(resolved)];
   const granted = await chrome.permissions.contains({ origins });
   if (granted) return true;
   return chrome.permissions.request({ origins });
 }
 
 export async function openAppSignedIn(active = true): Promise<number> {
-  const base = appBaseUrl();
+  const base = await resolveAppBaseUrl();
   const origin = new URL(base).origin;
   const existing = await chrome.tabs.query({ url: `${origin}/*` });
   const usable = existing.find((tab) => tab.id && tab.url && !tab.url.includes("/sign-in"));
@@ -67,4 +64,4 @@ function waitForTabComplete(tabId: number, timeoutMs = 20000): Promise<void> {
   });
 }
 
-export { APP_BASE_URL };
+export { resolveAppBaseUrl } from "../shared/app-url";
