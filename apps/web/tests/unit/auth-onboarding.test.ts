@@ -48,20 +48,20 @@ describe("onboarding routing", () => {
     ).toBe("consent");
   });
 
-  it("keeps new users on profile until name, university, and education are filled", () => {
+  it("lets a named user leave profile even if kit university fields are still empty", () => {
     expect(
       resolveOnboardingStep({
         hasConsent: true,
         hasIdentity: true,
         hasUniversity: false,
-        hasEducation: true,
+        hasEducation: false,
         documentCount: 0,
         evidenceCount: 0,
         skippedDocuments: false,
         onboardingCompleted: false,
-        storedStep: "documents",
+        storedStep: "profile",
       }),
-    ).toBe("profile");
+    ).toBe("documents");
   });
 
   it("lets users skip profile and continue to kit upload", () => {
@@ -118,14 +118,14 @@ describe("onboarding routing", () => {
     expect(onboardingHref("done")).toBe("/app");
   });
 
-  it("sends a finished account with a skipped kit back to Your kit on login", () => {
+  it("keeps a finished account on the dashboard after login, even if the kit is incomplete", () => {
     expect(
       postAuthHref({
         onboardingCompleted: true,
         onboardingStep: "done",
         kitMissing: ["CNIC/Pharm-B"],
       }),
-    ).toBe("/app/memory?remind=kit");
+    ).toBe("/app");
   });
 
   it("lets a complete kit into the dashboard after login", () => {

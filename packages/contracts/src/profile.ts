@@ -37,7 +37,7 @@ export const onboardingStepSchema = z.enum([
 export const ONBOARDING_STEPS = [
   { id: "consent", label: "Consent", href: "/app/onboarding/consent" },
   { id: "profile", label: "Profile", href: "/app/onboarding/profile" },
-  { id: "documents", label: "Your kit", href: "/app/onboarding/documents" },
+  { id: "documents", label: "Documents", href: "/app/onboarding/documents" },
   { id: "review", label: "Review", href: "/app/onboarding/review" },
   { id: "ready", label: "Ready", href: "/app/onboarding/ready" },
 ] as const;
@@ -59,8 +59,8 @@ export function canFinishOnboarding(input: { hasConsent: boolean; hasIdentity: b
 export function resolveOnboardingStep(input: {
   hasConsent: boolean;
   hasIdentity: boolean;
-  hasUniversity: boolean;
-  hasEducation: boolean;
+  hasUniversity?: boolean;
+  hasEducation?: boolean;
   documentCount: number;
   evidenceCount: number;
   skippedDocuments: boolean;
@@ -70,8 +70,7 @@ export function resolveOnboardingStep(input: {
 }): OnboardingStep {
   if (input.onboardingCompleted) return "done";
   if (!input.hasConsent) return "consent";
-  const profileComplete = input.hasIdentity && input.hasUniversity && input.hasEducation;
-  if (!profileComplete && !input.skippedProfile) return "profile";
+  if (!input.hasIdentity && !input.skippedProfile) return "profile";
   if (input.storedStep === "ready") return "ready";
   if (input.storedStep === "review") return "review";
   if (input.storedStep === "done") return "done";
@@ -83,10 +82,9 @@ export function resolveOnboardingStep(input: {
 export function postAuthHref(input: {
   onboardingCompleted: boolean;
   onboardingStep: OnboardingStep;
-  kitMissing: string[];
+  kitMissing?: string[];
 }): string {
   if (!input.onboardingCompleted) return onboardingHref(input.onboardingStep);
-  if (input.kitMissing.length > 0) return "/app/memory?remind=kit";
   return "/app";
 }
 

@@ -97,3 +97,51 @@ export function formatIdentityNumberForField(raw: string, fieldSignals: string):
 
   return trimmed;
 }
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const ISO_MONTH = /^(\d{4})-(\d{2})$/;
+const ISO_TIME = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
+const ISO_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/** Convert a memory value to HTML date input form, or null when it is not a real calendar date. */
+export function toHtmlDateValue(raw: string): string | null {
+  const text = raw.trim();
+  if (!text || text.length > 40) return null;
+  if (/mon\s*-?\s*fri|weekdays?|availability|full[- ]?time|part[- ]?time/i.test(text)) return null;
+  const iso = text.match(ISO_DATE);
+  if (iso) {
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  }
+  if (!/\d{4}/.test(text) || /[a-z]{8,}/i.test(text)) return null;
+  const parsed = Date.parse(text);
+  if (Number.isNaN(parsed)) return null;
+  const date = new Date(parsed);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+/** True when `value` can be assigned to a native input without a browser format error. */
+export function valueFitsNativeInput(value: string, inputType: string): boolean {
+  const text = value.trim();
+  if (!text) return false;
+  const type = inputType.toLowerCase();
+  if (type === "date") {
+    const iso = toHtmlDateValue(text);
+    return Boolean(iso && ISO_DATE.test(iso));
+  }
+  if (type === "month") return ISO_MONTH.test(text);
+  if (type === "time") return ISO_TIME.test(text);
+  if (type === "datetime-local") return ISO_DATETIME.test(text.replace(" ", "T"));
+  if (type === "week") return /^\d{4}-W\d{2}$/i.test(text);
+  if (type === "number" || type === "range") return /^-?\d+(\.\d+)?$/.test(text);
+  if (type === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) && text.length < 254;
+  if (type === "url") return /^(https?:\/\/|www\.)/i.test(text) || /^[a-z0-9.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text);
+  if (type === "tel") return text.length <= 32 && /[\d+]/.test(text) && !/[a-z]{8,}/i.test(text);
+  return true;
+}

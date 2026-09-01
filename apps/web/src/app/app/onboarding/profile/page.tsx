@@ -19,30 +19,28 @@ export default async function OnboardingProfilePage({
   return (
     <OnboardingShell
       eyebrow="Onboarding"
-      title="Name, university, education"
-      body="Confirm the facts that repeat on every form — or skip and fill them later in Your kit. Resume extraction can fill blanks you leave empty."
+      title="Who you are"
+      body="Confirm the facts that repeat on every form. Resume extraction can fill the rest — you will review before anything counts as verified."
       step="profile"
     >
       <form action={saveOnboardingProfile} className="grid gap-4 rounded-2xl border border-line bg-white p-6">
         <Field label="Full name" htmlFor="displayName" hint="Used on every posting. You can fill this later in Your kit.">
           <Input id="displayName" name="displayName" defaultValue={profile?.display_name ?? ""} required />
         </Field>
-        <Field label="University" htmlFor="university" hint="Used on every posting.">
+        <Field label="University" htmlFor="university" hint="Optional now. The kit reminder will ask if a posting needs it.">
           <Input
             id="university"
             name="university"
             defaultValue={parseWorkspacePreferences(state.profile.preferences).university}
             placeholder="NUST"
-            required
           />
         </Field>
-        <Field label="Education" htmlFor="educationSummary" hint="Degree and year, for example BS Computer Science, 2026.">
+        <Field label="Education" htmlFor="educationSummary" hint="Optional now. Degree and year, for example BS Computer Science, 2026.">
           <Input
             id="educationSummary"
             name="educationSummary"
             defaultValue={parseWorkspacePreferences(state.profile.preferences).educationSummary}
             placeholder="BS Computer Science, 2026"
-            required
           />
         </Field>
         <Field label="Headline" htmlFor="headline">
@@ -78,7 +76,7 @@ export default async function OnboardingProfilePage({
         </Field>
         {error === "required" ? (
           <p className="text-sm text-coral-text" role="alert">
-            Name, university, and education are required to continue with this form — or skip for now below.
+            A full name is required before you can continue.
           </p>
         ) : error === "save" ? (
           <p className="text-sm text-coral-text" role="alert">
@@ -86,7 +84,7 @@ export default async function OnboardingProfilePage({
           </p>
         ) : null}
         <div className="flex flex-wrap gap-3">
-          <SubmitButton>Continue to your kit</SubmitButton>
+          <SubmitButton>Continue to documents</SubmitButton>
         </div>
       </form>
 

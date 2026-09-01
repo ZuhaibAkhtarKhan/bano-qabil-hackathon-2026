@@ -1,5 +1,6 @@
 import {
   connectWithWebsiteSession,
+  createBatchFillPlan,
   createFillPlan,
   endFillSession,
   fetchDocumentFile,
@@ -65,6 +66,7 @@ type FillSession = {
   enabled: boolean;
   updatedAt: number;
   fillSessionId?: string;
+  pageIndex?: number;
 };
 
 const FILL_SESSION_KEY = "fillSession";
@@ -156,6 +158,96 @@ async function loadAttachedFiles(mappings: Mapping[]): Promise<Map<string, Attac
   return files;
 }
 
+type BatchFieldResult = {
+  fieldId: string;
+  status: "filled" | "need_you";
+  value?: string;
+  evidenceIds?: string[];
+  documentVersionId?: string;
+};
+
+async function loadBatchFiles(results: BatchFieldResult[]): Promise<Map<string, AttachedFile>> {
+  const files = new Map<string, AttachedFile>();
+  const versionIds = [
+    ...new Set(results.map((item) => item.documentVersionId).filter((id): id is string => Boolean(id))),
+  ];
+  await Promise.all(
+    versionIds.slice(0, 6).map(async (versionId) => {
+      try {
+        const file = await fetchDocumentFile(versionId);
+        files.set(versionId, {
+          versionId: file.versionId,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          base64: file.base64,
+        });
+      } catch {
+        // Content script skips attach when bytes are missing.
+      }
+    }),
+  );
+  return files;
+}
+
+async function runBatchFillOnTab(input: {
+  tabId: number;
+  origin: string;
+  applicationId: string;
+  pageIndex: number;
+  resumeFill?: boolean;
+}) {
+  let inventory: { fields?: unknown[]; hazards?: unknown; url?: string; title?: string } | null = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
+    try {
+      inventory = await sendToTab(input.tabId, { type: "INVENTORY_BATCH" });
+    } catch {
+      inventory = null;
+    }
+    if (inventory?.fields && Array.isArray(inventory.fields) && inventory.fields.length > 0) break;
+  }
+  if (!inventory?.fields?.length) {
+    throw new Error("no-fields");
+  }
+
+  const plan = await createBatchFillPlan({
+    applicationId: input.applicationId,
+    pageIndex: input.pageIndex,
+    origin: input.origin,
+    fields: inventory.fields ?? [],
+  });
+
+  const files = await loadBatchFiles(plan.fields);
+  const typeById = new Map(
+    (inventory.fields as Array<{ fieldId?: string; type?: string }>).map((field) => [
+      String(field.fieldId ?? ""),
+      String(field.type ?? ""),
+    ]),
+  );
+  const applied = (await sendToTab(input.tabId, {
+    type: "APPLY_BATCH_RESULTS",
+    origin: input.origin,
+    applicationId: input.applicationId,
+    autoContinue: true,
+    resumeFill: Boolean(input.resumeFill),
+    results: plan.fields.map((item) => ({
+      ...item,
+      type: typeById.get(item.fieldId) || undefined,
+    })),
+    files: Array.from(files.values()),
+  })) as {
+    filled?: Array<{ fieldId?: string; filled?: boolean }>;
+    highlighted?: number;
+    stopped?: boolean;
+  };
+
+  return {
+    ...applied,
+    fillSessionId: plan.fillSessionId,
+    filledCount: applied.filled?.filter((item) => item.filled).length ?? 0,
+  };
+}
+
 async function applyMappingsToTab(input: {
   tabId: number;
   origin: string;
@@ -235,6 +327,33 @@ async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?:
     if (fillHaltGeneration !== haltAtStart) return { ok: false, reason: "stopped" };
     await ensureHostAccess(origin).catch(() => undefined);
     await ensureContentScript(tabId);
+    if (fillHaltGeneration !== haltAtStart) return { ok: false, reason: "stopped" };
+
+    try {
+      const pageIndex = session.pageIndex ?? 0;
+      const batch = await runBatchFillOnTab({
+        tabId,
+        origin,
+        applicationId: session.applicationId,
+        pageIndex,
+        resumeFill: false,
+      });
+      if (fillHaltGeneration !== haltAtStart || batch.stopped || !(await loadFillSession())) {
+        return { ok: false, reason: "stopped" };
+      }
+      await saveFillSession({
+        ...session,
+        tabId,
+        origin,
+        updatedAt: Date.now(),
+        enabled: true,
+        fillSessionId: batch.fillSessionId || session.fillSessionId,
+        pageIndex: pageIndex + 1,
+      });
+      return { ok: true, filled: batch.filledCount };
+    } catch {
+      // Fall through to the existing per-field fill-plan path.
+    }
 
     // Next-step UIs (Google Forms) often paint fields after the click; retry briefly.
     let inventory: InventoryResponse | null = null;
@@ -519,6 +638,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureHostAccess(origin);
       const inventory = await sendToTab<InventoryResponse>(tab.id, { type: "INVENTORY" });
       return { ...inventory, tabId: tab.id, origin };
+    }
+
+    if (message?.type === "FETCH_DOCUMENT") {
+      return fetchDocumentFile(String(message.versionId ?? ""));
+    }
+
+    if (message?.type === "SCAN_AND_FILL_BATCH") {
+      const tab = await activeTab();
+      if (!tab.id) throw new Error("No active tab.");
+      const origin = tabOrigin(tab);
+      const expectedOrigin = String(message.origin ?? origin);
+      if (origin !== expectedOrigin) {
+        throw new Error("Page origin changed. Try Fill from memory again.");
+      }
+      await ensureHostAccess(origin);
+      const applicationId = String(message.applicationId ?? "");
+      if (!applicationId) throw new Error("Save this page to 1-Apply first.");
+      fillHaltGeneration += 1;
+      const pageIndex = typeof message.pageIndex === "number" ? message.pageIndex : 0;
+      await saveFillSession({
+        applicationId,
+        origin,
+        tabId: tab.id,
+        enabled: true,
+        updatedAt: Date.now(),
+        pageIndex,
+      });
+      const result = await runBatchFillOnTab({
+        tabId: tab.id,
+        origin,
+        applicationId,
+        pageIndex,
+        resumeFill: true,
+      });
+      await saveFillSession({
+        applicationId,
+        origin,
+        tabId: tab.id,
+        enabled: true,
+        updatedAt: Date.now(),
+        fillSessionId: result.fillSessionId || undefined,
+        pageIndex: pageIndex + 1,
+      });
+      return result;
     }
 
     if (message?.type === "CREATE_FILL_PLAN") {

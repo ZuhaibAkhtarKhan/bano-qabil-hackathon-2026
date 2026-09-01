@@ -9,10 +9,13 @@ import {
   fillTargetAllowed,
   inspectPage,
   inventoryFromDocument,
+  isAiAnswerableField,
   isProtectedControl,
   mapFields,
   planAutofill,
   proposedFillTargets,
+  toHtmlDateValue,
+  valueFitsNativeInput,
 } from "../src/index";
 import type { MemoryValue } from "../src/types";
 
@@ -121,6 +124,54 @@ describe("mapping confidence", () => {
     expect(mapping?.aiAnswerable).toBe(true);
     expect(mapping?.proposedValue).toBe("");
     expect(mapping?.options.some((item) => item.value.includes("retrieval"))).toBe(true);
+  });
+
+  it("treats host-custom short prompts as AI-answerable", () => {
+    const document = documentFrom(`
+      <label for="share">Please share why this role interests you</label>
+      <input id="share" name="share" />
+    `);
+    const [field] = inventoryFromDocument(document);
+    expect(field).toBeTruthy();
+    expect(isAiAnswerableField(field!)).toBe(true);
+  });
+
+  it("does not treat native date inputs as AI-answerable", () => {
+    const document = documentFrom(`
+      <label for="start">Start date</label>
+      <input id="start" name="start_date" type="date" />
+    `);
+    const [field] = inventoryFromDocument(document);
+    expect(field?.type).toBe("date");
+    expect(isAiAnswerableField(field!)).toBe(false);
+  });
+
+  it("does not map weekday availability into a date input", () => {
+    const catalog: MemoryValue[] = [
+      { path: "Profile → Availability", source: "Application Memory", value: "Mon-Friday", aliases: ["available", "availability"] },
+      { path: "Profile → Full name", source: "Application Memory", value: "Saadia Asghar", aliases: ["name"] },
+    ];
+    const document = documentFrom(`
+      <label for="start">Start date</label>
+      <input id="start" name="start_date" type="date" />
+    `);
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.fieldType).toBe("date");
+    expect(mapping?.proposedValue).toBe("");
+    expect(mapping?.aiAnswerable).toBe(false);
+  });
+
+  it("keeps ISO calendar dates for date inputs", () => {
+    const catalog: MemoryValue[] = [
+      { path: "Education → Graduation year", source: "Application Memory", value: "2024-06-15", aliases: ["graduation", "start date"] },
+    ];
+    const document = documentFrom(`
+      <label for="grad">Graduation date</label>
+      <input id="grad" name="graduation_date" type="date" />
+    `);
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.proposedValue).toBe("2024-06-15");
+    expect(mapping?.aiAnswerable).toBe(false);
   });
 
   it("maps Microsoft-style degree+experience Yes/No radios from Application Memory", () => {
@@ -406,6 +457,21 @@ describe("field length limits", () => {
     expect(wordOnly).toEqual({ value: 150, unit: "words", source: "label" });
 
     expect(enforceFieldLengthLimit("one two three four five", { value: 3, unit: "words", source: "label" })).toBe("one two three");
+  });
+});
+
+describe("native HTML date values", () => {
+  it("accepts calendar dates and rejects availability text and essays", () => {
+    expect(toHtmlDateValue("2024-09-01")).toBe("2024-09-01");
+    expect(toHtmlDateValue("Mon-Friday")).toBeNull();
+    expect(
+      toHtmlDateValue(
+        "I do not have specific information regarding an end date for my current or previous positions.",
+      ),
+    ).toBeNull();
+    expect(valueFitsNativeInput("Mon-Friday", "date")).toBe(false);
+    expect(valueFitsNativeInput("2024-09-01", "date")).toBe(true);
+    expect(valueFitsNativeInput("not a number", "number")).toBe(false);
   });
 });
 

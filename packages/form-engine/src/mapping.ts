@@ -1,4 +1,4 @@
-import { deriveYearOfStudy, extractYearsFromText, formatIdentityNumberForField } from "./format-value";
+import { deriveYearOfStudy, extractYearsFromText, formatIdentityNumberForField, toHtmlDateValue } from "./format-value";
 import { humanQuestionLabel } from "./question-label";
 import { isProtectedControl, isSensitiveField } from "./safety";
 import type { DetectedField, FieldMapping, FieldMappingOption, MemoryValue } from "./types";
@@ -200,7 +200,15 @@ function narrativeMemories(catalog: MemoryValue[]): MemoryValue[] {
 }
 
 export function isAiAnswerableField(field: DetectedField): boolean {
-  if (field.type === "file" || field.type === "radio" || field.type === "checkbox" || field.type === "select" || field.type === "multi-select") {
+  if (
+    field.type === "file" ||
+    field.type === "radio" ||
+    field.type === "checkbox" ||
+    field.type === "select" ||
+    field.type === "multi-select" ||
+    field.type === "date" ||
+    field.type === "number"
+  ) {
     return false;
   }
   if (isProtectedControl(field) || isSensitiveField(field)) return false;
@@ -210,8 +218,15 @@ export function isAiAnswerableField(field: DetectedField): boolean {
   if (LINK_FIELD.test(signals) && !/\b(why|describe|explain|tell us)\b/i.test(signals)) return false;
   if (field.type === "textarea") return true;
   if (AI_ANSWERABLE.test(signals)) return true;
-  // Google Forms short-answer with a long open prompt (e.g. Scenario: … How would you …?).
-  if (field.type === "text" && field.label.trim().length >= 40 && /\?|scenario|how would|what would|describe|rewrite|respond|explain|passage|exercise/i.test(field.label)) {
+  // Host-custom short answers (Google Forms / ATS) with a real prompt — not identity fields.
+  const prompt = `${field.label} ${field.nearbyText}`.trim();
+  if (
+    (field.type === "text" || field.type === "url") &&
+    prompt.length >= 18 &&
+    /\?|please |describe|explain|tell |why |how |share |write |discuss |reflect |anything|additional|comment|note to|cover letter|motivation|interest/i.test(
+      prompt,
+    )
+  ) {
     return true;
   }
   return false;
@@ -1028,16 +1043,55 @@ export function mapFields(fields: DetectedField[], catalog: MemoryValue[]): Fiel
   return fields.map((field) => ensureFieldAssist(mapField(field, catalog), field, catalog));
 }
 
+function coerceNativeInputValue(mapping: FieldMapping, field: DetectedField): FieldMapping {
+  if (field.type === "date") {
+    const iso = toHtmlDateValue(mapping.proposedValue);
+    if (iso) {
+      return { ...mapping, proposedValue: iso, aiAnswerable: false };
+    }
+    return {
+      ...mapping,
+      proposedValue: "",
+      aiAnswerable: false,
+      excludedByDefault: true,
+      reason: "Date field needs a calendar date (yyyy-MM-dd) from Application Memory.",
+    };
+  }
+  if (field.type === "number") {
+    const numeric = mapping.proposedValue.trim();
+    if (/^-?\d+(\.\d+)?$/.test(numeric)) {
+      return { ...mapping, proposedValue: numeric, aiAnswerable: false };
+    }
+    return { ...mapping, proposedValue: "", aiAnswerable: false, excludedByDefault: true };
+  }
+  return mapping;
+}
+
 /** Every interactive field gets a chip or AI popup so nothing is left without an assist control. */
 function ensureFieldAssist(mapping: FieldMapping, field: DetectedField, catalog: MemoryValue[]): FieldMapping {
+  mapping = coerceNativeInputValue(mapping, field);
   if (mapping.sensitive || mapping.approvalState === "blocked" || mapping.memoryPath === "Blocked") {
     return mapping;
   }
 
   const choiceType =
     field.type === "radio" || field.type === "checkbox" || field.type === "select" || field.type === "multi-select";
-  const textType =
-    field.type === "text" || field.type === "textarea" || field.type === "url" || field.type === "number" || field.type === "date";
+  if (field.type === "date" || field.type === "number") {
+    const options =
+      field.type === "date"
+        ? mapping.options.flatMap((item) => {
+            const iso = toHtmlDateValue(item.value);
+            return iso ? [{ ...item, value: iso }] : [];
+          })
+        : mapping.options.filter((item) => /^-?\d+(\.\d+)?$/.test(item.value.trim()));
+    return {
+      ...mapping,
+      options,
+      aiAnswerable: false,
+      showChip: Boolean(mapping.proposedValue) || options.length > 0,
+    };
+  }
+  const textType = field.type === "text" || field.type === "textarea" || field.type === "url";
 
   if (choiceType) {
     const formOptions =

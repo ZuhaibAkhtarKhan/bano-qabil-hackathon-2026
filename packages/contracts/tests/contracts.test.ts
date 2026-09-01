@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   APPLICATION_LIFECYCLE,
   assertDraftIsGrounded,
+  BatchFillRequestSchema,
+  BatchFillResponseSchema,
   computeProfileCompleteness,
   consentInputSchema,
   consentUpdateFields,
@@ -90,5 +92,30 @@ describe("job lifecycle", () => {
     expect(jobLifecycleSchema.options).toEqual(["queued", "processing", "completed", "failed"]);
     expect(toJobLifecycle("running")).toBe("processing");
     expect(toJobLifecycle("succeeded")).toBe("completed");
+  });
+});
+
+describe("batch fill-plan contracts", () => {
+  it("round-trips fieldId and forces need_you without a value", () => {
+    const request = BatchFillRequestSchema.parse({
+      applicationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      pageIndex: 2,
+      fields: [{ fieldId: "f_abc", type: "textarea", label: "Why us?" }],
+    });
+    expect(request.fields[0]?.fieldId).toBe("f_abc");
+    const response = BatchFillResponseSchema.parse({
+      fields: [{ fieldId: "f_abc", status: "need_you" }],
+    });
+    expect(response.fields[0]?.status).toBe("need_you");
+    expect(response.fields[0]?.value).toBeUndefined();
+  });
+
+  it("accepts native date field types in the batch request", () => {
+    const request = BatchFillRequestSchema.parse({
+      applicationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      pageIndex: 0,
+      fields: [{ fieldId: "f_start", type: "date", label: "Start date" }],
+    });
+    expect(request.fields[0]?.type).toBe("date");
   });
 });

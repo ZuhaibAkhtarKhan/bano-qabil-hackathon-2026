@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AsyncButton, SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { authErrorFromSearchParams, ACCOUNT_EXISTS_MESSAGE, mapAuthError, safeNextPath } from "@/lib/auth-errors";
+import { DEMO_ACCOUNT } from "@/lib/demo-account";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
@@ -190,6 +191,33 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         {mode === "sign-up" ? "Create account" : "Sign in"}
         <span aria-hidden="true">→</span>
       </SubmitButton>
+
+      {mode === "sign-in" ? (
+        <div className="rounded-xl border border-line bg-[#fafbf8] px-3 py-3">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted">Hackathon demo</p>
+          <p className="mt-1 text-xs leading-5 text-ink-muted">
+            Pre-filled kit, Need You gaps, a deadline freeze packet, a host CAPTCHA wall, and a frozen submission.
+          </p>
+          <p className="mt-2 font-mono text-[11px] text-ink">
+            {DEMO_ACCOUNT.email}
+            <span className="text-ink-muted"> / </span>
+            {DEMO_ACCOUNT.password}
+          </p>
+          <AsyncButton
+            type="button"
+            variant="secondary"
+            className="mt-3 w-full"
+            disabled={busy}
+            pendingText="Opening demo…"
+            onClick={() => {
+              setEmail(DEMO_ACCOUNT.email);
+              setPassword(DEMO_ACCOUNT.password);
+            }}
+          >
+            Use demo account
+          </AsyncButton>
+        </div>
+      ) : null}
 
       <div className="relative py-1">
         <div className="absolute inset-0 flex items-center" aria-hidden="true">

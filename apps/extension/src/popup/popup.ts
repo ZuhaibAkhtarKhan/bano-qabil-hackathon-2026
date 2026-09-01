@@ -161,6 +161,41 @@ document.getElementById("fill")!.addEventListener("click", async () => {
     const tab = await activeTab();
     await ensureSiteAccessFromGesture(tab.url!);
 
+    if (!cachedApps.length) {
+      cachedApps = await send<ApplicationOption[]>({ type: "LIST_APPLICATIONS" });
+    }
+    const matched = selectApplicationForUrl(tab.url ?? null);
+    const applicationId = matched?.id || applicationEl.value;
+    if (!applicationId) {
+      log("Save this page to 1-Apply first so we can match the application by URL.");
+      return;
+    }
+
+    const origin = new URL(tab.url!).origin;
+    try {
+      const result = await send<{
+        filled?: Array<{ filled?: boolean; hasAlternates?: boolean }>;
+        highlighted?: number;
+        filledCount?: number;
+      }>({
+        type: "SCAN_AND_FILL_BATCH",
+        applicationId,
+        origin,
+        pageIndex: 0,
+      });
+      const filled = result.filledCount ?? result.filled?.filter((item) => item.filled).length ?? 0;
+      const highlighted = result.highlighted ?? 0;
+      log(
+        `Filled ${filled}. Keeps filling after Next until you Stop. ${
+          highlighted ? `${highlighted} still empty — highlighted for Need You.` : "Submit remains yours."
+        }`,
+      );
+      await refreshFillSessionUi();
+      return;
+    } catch {
+      // Fall back to the existing per-field fill-plan + 1A chip path.
+    }
+
     const inventory = await send<{
       fields: unknown[];
       url: string;
@@ -184,16 +219,16 @@ document.getElementById("fill")!.addEventListener("click", async () => {
     if (!cachedApps.length) {
       cachedApps = await send<ApplicationOption[]>({ type: "LIST_APPLICATIONS" });
     }
-    const matched = selectApplicationForUrl(inventory.url);
-    const applicationId = matched?.id || applicationEl.value;
-    if (!applicationId) {
+    const fallbackMatch = selectApplicationForUrl(inventory.url);
+    const fallbackApplicationId = fallbackMatch?.id || applicationEl.value || applicationId;
+    if (!fallbackApplicationId) {
       log("Save this page to 1-Apply first so we can match the application by URL.");
       return;
     }
 
     const plan = await send<{ mappings: Mapping[]; fillSessionId?: string }>({
       type: "CREATE_FILL_PLAN",
-      applicationId,
+      applicationId: fallbackApplicationId,
       origin: inventory.origin || new URL(inventory.url).origin,
       fields: inventory.fields,
       hazards: inventory.hazards,
@@ -204,7 +239,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       highlighted?: number;
     }>({
       type: "APPLY_SUGGESTIONS",
-      applicationId,
+      applicationId: fallbackApplicationId,
       fillSessionId: plan.fillSessionId,
       mappings: plan.mappings,
       highlightKeys: (inventory.fields as Array<{ key?: string }>).map((field) => String(field.key ?? "")).filter(Boolean),

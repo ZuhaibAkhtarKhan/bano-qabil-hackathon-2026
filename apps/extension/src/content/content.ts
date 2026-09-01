@@ -1,10 +1,12 @@
 import {
+  APPLY_BATCH_ID_ATTR,
   APPLY_EMPTY_ATTR,
   APPLY_FIELD_ATTR,
   APPLY_HOST_ATTR,
   assertFillActionAllowed,
   describeFieldLengthLimit,
   detectFieldLengthLimit,
+  fieldsEligibleForBatch,
   fillTargetAllowed,
   findPrimaryStepAdvance,
   inspectPage,
@@ -12,6 +14,10 @@ import {
   isProtectedControl,
   isSensitiveField,
   isStepAdvanceControl,
+  stampBatchFieldIds,
+  toBatchFieldInputs,
+  toHtmlDateValue,
+  valueFitsNativeInput,
   type FieldLengthLimit,
 } from "@1apply/form-engine";
 
@@ -184,6 +190,11 @@ if (!root.__1APPLY_LISTENERS) {
       return { clicked: false, reason: "max-steps" };
     }
 
+    const empty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
+    if (empty > 0) {
+      return { clicked: false, reason: "empty-fields" };
+    }
+
     const btn = findPrimaryStepAdvance(document);
     if (!btn) {
       showToast("1-Apply finished fillable pages. Missing answers stay in Need You — Stop when done.");
@@ -353,12 +364,33 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   function findControl(fieldKey: string): HTMLElement | null {
-    const tagged = findTagged(fieldKey) as HTMLElement | null;
-    if (tagged) return tagged;
+    const nodes = Array.from(document.querySelectorAll(`[${APPLY_FIELD_ATTR}="${cssEscape(fieldKey)}"]`)) as HTMLElement[];
+    const control = nodes.find(
+      (node) =>
+        node instanceof HTMLInputElement ||
+        node instanceof HTMLTextAreaElement ||
+        node instanceof HTMLSelectElement ||
+        node.getAttribute("contenteditable") === "true" ||
+        node.getAttribute("role") === "textbox" ||
+        node.getAttribute("role") === "listbox" ||
+        node.getAttribute("role") === "combobox" ||
+        node.getAttribute("role") === "radio" ||
+        node.getAttribute("role") === "checkbox",
+    );
+    if (control) return control;
+    if (nodes[0]) return nodes[0];
     return (
       document.querySelector<HTMLElement>(`[name="${cssEscape(fieldKey)}"]`) ||
       document.querySelector<HTMLElement>(`#${cssEscape(fieldKey)}`)
     );
+  }
+
+  function findControlByBatchId(fieldId: string): HTMLElement | null {
+    const tagged = document.querySelector(`[${APPLY_BATCH_ID_ATTR}="${cssEscape(fieldId)}"]`) as HTMLElement | null;
+    if (!tagged) return null;
+    const key = tagged.getAttribute(APPLY_FIELD_ATTR);
+    if (key) return findControl(key) || tagged;
+    return tagged;
   }
 
   function readControlValue(fieldKey: string, fieldType: string): string {
@@ -684,6 +716,16 @@ if (!root.__1APPLY_LISTENERS) {
     return false;
   }
 
+  function valueForNativeInput(el: HTMLInputElement | HTMLTextAreaElement, value: string): string | null {
+    if (!(el instanceof HTMLInputElement)) return value;
+    const type = (el.type || "text").toLowerCase();
+    if (type === "date") return toHtmlDateValue(value);
+    if (["datetime-local", "month", "week", "time", "number", "range", "email", "url", "tel"].includes(type)) {
+      return valueFitsNativeInput(value, type) ? value : null;
+    }
+    return value;
+  }
+
   async function applyValue(el: HTMLElement, mapping: FillPayload): Promise<boolean> {
     const card = findCard(mapping.fieldKey) || el;
 
@@ -758,7 +800,9 @@ if (!root.__1APPLY_LISTENERS) {
     }
 
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-      setNativeTextValue(el, mapping.value);
+      const next = valueForNativeInput(el, mapping.value);
+      if (next == null) return false;
+      setNativeTextValue(el, next);
       return true;
     }
 
@@ -766,7 +810,9 @@ if (!root.__1APPLY_LISTENERS) {
       "input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea",
     );
     if (textInput) {
-      setNativeTextValue(textInput, mapping.value);
+      const next = valueForNativeInput(textInput, mapping.value);
+      if (next == null) return false;
+      setNativeTextValue(textInput, next);
       return true;
     }
 
@@ -786,16 +832,27 @@ if (!root.__1APPLY_LISTENERS) {
 
   function isControlFilled(fieldKey: string, el: HTMLElement): boolean {
     const card = findCard(fieldKey) || el;
-    if (card.querySelector('[role="listbox"]')) {
-      const listbox = card.querySelector('[role="listbox"]');
-      const text = (listbox?.textContent ?? "").trim().toLowerCase();
-      return Boolean(text && text !== "choose" && !text.includes("choose"));
+    if (card.querySelector('[role="listbox"]') || el.getAttribute("role") === "listbox") {
+      const listbox = (el.getAttribute("role") === "listbox" ? el : card.querySelector('[role="listbox"]')) as HTMLElement | null;
+      const selected = listbox?.querySelector('[role="option"][aria-selected="true"]');
+      const selectedText = (selected?.textContent ?? "").trim().toLowerCase();
+      return Boolean(selectedText && selectedText !== "choose" && !selectedText.includes("choose"));
     }
-    if (card.querySelector('[role="radio"]')) {
-      return Array.from(card.querySelectorAll('[role="radio"]')).some((node) => node.getAttribute("aria-checked") === "true");
+    if (card.querySelector('[role="radio"]') || (el instanceof HTMLInputElement && el.type === "radio")) {
+      if (Array.from(card.querySelectorAll('[role="radio"]')).some((node) => node.getAttribute("aria-checked") === "true")) {
+        return true;
+      }
+      return Array.from(
+        document.querySelectorAll<HTMLInputElement>(`input[type="radio"][${APPLY_FIELD_ATTR}="${cssEscape(fieldKey)}"]`),
+      ).some((node) => node.checked);
     }
-    if (card.querySelector('[role="checkbox"]')) {
-      return Array.from(card.querySelectorAll('[role="checkbox"]')).some((node) => node.getAttribute("aria-checked") === "true");
+    if (card.querySelector('[role="checkbox"]') || (el instanceof HTMLInputElement && el.type === "checkbox")) {
+      if (Array.from(card.querySelectorAll('[role="checkbox"]')).some((node) => node.getAttribute("aria-checked") === "true")) {
+        return true;
+      }
+      return Array.from(
+        document.querySelectorAll<HTMLInputElement>(`input[type="checkbox"][${APPLY_FIELD_ATTR}="${cssEscape(fieldKey)}"]`),
+      ).some((node) => node.checked);
     }
     const file = card.querySelector<HTMLInputElement>('input[type="file"]');
     if (file) return (file.files?.length ?? 0) > 0 || fileAlreadyUploaded(card);
@@ -810,9 +867,19 @@ if (!root.__1APPLY_LISTENERS) {
         (node) => node.checked,
       );
     }
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return Boolean(el.value?.trim());
-    const text = card.querySelector<HTMLInputElement | HTMLTextAreaElement>("input:not([type=hidden]):not([type=file]), textarea");
-    return Boolean(text?.value?.trim());
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const value = (el.value ?? "").trim();
+      return Boolean(value) && !/^(your answer|your response|type your answer)$/i.test(value);
+    }
+    const text = card.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      "input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea",
+    );
+    if (text?.value?.trim() && !/^(your answer|your response|type your answer)$/i.test(text.value.trim())) return true;
+    const editable =
+      (el.getAttribute("contenteditable") === "true" || el.getAttribute("role") === "textbox" ? el : null) ||
+      card.querySelector<HTMLElement>('[contenteditable="true"], [role="textbox"]');
+    const editableText = (editable?.textContent ?? "").replace(/\s+/g, " ").trim();
+    return Boolean(editableText) && !/^(your answer|your response|type your answer)$/i.test(editableText);
   }
 
   function ensureHighlightStyle() {
@@ -1273,6 +1340,29 @@ if (!root.__1APPLY_LISTENERS) {
       return false;
     }
 
+    if (message?.type === "INVENTORY_BATCH") {
+      const fields = inventoryFromDocument(document);
+      const eligible = fieldsEligibleForBatch(fields);
+      stampBatchFieldIds(document, eligible);
+      const extras: Record<string, { currentValue?: string; maxLength?: number }> = {};
+      for (const field of eligible) {
+        const el = findControl(field.key);
+        const limit = el ? detectFieldLengthLimit(el, field.label, field.nearbyText) : null;
+        extras[field.key] = {
+          currentValue: readControlValue(field.key, field.type) || undefined,
+          maxLength: limit?.unit === "characters" ? limit.value : undefined,
+        };
+      }
+      sendResponse({
+        type: "INVENTORY_BATCH_RESULT",
+        fields: toBatchFieldInputs(eligible, extras),
+        hazards: inspectPage(document, document.body?.innerText ?? "", fields),
+        url: location.href,
+        title: document.title,
+      });
+      return false;
+    }
+
     if (message?.type === "CAPTURE_FILLED_STATE") {
       const fields = inventoryFromDocument(document);
       const captured = fields.map((field) => ({
@@ -1302,6 +1392,172 @@ if (!root.__1APPLY_LISTENERS) {
       }
       sendResponse({ ok });
       return false;
+    }
+
+    if (message?.type === "APPLY_BATCH_RESULTS") {
+      assertFillActionAllowed("setValue");
+      const expectedOrigin = String(message.origin ?? "");
+      if (expectedOrigin && location.origin !== expectedOrigin) {
+        sendResponse({ type: "FILL_RESULT", filled: [], error: "Origin mismatch" });
+        return false;
+      }
+
+      void (async () => {
+        root.__1APPLY_FILLING = true;
+        try {
+          const scanned = inventoryFromDocument(document);
+          stampBatchFieldIds(document, fieldsEligibleForBatch(scanned));
+          const applicationId = String(message.applicationId ?? "");
+          const files = new Map<string, AttachedFile>();
+          for (const file of (message.files ?? []) as AttachedFile[]) {
+            if (file?.versionId) files.set(file.versionId, file);
+          }
+
+          const results: Array<{ fieldId: string; filled: boolean; skippedReason?: string }> = [];
+          const highlightKeys: string[] = [];
+
+          for (const result of (message.results ?? []) as Array<{
+            fieldId: string;
+            status: "filled" | "need_you";
+            value?: string;
+            documentVersionId?: string;
+            type?: string;
+          }>) {
+            const el = findControlByBatchId(result.fieldId);
+            const fieldKey = el?.getAttribute(APPLY_FIELD_ATTR) || result.fieldId;
+            if (!el) {
+              results.push({ fieldId: result.fieldId, filled: false, skippedReason: "Control not found" });
+              highlightKeys.push(fieldKey);
+              continue;
+            }
+            const card = findCard(fieldKey) || el;
+            const resultType = String(result.type ?? "");
+            const inferredType =
+              resultType === "radio" ||
+              resultType === "checkbox" ||
+              resultType === "select" ||
+              resultType === "file" ||
+              resultType === "textarea"
+                ? resultType
+                : el instanceof HTMLSelectElement || card.querySelector('[role="listbox"]')
+                  ? "select"
+                  : el instanceof HTMLInputElement && el.type === "radio" || card.querySelector('[role="radio"]')
+                    ? "radio"
+                    : el instanceof HTMLInputElement && el.type === "checkbox" || card.querySelector('[role="checkbox"]')
+                      ? "checkbox"
+                      : el instanceof HTMLTextAreaElement
+                        ? "textarea"
+                        : el instanceof HTMLInputElement
+                          ? el.type === "file"
+                            ? "file"
+                            : "text"
+                          : el.getAttribute("contenteditable") === "true" || el.getAttribute("role") === "textbox"
+                            ? "textarea"
+                            : resultType || "text";
+            const isChoice =
+              inferredType === "radio" || inferredType === "checkbox" || inferredType === "select" || inferredType === "file";
+
+            if (!isChoice && isControlFilled(fieldKey, el)) {
+              card.removeAttribute(APPLY_EMPTY_ATTR);
+              results.push({ fieldId: result.fieldId, filled: true, skippedReason: "already filled" });
+              continue;
+            }
+
+            if (result.status !== "filled") {
+              highlightKeys.push(fieldKey);
+              if (inferredType === "text" || inferredType === "textarea") {
+                const question =
+                  findCard(fieldKey)?.querySelector('[role="heading"]')?.textContent?.trim() ||
+                  (el.getAttribute("aria-label") ?? "") ||
+                  fieldKey;
+                mountAiAssistant(el, fieldKey, question, inferredType, applicationId, []);
+              }
+              results.push({ fieldId: result.fieldId, filled: false, skippedReason: "need_you" });
+              continue;
+            }
+
+            if (!fillTargetAllowed(fieldKey, inferredType)) {
+              results.push({ fieldId: result.fieldId, filled: false, skippedReason: "Protected control" });
+              continue;
+            }
+
+            const versionId = result.documentVersionId;
+            const file = versionId ? files.get(versionId) : undefined;
+            const filled = await applyValue(el, {
+              fieldKey,
+              value: versionId || result.value || "",
+              type: versionId ? "file" : inferredType,
+              file: file
+                ? file
+                : versionId
+                  ? {
+                      versionId,
+                      filename: "document.pdf",
+                      mimeType: "application/pdf",
+                      base64: "",
+                    }
+                  : null,
+            });
+            if (filled) {
+              card.removeAttribute(APPLY_EMPTY_ATTR);
+              results.push({ fieldId: result.fieldId, filled: true });
+            } else {
+              highlightKeys.push(fieldKey);
+              results.push({
+                fieldId: result.fieldId,
+                filled: false,
+                skippedReason: file ? "Could not attach file" : "Could not apply value",
+              });
+            }
+          }
+
+          highlightEmpty(highlightKeys);
+
+          if (message.resumeFill) {
+            root.__1APPLY_STOPPED = false;
+          }
+
+          if (message.autoContinue) {
+            if (root.__1APPLY_STOPPED) {
+              sendResponse({
+                type: "FILL_RESULT",
+                filled: results,
+                highlighted: document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length,
+                stopped: true,
+              });
+              return;
+            }
+            enableAutoContinueWatch();
+            root.__1APPLY_LAST_PAGE_FP = pageFingerprint();
+            root.__1APPLY_CONTINUE_TRIES = 0;
+            const filledCount = results.filter((item) => item.filled).length;
+            const stillEmpty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
+            showToast(
+              stillEmpty
+                ? `1-Apply filled ${filledCount}. ${stillEmpty} question(s) still empty — tap 1A or complete them before Next.`
+                : filledCount
+                  ? `1-Apply filled ${filledCount} field(s).`
+                  : "1-Apply ready — tap 1A for AI questions.",
+            );
+          }
+
+          sendResponse({
+            type: "FILL_RESULT",
+            filled: results,
+            highlighted: document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length,
+          });
+        } finally {
+          root.__1APPLY_FILLING = false;
+        }
+
+        const stillEmpty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
+        if (message.autoContinue && isFillActive() && stillEmpty === 0) {
+          await sleep(450);
+          if (isFillActive()) await tryAutoAdvance();
+        }
+      })();
+
+      return true;
     }
 
     if (message?.type === "FILL" || message?.type === "APPLY_SUGGESTIONS" || message?.type === "APPLY_SUGGESTIONS") {

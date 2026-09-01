@@ -46,7 +46,7 @@ export async function loadMemoryCatalog(
   actor: Actor,
   applicationId: string,
 ): Promise<MemoryValue[]> {
-  const [{ data: profile }, { data: facts }, { data: answers }, { data: questions }, { data: evidence }, { data: skills }] =
+  const [{ data: profile }, { data: facts }, { data: answers }, { data: questions }, { data: evidence }, { data: skills }, { data: savedFields }] =
     await Promise.all([
       supabase
         .from("profiles")
@@ -68,6 +68,14 @@ export async function loadMemoryCatalog(
         .eq("user_id", actor.userId)
         .limit(40),
       supabase.from("skills").select("name").eq("user_id", actor.userId).limit(80),
+      supabase
+        .from("field_mappings")
+        .select("label, value, field_type, sensitive, excluded_by_default")
+        .eq("application_id", applicationId)
+        .eq("user_id", actor.userId)
+        .eq("sensitive", false)
+        .order("created_at", { ascending: false })
+        .limit(80),
     ]);
 
   const catalog: MemoryValue[] = [];
@@ -244,6 +252,14 @@ export async function loadMemoryCatalog(
     add("Approved Application Answer", text, ["why are you interested", "motivation", "cover letter", "personal statement", "why join"], source);
     add(`Answer → ${prompt.slice(0, 40)}`, text, [prompt.toLowerCase().slice(0, 40)], source);
     addEducationBlob(text, source);
+  }
+
+  const looksLikeVersionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const row of savedFields ?? []) {
+    const value = String(row.value ?? "").trim();
+    const label = String(row.label ?? "").trim();
+    if (!value || !label || row.field_type === "file" || looksLikeVersionId.test(value)) continue;
+    add(`Need You → ${label.slice(0, 48)}`, value, [label.toLowerCase().slice(0, 80), "need you"], "Need You");
   }
 
   for (const row of evidence ?? []) {

@@ -17,7 +17,7 @@ export async function saveOnboardingProfile(formData: FormData) {
   const displayName = String(formData.get("displayName") ?? "").trim();
   const university = String(formData.get("university") ?? "").trim();
   const educationSummary = String(formData.get("educationSummary") ?? "").trim();
-  if (!displayName || !university || !educationSummary) {
+  if (!displayName) {
     redirect("/app/onboarding/profile?error=required");
   }
 

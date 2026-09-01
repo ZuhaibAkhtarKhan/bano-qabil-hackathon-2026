@@ -255,6 +255,32 @@ export function listApplications() {
   >("/api/extension/applications");
 }
 
+export function createBatchFillPlan(input: {
+  applicationId: string;
+  pageIndex: number;
+  origin?: string;
+  fields: unknown[];
+}) {
+  return request<{
+    fields: Array<{
+      fieldId: string;
+      status: "filled" | "need_you";
+      value?: string;
+      evidenceIds?: string[];
+      documentVersionId?: string;
+    }>;
+    fillSessionId: string | null;
+  }>(`/api/applications/${input.applicationId}/fill-plan/batch`, {
+    method: "POST",
+    body: JSON.stringify({
+      applicationId: input.applicationId,
+      pageIndex: input.pageIndex,
+      origin: input.origin,
+      fields: input.fields,
+    }),
+  });
+}
+
 export function fetchDocumentFile(versionId: string) {
   return request<{
     versionId: string;

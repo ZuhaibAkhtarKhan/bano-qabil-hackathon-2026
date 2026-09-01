@@ -52,7 +52,12 @@ export {
   type ResumeKeywordGapResult,
 } from "./resume-keyword-gaps";
 
-export { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "./grounding";
+export {
+  finalizeGroundedDraft,
+  freezeSubmissionManifest,
+  groundBatchFillFields,
+  lengthWarnings,
+} from "./grounding";
 
 export {
   detectSubmissionSignals,

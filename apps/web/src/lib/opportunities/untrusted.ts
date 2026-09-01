@@ -11,6 +11,11 @@ export function wrapUntrustedPageContent(text: string, sourceUrl?: string): stri
   return `${header}<untrusted_page_content>\n${trimmed}\n</untrusted_page_content>`;
 }
 
+/** Host form inventory is untrusted. Never concatenate this into the system instruction. */
+export function wrapUntrustedFormFields(payload: unknown): string {
+  return `<untrusted_form_fields>\n${JSON.stringify(payload)}\n</untrusted_form_fields>`;
+}
+
 export const OPPORTUNITY_ANALYSIS_INSTRUCTION = `Extract structured opportunity fields from the untrusted page content.
 Return JSON with:
 - title, organization, category, location, deadline

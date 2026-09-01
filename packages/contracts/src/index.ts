@@ -183,3 +183,16 @@ export {
   type IntegrationToken,
   type OAuthState,
 } from "./integrations";
+
+export {
+  BatchFieldInputSchema,
+  BatchFieldResultSchema,
+  BatchFieldTypeSchema,
+  BatchFillRequestSchema,
+  BatchFillResponseSchema,
+  type BatchFieldInput,
+  type BatchFieldResult,
+  type BatchFieldType,
+  type BatchFillRequest,
+  type BatchFillResponse,
+} from "./fill-plan-batch";
