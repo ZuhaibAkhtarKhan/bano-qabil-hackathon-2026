@@ -57,7 +57,7 @@ export async function ingestCategorizedResume(input: {
   let versionId: string;
   let versionLabel = "v1";
   let duplicate = false;
-  let isNewCategory = !existingResume?.document_id;
+  const isNewCategory = !existingResume?.document_id;
 
   if (existingResume?.document_id) {
     documentId = String(existingResume.document_id);
@@ -132,7 +132,7 @@ export async function ingestCategorizedResume(input: {
     };
   }
 
-  let processResult = {
+  const processResult = {
     textExtracted: false,
     kitFilled: false,
     remainingBlanks: 0,

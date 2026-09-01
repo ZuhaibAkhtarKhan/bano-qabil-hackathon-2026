@@ -10,7 +10,7 @@ import {
   APPLICATION_LIFECYCLE_ACTIONS,
 } from "@/lib/application-lifecycle";
 import { detectProfileMemoryField, isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
-import { scheduleRefreshOpenApplicationsFromKit, refreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
+import { refreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { logError } from "@/lib/log";
 import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";

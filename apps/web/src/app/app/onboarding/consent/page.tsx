@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { acceptConsent } from "@/app/app/actions";
 import { ensureOnboardingStep } from "@/lib/onboarding";
 import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
@@ -28,7 +30,11 @@ export default async function OnboardingConsentPage({
         <label className="flex items-start gap-3 rounded-2xl border border-line bg-white p-4 text-sm">
           <input type="checkbox" name="termsAccepted" className="mt-1" required />
           <span>
-            I accept the terms and privacy notice for storing my application materials in a private account.
+            I accept the terms and{" "}
+            <Link href="/privacy" className="font-medium text-ink underline decoration-line underline-offset-2">
+              privacy policy
+            </Link>{' '}
+            for storing my application materials in a private account.
           </span>
         </label>
         <label className="flex items-start gap-3 rounded-2xl border border-line bg-white p-4 text-sm">
