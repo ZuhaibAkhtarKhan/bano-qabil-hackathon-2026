@@ -66,6 +66,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
+          command_timeout: 5m
           script: |
             set -euo pipefail
             cd ~/bano-qabil-hackathon-2026
@@ -73,4 +74,18 @@ jobs:
             rm -f next-build.tgz
             pm2 reload ecosystem.config.cjs || pm2 start ecosystem.config.cjs
             pm2 save
-            curl -sf http://localhost:3000/api/health
+            # Next.js needs a few seconds after reload before port 3000 accepts connections
+            ok=0
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:3000/api/health >/dev/null; then
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "Health check failed after 60s"
+              pm2 status
+              pm2 logs 1apply-web --lines 40 --nostream || true
+              exit 1
+            fi

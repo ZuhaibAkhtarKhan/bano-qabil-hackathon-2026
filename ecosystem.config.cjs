@@ -3,8 +3,8 @@ module.exports = {
     {
       name: "1apply-web",
       cwd: "./apps/web",
-      script: "npm",
-      args: "run start",
+      script: "node_modules/next/dist/bin/next",
+      args: "start --port 3000",
       env: {
         NODE_ENV: "production",
         PORT: "3000",
