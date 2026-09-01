@@ -4,6 +4,10 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@1apply/contracts", "@1apply/domain", "@1apply/form-engine"],
   serverExternalPackages: ["mammoth"],
   poweredByHeader: false,
+  eslint: {
+    // On 2GB EC2, run lint separately; build uses scripts/ec2-build.sh
+    ignoreDuringBuilds: process.env.LOW_MEM_BUILD === "1",
+  },
   async headers() {
     return [
       {
