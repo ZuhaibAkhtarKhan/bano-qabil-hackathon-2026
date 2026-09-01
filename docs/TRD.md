@@ -24,7 +24,7 @@
 | Async work | Postgres jobs table + scheduled worker initially | Minimal infrastructure; replace with a dedicated queue when volume requires |
 | Extension | Chrome Manifest V3, TypeScript, service worker/content script | Current extension security model and user-invoked page integration |
 | Testing | Vitest, Testing Library, Playwright | Unit, component, integration, and end-to-end coverage |
-| Hosting | Vercel + Supabase | Simple preview and production deployments |
+| Hosting | AWS EC2 + Supabase | Self-hosted web app; Supabase for DB/auth/storage |
 | Observability | Structured server logs + error monitoring | Correlation IDs, job state, latency, and failures without sensitive payloads |
 
 Version policy: pin exact versions in the lockfile during implementation and use currently supported stable releases. Architecture references: [Next.js App Router](https://nextjs.org/docs/app), [Supabase database and RLS](https://supabase.com/docs/guides/database/overview), [permission-aware RAG](https://supabase.com/docs/guides/ai/rag-with-permissions), [OpenAI API documentation](https://platform.openai.com/docs), and [Chrome Manifest V3](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3).

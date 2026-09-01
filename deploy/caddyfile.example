@@ -1,0 +1,10 @@
+# Default Caddy on Ubuntu serves this welcome page until you replace the config.
+# On EC2:
+#   sudo cp deploy/caddyfile.example /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Requires Next.js on localhost:3000 (pm2 start ecosystem.config.cjs)
+
+:80 {
+	reverse_proxy localhost:3000
+}

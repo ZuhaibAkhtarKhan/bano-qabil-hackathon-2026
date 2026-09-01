@@ -363,7 +363,6 @@ export async function resolveNeedsYouValue(formData: FormData) {
   const questionId = String(formData.get("questionId") ?? "").trim() || null;
   const answerId = String(formData.get("answerId") ?? "").trim() || null;
   const mappingId = String(formData.get("mappingId") ?? "").trim() || null;
-  const detail = String(formData.get("detail") ?? "").trim();
   const scopeRaw = String(formData.get("scope") ?? "memory").trim().toLowerCase();
   const scope: "memory" | "application" = scopeRaw === "application" ? "application" : "memory";
 

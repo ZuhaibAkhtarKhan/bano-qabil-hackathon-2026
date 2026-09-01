@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "npm run dev -w @1apply/web",
     "build": "npm run build -w @1apply/web",
+    "build:server": "bash scripts/ec2-build.sh",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

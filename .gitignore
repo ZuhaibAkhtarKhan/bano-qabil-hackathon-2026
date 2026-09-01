@@ -55,3 +55,6 @@ Thumbs.db
 .env*.local
 **/.env.local
 test-results/
+
+# Vercel (not used — deploy via EC2)
+.vercel

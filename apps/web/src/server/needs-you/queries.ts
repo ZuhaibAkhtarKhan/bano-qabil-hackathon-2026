@@ -970,7 +970,7 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
           target.label,
           choiceOptions.length,
         );
-        let inputType: NeedsYouInputType =
+        const inputType: NeedsYouInputType =
           hostInputType === "multi-select" && choiceOptions.length > 0
             ? "multi-select"
             : hostInputType === "select" && choiceOptions.length > 0

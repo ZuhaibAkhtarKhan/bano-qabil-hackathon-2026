@@ -1,0 +1,91 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Write build-time public env
+        run: |
+          cat > apps/web/.env.local <<EOF
+          NEXT_PUBLIC_APP_URL=${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_EXTENSION_ORIGIN=${{ secrets.NEXT_PUBLIC_EXTENSION_ORIGIN }}
+          EOF
+
+      - name: Install and build (on GitHub — avoids EC2 OOM)
+        run: |
+          npm ci
+          export NODE_OPTIONS="--max-old-space-size=4096"
+          export LOW_MEM_BUILD=1
+          npm run build -w @1apply/web
+
+      - name: Archive Next.js build
+        run: tar -czf next-build.tgz -C apps/web .next
+
+      - name: Sync code on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/bano-qabil-hackathon-2026
+            git fetch origin main
+            git reset --hard origin/main
+            npm ci
+
+      - name: Upload build archive
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "next-build.tgz"
+          target: "~/bano-qabil-hackathon-2026/"
+
+      - name: Extract build and restart app
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd ~/bano-qabil-hackathon-2026
+            tar -xzf next-build.tgz -C apps/web
+            rm -f next-build.tgz
+            pm2 reload ecosystem.config.cjs || pm2 start ecosystem.config.cjs
+            pm2 save
+            # Next.js needs a few seconds after reload before port 3000 accepts connections
+            ok=0
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:3000/api/health >/dev/null; then
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "Health check failed after 60s"
+              pm2 status
+              pm2 logs 1apply-web --lines 40 --nostream || true
+              exit 1
+            fi

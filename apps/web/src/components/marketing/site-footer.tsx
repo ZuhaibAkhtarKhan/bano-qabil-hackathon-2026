@@ -17,7 +17,10 @@ const columns = [
   },
   {
     title: "Company",
-    links: ["Safety", "Privacy", "Responsible AI"],
+    links: [
+      { label: "Privacy", href: "/privacy" },
+      { label: "Sign in", href: "/sign-in" },
+    ],
   },
 ];
 
@@ -36,7 +39,15 @@ export function SiteFooter() {
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-muted">{column.title}</p>
             <ul className="mt-4 space-y-2 text-sm text-ink-muted">
               {column.links.map((item) => (
-                <li key={item}>{item}</li>
+                <li key={typeof item === "string" ? item : item.href}>
+                  {typeof item === "string" ? (
+                    item
+                  ) : (
+                    <Link href={item.href} className="hover:text-ink">
+                      {item.label}
+                    </Link>
+                  )}
+                </li>
               ))}
             </ul>
           </div>
@@ -45,12 +56,12 @@ export function SiteFooter() {
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-5 text-xs text-ink-muted sm:px-8">
         <p>© {new Date().getFullYear()} 1-Apply. Truth before fluency.</p>
         <div className="flex gap-4">
+          <Link href="/privacy" className="hover:text-ink">
+            Privacy
+          </Link>
           <Link href="/sign-in" className="hover:text-ink">
             Sign in
           </Link>
-          <a href="#how-it-works" className="hover:text-ink">
-            How it works
-          </a>
         </div>
       </div>
     </footer>
