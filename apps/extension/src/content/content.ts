@@ -1365,12 +1365,30 @@ if (!root.__1APPLY_LISTENERS) {
 
     if (message?.type === "CAPTURE_FILLED_STATE") {
       const fields = inventoryFromDocument(document);
-      const captured = fields.map((field) => ({
-        fieldKey: field.key,
-        label: field.label || field.name || field.key,
-        value: readControlValue(field.key, field.type),
+      const eligible = fieldsEligibleForBatch(fields);
+      stampBatchFieldIds(document, eligible);
+      const extras: Record<string, { currentValue?: string; maxLength?: number }> = {};
+      for (const field of eligible) {
+        const el = findControl(field.key);
+        const limit = el ? detectFieldLengthLimit(el, field.label, field.nearbyText) : null;
+        extras[field.key] = {
+          currentValue: readControlValue(field.key, field.type) || undefined,
+          maxLength: limit?.unit === "characters" ? limit.value : undefined,
+        };
+      }
+      const batchFields = toBatchFieldInputs(eligible, extras);
+      const keyByFieldId = new Map(batchFields.map((field, index) => [field.fieldId, eligible[index]?.key ?? field.fieldId]));
+      const captured = batchFields.map((field) => ({
+        fieldKey: keyByFieldId.get(field.fieldId) ?? field.fieldId,
+        fieldId: field.fieldId,
+        label: field.label,
+        value: field.currentValue ?? "",
         required: Boolean(field.required),
         fieldType: field.type,
+        options: field.options,
+        maxLength: field.maxLength,
+        nearbyText: field.nearbyText,
+        placeholder: field.placeholder,
       }));
       const pageText = (document.body?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 20_000);
       sendResponse({
@@ -1379,6 +1397,17 @@ if (!root.__1APPLY_LISTENERS) {
         pageUrl: location.href,
         pageText,
         fields: captured,
+        formPage: {
+          pageIndex: 0,
+          pageUrl: location.href,
+          pageTitle: document.title,
+          origin: location.origin,
+          hazards: inspectPage(document, document.body?.innerText ?? "", fields),
+          fields: batchFields.map((field) => ({
+            ...field,
+            fieldKey: keyByFieldId.get(field.fieldId),
+          })),
+        },
       });
       return false;
     }

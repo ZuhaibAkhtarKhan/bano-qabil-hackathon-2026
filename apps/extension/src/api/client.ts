@@ -115,6 +115,14 @@ export function ingestOpportunity(input: {
   title?: string;
   excerpt?: string;
   pageText?: string;
+  formPage?: {
+    pageIndex?: number;
+    pageUrl?: string;
+    pageTitle?: string;
+    origin?: string;
+    hazards?: unknown;
+    fields: unknown[];
+  };
 }) {
   return request<{
     opportunityId: string;
@@ -133,6 +141,7 @@ export function ingestOpportunity(input: {
         pageText: input.pageText,
         source: "extension",
       },
+      ...(input.formPage ? { formPage: input.formPage } : {}),
     }),
   });
 }
@@ -189,11 +198,24 @@ export function endFillSession(input: {
   pageText?: string;
   fields?: Array<{
     fieldKey: string;
+    fieldId?: string;
     label?: string;
     value: string;
     required?: boolean;
     fieldType?: string;
+    options?: string[];
+    maxLength?: number;
+    nearbyText?: string;
+    placeholder?: string;
   }>;
+  formPage?: {
+    pageIndex?: number;
+    pageUrl?: string;
+    pageTitle?: string;
+    origin?: string;
+    hazards?: unknown;
+    fields: unknown[];
+  };
 }) {
   return request<{
     applicationId: string;
@@ -212,6 +234,7 @@ export function endFillSession(input: {
       pageUrl: input.pageUrl,
       pageText: input.pageText,
       fields: input.fields ?? [],
+      ...(input.formPage ? { formPage: input.formPage } : {}),
     }),
   });
 }

@@ -452,11 +452,24 @@ type CapturedFillState = {
   pageText: string;
   fields: Array<{
     fieldKey: string;
+    fieldId?: string;
     label: string;
     value: string;
     required: boolean;
     fieldType: string;
+    options?: string[];
+    maxLength?: number;
+    nearbyText?: string;
+    placeholder?: string;
   }>;
+  formPage?: {
+    pageIndex?: number;
+    pageUrl?: string;
+    pageTitle?: string;
+    origin?: string;
+    hazards?: unknown;
+    fields: unknown[];
+  };
 };
 
 async function captureFilledState(tabId: number): Promise<CapturedFillState | null> {
@@ -485,6 +498,7 @@ async function syncFillSessionEnd(
       pageUrl: captured?.pageUrl,
       pageText: captured?.pageText,
       fields: captured?.fields ?? [],
+      formPage: captured?.formPage,
     });
   } catch {
     // Best-effort: local stop must still succeed if the API is unreachable.
@@ -623,11 +637,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (new URL(pageUrl).origin !== origin) {
         throw new Error("Page origin changed. Refresh and try again.");
       }
+      let formPage: {
+        pageIndex: number;
+        pageUrl?: string;
+        pageTitle?: string;
+        origin: string;
+        hazards?: unknown;
+        fields: unknown[];
+      } | undefined;
+      try {
+        const inventory = await sendToTab<{
+          fields?: unknown[];
+          hazards?: unknown;
+          url?: string;
+          title?: string;
+        }>(tab.id, { type: "INVENTORY_BATCH" });
+        if (inventory?.fields?.length) {
+          formPage = {
+            pageIndex: 0,
+            pageUrl: inventory.url || pageUrl,
+            pageTitle: inventory.title || meta.title,
+            origin,
+            hazards: inventory.hazards ?? {},
+            fields: inventory.fields,
+          };
+        }
+      } catch {
+        // Not every saved page is an application form.
+      }
       return ingestOpportunity({
         url: pageUrl,
         title: meta.title || tab.title || undefined,
         excerpt: meta.excerpt,
         pageText: meta.pageText || meta.excerpt,
+        formPage,
       });
     }
 
