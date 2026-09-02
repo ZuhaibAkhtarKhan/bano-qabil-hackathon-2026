@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { logError } from "@/lib/log";
-import { runGlobalAutomationSweep } from "@/server/automation/run-global-sweep";
+import { runGlobalAutomationSweep, runGlobalHostSubmitWorker } from "@/server/automation/run-global-sweep";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,7 +16,8 @@ function authorizeCron(request: Request): boolean {
 async function handleSweep() {
   try {
     const result = await runGlobalAutomationSweep();
-    return NextResponse.json({ ok: true, ...result });
+    const hostSubmit = await runGlobalHostSubmitWorker();
+    return NextResponse.json({ ok: true, ...result, hostSubmit });
   } catch (err) {
     logError("automation.cron_sweep_failed", { err });
     return NextResponse.json({ ok: false, error: "sweep_failed" }, { status: 500 });

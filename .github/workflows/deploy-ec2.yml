@@ -76,6 +76,17 @@ jobs:
             rm -f next-build.tgz
             pm2 reload ecosystem.config.cjs || pm2 start ecosystem.config.cjs
             pm2 save
+            # Ensure deadline automation crons are installed (idempotent).
+            TMP_CRON="$(mktemp)"
+            crontab -l 2>/dev/null | grep -v "1-apply-automation" | grep -v ec2-cron-sweep | grep -v ec2-cron-host-submit > "$TMP_CRON" || true
+            {
+              cat "$TMP_CRON"
+              echo "*/5 * * * * $HOME/bano-qabil-hackathon-2026/scripts/ec2-cron-host-submit.sh # 1-apply-automation"
+              echo "*/15 * * * * $HOME/bano-qabil-hackathon-2026/scripts/ec2-cron-sweep.sh # 1-apply-automation"
+            } | crontab -
+            rm -f "$TMP_CRON"
+            chmod +x "$HOME/bano-qabil-hackathon-2026/scripts/ec2-cron-host-submit.sh"
+            chmod +x "$HOME/bano-qabil-hackathon-2026/scripts/ec2-cron-sweep.sh"
             # Next.js needs a few seconds after reload before port 3000 accepts connections
             ok=0
             for i in $(seq 1 30); do

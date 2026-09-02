@@ -212,12 +212,12 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         clickFinalSubmit: true,
       });
 
-      if (result.ok && result.hostSubmitClicked && result.submitted) {
+      if (result.ok && result.hostSubmitClicked) {
         await completeHostSubmitJob({
           supabase,
           actor,
           jobId: job.id,
-          submitted: true,
+          submitted: result.submitted,
           hostSubmitClicked: true,
         });
         submitted += 1;

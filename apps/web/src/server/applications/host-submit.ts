@@ -2,6 +2,8 @@ import { computeHostSubmitDueAt } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
+import { logError } from "@/lib/log";
+import { createServiceRoleSupabaseClient } from "@/lib/supabase/admin";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
@@ -83,7 +85,9 @@ async function upsertHostJob(input: {
     eventBody,
   } = input;
 
-  const { data: existing } = await supabase
+  const queue = createServiceRoleSupabaseClient();
+
+  const { data: existing } = await queue
     .from("host_submit_jobs")
     .select("id, status")
     .eq("idempotency_key", idempotencyKey)
@@ -94,19 +98,24 @@ async function upsertHostJob(input: {
     if (terminal.includes(String(existing.status))) {
       return { ok: true, jobId: String(existing.id) };
     }
-    await supabase
+    const { error: updateError } = await queue
       .from("host_submit_jobs")
       .update({
         due_at: dueAt.toISOString(),
         source_url: sourceUrl,
         status: "pending",
+        job_kind: jobKind,
         last_error: null,
       })
       .eq("id", existing.id);
+    if (updateError) {
+      logError("host_submit.reschedule_failed", { updateError, applicationId, idempotencyKey });
+      return { ok: false, reason: updateError.message };
+    }
     return { ok: true, jobId: String(existing.id) };
   }
 
-  const { data: job, error } = await supabase
+  const { data: job, error } = await queue
     .from("host_submit_jobs")
     .insert({
       user_id: actor.userId,
@@ -120,7 +129,10 @@ async function upsertHostJob(input: {
     .select("id")
     .single();
 
-  if (error || !job) return { ok: false, reason: error?.message ?? "insert_failed" };
+  if (error || !job) {
+    logError("host_submit.queue_insert_failed", { error, applicationId, jobKind, idempotencyKey });
+    return { ok: false, reason: error?.message ?? "insert_failed" };
+  }
 
   await supabase
     .from("applications")
@@ -384,14 +396,14 @@ export async function completeHostSubmitJob(input: {
     return { ok: true };
   }
 
-  if (submitted && hostSubmitClicked) {
+  if (hostSubmitClicked) {
     await supabase
       .from("host_submit_jobs")
       .update({
         status: "submitted",
         host_submit_clicked: true,
         completed_at: now,
-        last_error: null,
+        last_error: submitted ? null : "Submit clicked; host confirmation not detected.",
       })
       .eq("id", jobId);
 
@@ -406,6 +418,7 @@ export async function completeHostSubmitJob(input: {
     await recordApplicationEvent(supabase, actor, applicationId, "application.host_submitted", {
       jobId,
       hostSubmitClicked: true,
+      hostConfirmationDetected: submitted,
     });
 
     await emitDomainEvent(supabase, {
@@ -414,7 +427,9 @@ export async function completeHostSubmitJob(input: {
       applicationId,
       subjectId: `${applicationId}:host_submit`,
       title: "Form submitted to host",
-      body: "1-Apply filled and clicked Submit on the host form before the deadline.",
+      body: submitted
+        ? "1-Apply filled and clicked Submit on the host form before the deadline."
+        : "1-Apply clicked Submit on the host form. Open the form to confirm if needed.",
     });
     return { ok: true };
   }
