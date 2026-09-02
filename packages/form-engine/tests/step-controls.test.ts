@@ -60,10 +60,12 @@ describe("step advance controls", () => {
     expect(isStepAdvanceControl(doc.querySelector('button[type="submit"]'))).toBe(false);
   });
 
-  it("allows clickNext but not clickSubmit via safety", async () => {
+  it("allows clickNext and clickSubmit only when host submit is enabled", async () => {
     const { assertFillActionAllowed, isForbiddenFillAction } = await import("../src/index");
     expect(isForbiddenFillAction("clickNext")).toBe(false);
     expect(() => assertFillActionAllowed("clickNext")).not.toThrow();
     expect(isForbiddenFillAction("clickSubmit")).toBe(true);
+    expect(isForbiddenFillAction("clickSubmit", { hostSubmitAllowed: true })).toBe(false);
+    expect(() => assertFillActionAllowed("clickSubmit", { hostSubmitAllowed: true })).not.toThrow();
   });
 });

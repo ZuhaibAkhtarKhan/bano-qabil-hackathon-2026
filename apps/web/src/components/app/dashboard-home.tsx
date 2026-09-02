@@ -228,8 +228,8 @@ export function DashboardHome({
                 <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.sendsAtDeadline}</dd>
                 <p className="mt-1 text-xs text-ink-muted">
                   {lanes.prepareAndSendIfSilent
-                    ? "Silence will freeze the packet"
-                    : "Turn on in Settings to auto-freeze"}
+                    ? "Silence will auto-submit"
+                    : "Turn on in Settings to auto-submit"}
                 </p>
               </div>
               <div className="rounded-2xl border border-line bg-white p-4">

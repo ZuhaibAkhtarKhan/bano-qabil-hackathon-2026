@@ -8,6 +8,8 @@ import {
   generateAiDraft,
   ingestOpportunity,
   listApplications,
+  listPendingHostSubmits,
+  reportHostSubmit,
 } from "../api/client";
 import type { DetectedField } from "@1apply/form-engine";
 
@@ -67,11 +69,15 @@ type FillSession = {
   updatedAt: number;
   fillSessionId?: string;
   pageIndex?: number;
+  autoSubmitHost?: boolean;
+  hostSubmitJobId?: string;
 };
 
 const FILL_SESSION_KEY = "fillSession";
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
+const HOST_SUBMIT_ALARM = "host-submit-poll";
 const autoFillInFlight = new Set<number>();
+const hostSubmitInFlight = new Set<string>();
 /** Bumped on Stop so in-flight continueFillOnTab aborts and cannot resurrect the session. */
 let fillHaltGeneration = 0;
 
@@ -780,3 +786,152 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   task.then(sendResponse).catch((error: Error) => sendResponse({ error: error.message }));
   return true;
 });
+
+async function waitForTabComplete(tabId: number, timeoutMs = 45_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === "complete") return;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+}
+
+async function runHostSubmitJob(job: {
+  id: string;
+  applicationId: string;
+  sourceUrl: string;
+}): Promise<void> {
+  if (hostSubmitInFlight.has(job.id)) return;
+  hostSubmitInFlight.add(job.id);
+
+  let tabId: number | undefined;
+  try {
+    await reportHostSubmit({ jobId: job.id, running: true });
+
+    const url = new URL(job.sourceUrl);
+    await chrome.permissions.request({ origins: [`${url.origin}/*`] });
+
+    const tab = await chrome.tabs.create({ url: job.sourceUrl, active: false });
+    if (!tab.id) throw new Error("Could not open the form tab.");
+    tabId = tab.id;
+    await waitForTabComplete(tabId);
+    const origin = url.origin;
+
+    fillHaltGeneration += 1;
+    await saveFillSession({
+      applicationId: job.applicationId,
+      origin,
+      tabId,
+      enabled: true,
+      updatedAt: Date.now(),
+      pageIndex: 0,
+      autoSubmitHost: true,
+      hostSubmitJobId: job.id,
+    });
+
+    await sendToTab(tabId, { type: "SET_AUTO_SUBMIT_HOST", enabled: true });
+
+    for (let step = 0; step < 14; step += 1) {
+      const fillResult = await continueFillOnTab(tabId);
+      if (fillResult.reason === "stopped") break;
+
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+
+      const advance = (await sendToTab<{ clicked?: boolean; reason?: string }>(tabId, {
+        type: "TRY_AUTO_ADVANCE",
+      }).catch(() => ({ clicked: false, reason: "advance-failed" }))) as {
+        clicked?: boolean;
+        reason?: string;
+      };
+
+      if (advance.clicked && advance.reason !== "no-change") {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
+
+      const submitTry = (await sendToTab<{
+        clicked?: boolean;
+        submitted?: boolean;
+        reason?: string;
+        blockedReason?: string;
+      }>(tabId, { type: "TRY_AUTO_SUBMIT" }).catch(() => null)) as {
+        clicked?: boolean;
+        submitted?: boolean;
+        reason?: string;
+        blockedReason?: string;
+      } | null;
+
+      if (submitTry?.blockedReason) {
+        await reportHostSubmit({
+          jobId: job.id,
+          blockedReason: submitTry.blockedReason,
+        });
+        return;
+      }
+
+      if (submitTry?.clicked) {
+        await reportHostSubmit({
+          jobId: job.id,
+          submitted: Boolean(submitTry.submitted),
+          hostSubmitClicked: true,
+          error: submitTry.submitted ? null : "Submit clicked but confirmation not detected.",
+        });
+        await clearFillSession(tabId, "submitted_detected");
+        return;
+      }
+
+      if (!advance.clicked && (fillResult.reason === "no-fields" || submitTry?.reason === "no-submit")) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        continue;
+      }
+
+      if (!advance.clicked) break;
+    }
+
+    await reportHostSubmit({
+      jobId: job.id,
+      submitted: false,
+      hostSubmitClicked: false,
+      error: "Could not reach the Submit step. Fill missing fields in Need You and try again.",
+    });
+  } catch (error) {
+    await reportHostSubmit({
+      jobId: job.id,
+      submitted: false,
+      hostSubmitClicked: false,
+      error: error instanceof Error ? error.message : "host_submit_failed",
+    }).catch(() => undefined);
+  } finally {
+    hostSubmitInFlight.delete(job.id);
+    if (tabId) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        // Tab may already be closed.
+      }
+    }
+  }
+}
+
+async function pollPendingHostSubmits(): Promise<void> {
+  try {
+    const session = await fetchSession().catch(() => null);
+    if (!session?.connected) return;
+    const jobs = await listPendingHostSubmits();
+    for (const job of jobs.slice(0, 2)) {
+      if (job.attemptCount >= 5) continue;
+      await runHostSubmitJob(job);
+    }
+  } catch {
+    // Extension may be offline or user signed out.
+  }
+}
+
+chrome.alarms.create(HOST_SUBMIT_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HOST_SUBMIT_ALARM) {
+    void pollPendingHostSubmits();
+  }
+});
+
+void pollPendingHostSubmits();

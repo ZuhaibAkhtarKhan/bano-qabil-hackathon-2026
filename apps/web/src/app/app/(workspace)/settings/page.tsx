@@ -79,11 +79,12 @@ export default async function SettingsPage({
         </Card>
 
         <Card className="p-6" data-tour="settings-freeze">
-          <h2 className="text-base font-medium">Prepare and send if I don’t respond</h2>
+          <h2 className="text-base font-medium">Auto-submit if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            On by default. When enabled, 1-Apply emails you about 2 hours before the deadline so you can review
-            answers, documents, and Need You items. If you do not edit, the packet freezes at the deadline.
-            1-Apply never clicks host Submit, and never bypasses CAPTCHA, signature, or payment.
+            On by default. About 2 hours before the deadline, 1-Apply emails you so you can review answers,
+            documents, and Need You items. If you do not edit, the extension fills and submits the host form
+            before the deadline. Keep Chrome running with the extension connected. CAPTCHA, signature, and payment
+            still need you.
           </p>
           <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
             <label className="flex items-start gap-3 text-sm">
@@ -93,7 +94,7 @@ export default async function SettingsPage({
                 defaultChecked={prefs.prepareAndSendIfSilent}
                 className="mt-1"
               />
-              <span>Freeze this packet at the deadline if I stay silent. You get an email 2 hours before to review.</span>
+              <span>Auto-submit this form before the deadline if I stay silent. You get an email 2 hours before to review.</span>
             </label>
             <SubmitButton variant="secondary">
               Save send preference
@@ -108,7 +109,7 @@ export default async function SettingsPage({
             <a className="underline" href="/app/integrations">
               Integrations
             </a>
-            . The extension never clicks submit.
+            . The extension fills forms and can auto-submit before deadlines when enabled in Settings.
           </p>
           <ExtensionConnectCard appUrl={appUrl} />
         </Card>

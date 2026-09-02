@@ -76,6 +76,9 @@ export function fillTargetAllowed(fieldKey: string, type: string): boolean {
   return !isProtectedControl({ name: fieldKey, label: fieldKey, type, id: fieldKey });
 }
 
-export function isForbiddenFillAction(action: string): boolean {
+export function isForbiddenFillAction(action: string, options?: { hostSubmitAllowed?: boolean }): boolean {
+  if (options?.hostSubmitAllowed && (action === "submit" || action === "clickSubmit")) {
+    return false;
+  }
   return action === "submit" || action === "clickSubmit" || action === "bypassCaptcha" || action === "createAccount";
 }

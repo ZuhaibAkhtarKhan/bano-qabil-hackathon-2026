@@ -11,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { freezeApplicationPacket } from "@/server/applications/freeze-packet";
+import { queueHostSubmitJob } from "@/server/applications/host-submit";
 import {
   hasPreDeadlineReviewNotice,
   sendPreDeadlineReviewNoticeIfDue,
@@ -208,6 +209,7 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
     const [
       { data: answersAfterFill },
       { data: attachedAfterFill },
+      { data: fieldMappings },
     ] = deadlineUrgent
       ? await Promise.all([
           supabase
@@ -215,8 +217,12 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
             .select("question_id, state, approved_text, original_ai_text, user_edited_text")
             .eq("application_id", application.id),
           supabase.from("application_documents").select("document_id").eq("application_id", application.id),
+          supabase
+            .from("field_mappings")
+            .select("field_key, value, excluded_by_default")
+            .eq("application_id", application.id),
         ])
-      : [{ data: answers }, { data: attached }];
+      : [{ data: answers }, { data: attached }, { data: [] }];
 
     const answersForSubmit = answersAfterFill ?? answers ?? [];
     const attachedForSubmit = attachedAfterFill ?? attached ?? [];
@@ -238,6 +244,14 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
           }),
       ),
     ).length;
+
+    const fillableMappings = (fieldMappings ?? []).filter(
+      (row) => !row.excluded_by_default && Boolean(String(row.value ?? "").trim()),
+    );
+    const hasFillContent =
+      packetCountForSubmit > 0 ||
+      fillableMappings.length > 0 ||
+      (questions ?? []).length === 0;
 
     const decision = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
@@ -263,7 +277,8 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
         identityPresent,
         packetNoticeSent: preDeadlineReviewSent,
         allQuestionsHavePacketText:
-          (questions ?? []).length === 0 || packetCountForSubmit === (questions ?? []).length,
+          hasFillContent &&
+          ((questions ?? []).length === 0 || packetCountForSubmit === (questions ?? []).length),
         allAnswersApproved:
           (answersForSubmit ?? []).every((row) => row.state === "approved") &&
           (questions ?? []).length === packetCountForSubmit,
@@ -274,12 +289,21 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
     );
 
     if (decision.action === "proceed") {
-      await freezeApplicationPacket({
-        supabase,
-        actor,
-        applicationId: application.id as string,
-        source: "silence",
-      });
+      if (SILENCE_AUTO_SUBMIT_POLICY.submitToHost) {
+        await queueHostSubmitJob({
+          supabase,
+          actor,
+          applicationId: application.id as string,
+          dueAt: now,
+        });
+      } else {
+        await freezeApplicationPacket({
+          supabase,
+          actor,
+          applicationId: application.id as string,
+          source: "silence",
+        });
+      }
     } else if (decision.action === "pause") {
       await emitDomainEvent(supabase, {
         name: "automation.account_action",

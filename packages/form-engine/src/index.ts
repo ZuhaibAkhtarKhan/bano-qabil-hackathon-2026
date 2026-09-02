@@ -22,8 +22,10 @@ export {
   classifyActionControl,
   controlSignalText,
   findPrimaryStepAdvance,
+  findPrimarySubmitControl,
   findStepAdvanceControls,
   isStepAdvanceControl,
+  isSubmitControl,
 } from "./step-controls";
 export { deriveYearOfStudy, formatIdentityNumberForField, extractYearsFromText, toHtmlDateValue, valueFitsNativeInput } from "./format-value";
 export {

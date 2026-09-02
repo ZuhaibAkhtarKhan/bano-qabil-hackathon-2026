@@ -315,6 +315,33 @@ export function fetchDocumentFile(versionId: string) {
   }>(`/api/extension/documents/${versionId}`);
 }
 
+export function listPendingHostSubmits() {
+  return request<
+    Array<{
+      id: string;
+      applicationId: string;
+      sourceUrl: string;
+      dueAt: string;
+      status: string;
+      attemptCount: number;
+    }>
+  >("/api/extension/host-submits/pending");
+}
+
+export function reportHostSubmit(input: {
+  jobId: string;
+  running?: boolean;
+  submitted?: boolean;
+  hostSubmitClicked?: boolean;
+  error?: string | null;
+  blockedReason?: string | null;
+}) {
+  return request<{ ok: boolean }>("/api/extension/host-submits/complete", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function connectWithWebsiteSession() {
   await saveSession();
   const allowed = await ensureAppHostPermission();

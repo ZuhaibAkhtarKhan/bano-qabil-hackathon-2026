@@ -30,8 +30,8 @@ export function mappingsSafeToFill(mappings: FieldMapping[]): FieldMapping[] {
   });
 }
 
-export function assertFillActionAllowed(action: FillAction): void {
-  if (isForbiddenFillAction(action)) {
+export function assertFillActionAllowed(action: FillAction, options?: { hostSubmitAllowed?: boolean }): void {
+  if (isForbiddenFillAction(action, options)) {
     throw new Error("1-Apply never submits, bypasses CAPTCHA, or creates host accounts.");
   }
 }

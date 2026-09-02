@@ -101,6 +101,31 @@ export function findStepAdvanceControls(root: ParentNode): HTMLElement[] {
   return out;
 }
 
+/** Best single Submit target on the final page, or null if none. */
+export function findPrimarySubmitControl(root: ParentNode): HTMLElement | null {
+  const nodes = Array.from(root.querySelectorAll(CONTROL_SELECTOR)) as HTMLElement[];
+  const candidates: HTMLElement[] = [];
+
+  for (const node of nodes) {
+    const control = (node.closest(CONTROL_SELECTOR) as HTMLElement | null) ?? node;
+    if (classifyActionControl(control) !== "submit") continue;
+    if (!isVisibleEnabled(control)) continue;
+    if (!candidates.includes(control)) candidates.push(control);
+  }
+
+  if (!candidates.length) return null;
+
+  const preferred = candidates.find((el) => /\bsubmit\b/i.test(controlSignalText(el)));
+  return preferred ?? candidates[candidates.length - 1] ?? null;
+}
+
+export function isSubmitControl(el: Element | null): boolean {
+  if (!el) return false;
+  const control = el.closest(CONTROL_SELECTOR) as HTMLElement | null;
+  if (!control) return false;
+  return classifyActionControl(control) === "submit";
+}
+
 /** Best single Next/Continue target, or null if none (last page / no wizard). */
 export function findPrimaryStepAdvance(root: ParentNode): HTMLElement | null {
   const controls = findStepAdvanceControls(root);

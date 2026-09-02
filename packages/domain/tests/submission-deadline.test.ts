@@ -357,8 +357,25 @@ describe("auto-submit policy", () => {
     expect(decision.action).toBe("proceed");
   });
 
-  it("freezes a silence packet only at or after the deadline once review notice was sent", () => {
-    const beforeDeadline = evaluateAutoSubmit(
+  it("queues host submit in the pre-deadline window once review notice was sent", () => {
+    const beforeWindow = evaluateAutoSubmit(
+      SILENCE_AUTO_SUBMIT_POLICY,
+      {
+        ...makeReminderInput({
+          deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          identityPresent: true,
+          packetNoticeSent: true,
+          allQuestionsHavePacketText: true,
+        }),
+        allAnswersApproved: false,
+        documentsAttached: true,
+        hasUnsupportedClaims: false,
+      },
+    );
+    expect(beforeWindow.action).toBe("block");
+    expect(beforeWindow.reason).toMatch(/outside.*window/);
+
+    const inWindow = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
       {
         ...makeReminderInput({
@@ -372,30 +389,14 @@ describe("auto-submit policy", () => {
         hasUnsupportedClaims: false,
       },
     );
-    expect(beforeDeadline.action).toBe("block");
-
-    const atDeadline = evaluateAutoSubmit(
-      SILENCE_AUTO_SUBMIT_POLICY,
-      {
-        ...makeReminderInput({
-          deadlineAt: new Date(Date.now() - 60 * 1000).toISOString(),
-          identityPresent: true,
-          packetNoticeSent: true,
-          allQuestionsHavePacketText: true,
-        }),
-        allAnswersApproved: false,
-        documentsAttached: true,
-        hasUnsupportedClaims: false,
-      },
-    );
-    expect(atDeadline.action).toBe("proceed");
-    expect(atDeadline.reason).toMatch(/Do not click host Submit/);
+    expect(inWindow.action).toBe("proceed");
+    expect(inWindow.reason).toMatch(/host form fill and submit/i);
 
     const missingNotice = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
       {
         ...makeReminderInput({
-          deadlineAt: new Date(Date.now() - 60 * 1000).toISOString(),
+          deadlineAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
           identityPresent: true,
           packetNoticeSent: false,
           allQuestionsHavePacketText: true,
@@ -424,7 +425,7 @@ describe("auto-submit policy", () => {
       packetSummary: "2 answers · 1 document attached.",
       reviewUrl: "https://app.example/app/applications/app-1#submission",
     });
-    expect(notice.title).toMatch(/Review before auto-freeze/);
+    expect(notice.title).toMatch(/Review before auto-submit/);
     expect(notice.body).toMatch(/2 hours remain/);
     expect(notice.emailHtml).toMatch(/Review application/);
   });

@@ -79,7 +79,7 @@ export async function DashboardPackets() {
         <MetricCard
           label="Sends at deadline"
           value={lanes.sendsAtDeadline.length}
-          hint={prepareAndSendIfSilent ? "Silence will freeze the packet" : "Turn on in Settings to auto-freeze"}
+          hint={prepareAndSendIfSilent ? "Silence will auto-submit" : "Turn on in Settings to auto-submit"}
         />
         <MetricCard label="Waiting on host" value={lanes.waitingHost.length} hint="CAPTCHA, signature, or payment" />
       </dl>
@@ -122,7 +122,7 @@ export async function DashboardPackets() {
               <p className="text-sm text-ink-muted">
                 {prepareAndSendIfSilent
                   ? "No complete packets waiting on a deadline."
-                  : "Opt in under Settings if you want 1-Apply to freeze a packet when you stay silent."}
+                  : "Opt in under Settings if you want 1-Apply to auto-submit when you stay silent."}
               </p>
             }
           >

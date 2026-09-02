@@ -10,8 +10,9 @@ export async function freezeApplicationPacket(input: {
   actor: Actor;
   applicationId: string;
   source: "user" | "silence";
+  hostSubmitClicked?: boolean;
 }): Promise<{ ok: true; snapshotId: string } | { ok: false; reason: string }> {
-  const { supabase, actor, applicationId, source } = input;
+  const { supabase, actor, applicationId, source, hostSubmitClicked = false } = input;
 
   const { data: application } = await supabase
     .from("applications")
@@ -115,7 +116,7 @@ export async function freezeApplicationPacket(input: {
       idempotency_key: `${applicationId}:packet:${source}:${snapshot.submittedAt.slice(0, 13)}`,
       guard_result: {
         source,
-        hostSubmitClicked: false,
+        hostSubmitClicked,
         captchaBypassed: false,
       },
     })
@@ -129,9 +130,10 @@ export async function freezeApplicationPacket(input: {
     .update({
       status: "submitted",
       submitted_at: snapshot.submittedAt,
-      next_action:
-        source === "silence"
-          ? "Packet frozen at deadline because you did not edit. 1-Apply did not click host Submit."
+      next_action: hostSubmitClicked
+        ? "Submitted to the host before the deadline."
+        : source === "silence"
+          ? "Packet frozen at deadline because you did not edit."
           : "Track the host process. 1-Apply did not send this application.",
     })
     .eq("id", applicationId);
@@ -147,10 +149,15 @@ export async function freezeApplicationPacket(input: {
     userId: actor.userId,
     applicationId,
     subjectId: `${applicationId}:packet:${source}`,
-    title: source === "silence" ? "Packet frozen at deadline" : "Submission snapshot frozen",
-    body:
-      source === "silence"
-        ? "The current packet was frozen because you did not edit before the deadline. 1-Apply did not click host Submit or bypass CAPTCHA."
+    title: hostSubmitClicked
+      ? "Form submitted to host"
+      : source === "silence"
+        ? "Packet frozen at deadline"
+        : "Submission snapshot frozen",
+    body: hostSubmitClicked
+      ? "1-Apply filled and clicked Submit on the host form."
+      : source === "silence"
+        ? "The current packet was frozen because you did not edit before the deadline."
         : "Approved answers and attached document versions were recorded. You still submit to the host yourself.",
   });
 

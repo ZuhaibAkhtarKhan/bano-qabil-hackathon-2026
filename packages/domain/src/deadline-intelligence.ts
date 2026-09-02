@@ -157,8 +157,8 @@ export function generateReminder(input: ReminderInput, now: Date = new Date()): 
     return {
       state: "deadline_approaching",
       urgency: deadline.urgency,
-      title: `${title}${org}: will freeze this packet unless you edit`,
-      body: `Unless you edit, 1-Apply will freeze this packet at the deadline. ${input.packetSummary ?? "Current suggestions and attached documents will be recorded."} ${deadline.label}. 1-Apply will not click host Submit or bypass CAPTCHA.`,
+      title: `${title}${org}: will auto-submit unless you edit`,
+      body: `Unless you edit, 1-Apply will fill and submit this form before the deadline. ${input.packetSummary ?? "Current answers and attached documents will be sent."} ${deadline.label}. CAPTCHA, signature, and payment still need you.`,
       priority: priorityFromUrgency(deadline.urgency, 90),
       actionable: true,
     };
@@ -220,7 +220,12 @@ export type AutoSubmitPolicy = {
   allowAutoGenerate: boolean;
   requireAllAnswersApproved: boolean;
   silenceTreatsSuggestionsAsPacket: boolean;
+  /** When true, only act at/after deadline (legacy freeze). When false, submit in the lead window before deadline. */
   freezeOnlyAtOrAfterDeadline: boolean;
+  /** When true, queue a host form submit (extension / worker clicks Submit). */
+  submitToHost: boolean;
+  /** Submit when deadline is this many hours away or less (still before deadline). */
+  submitLeadHours: number;
   requireIdentity: boolean;
   requirePriorPacketNotice: boolean;
   requireDocumentsAttached: boolean;
@@ -240,6 +245,8 @@ export const DEFAULT_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   requireAllAnswersApproved: true,
   silenceTreatsSuggestionsAsPacket: false,
   freezeOnlyAtOrAfterDeadline: false,
+  submitToHost: false,
+  submitLeadHours: 24,
   requireIdentity: false,
   requirePriorPacketNotice: false,
   requireDocumentsAttached: true,
@@ -274,8 +281,8 @@ export function buildPreDeadlineReviewNotice(input: {
 }): { title: string; body: string; emailSubject: string; emailHtml: string } {
   const org = input.organization ? ` at ${input.organization}` : "";
   const summary = input.packetSummary ? ` ${input.packetSummary}` : "";
-  const title = `Review before auto-freeze — ${input.applicationTitle}${org}`;
-  const body = `About ${PRE_DEADLINE_REVIEW_NOTICE_HOURS} hours remain before the deadline (${input.deadlineLabel}). Unless you edit, 1-Apply will freeze this packet at the deadline.${summary} Open the application to change answers, documents, or Need You items. 1-Apply will not click host Submit or bypass CAPTCHA.`;
+  const title = `Review before auto-submit — ${input.applicationTitle}${org}`;
+  const body = `About ${PRE_DEADLINE_REVIEW_NOTICE_HOURS} hours remain before the deadline (${input.deadlineLabel}). Unless you edit, 1-Apply will fill and submit this form before the deadline.${summary} Open the application to change answers, documents, or Need You items. CAPTCHA, signature, and payment still need you.`;
   const emailSubject = title;
   const emailHtml = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111">
 <p>${body.replace(/\n/g, "<br>")}</p>
@@ -285,15 +292,19 @@ export function buildPreDeadlineReviewNotice(input: {
   return { title, body, emailSubject, emailHtml };
 }
 
+/** Default when user enables “prepare and send if silent” — submit to host before deadline. */
 export const SILENCE_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   ...DEFAULT_AUTO_SUBMIT_POLICY,
   enabled: true,
   allowAutoGenerate: true,
   requireAllAnswersApproved: false,
   silenceTreatsSuggestionsAsPacket: true,
-  freezeOnlyAtOrAfterDeadline: true,
+  freezeOnlyAtOrAfterDeadline: false,
+  submitToHost: true,
+  submitLeadHours: 24,
   requireIdentity: true,
   requirePriorPacketNotice: true,
+  requireDocumentsAttached: false,
   requireFitScoreAbove: null,
 };
 
@@ -369,14 +380,35 @@ export function evaluateAutoSubmit(
   }
 
   const deadline = computeDeadlineInfo(input.deadlineAt, input.deadlineTimezone, now);
+  if (deadline.hoursRemaining === null) {
+    return {
+      action: "block",
+      reason: "No deadline is on file, so auto-submit cannot run.",
+      humanActionRequired: [],
+    };
+  }
+
   if (policy.freezeOnlyAtOrAfterDeadline) {
-    if (deadline.hoursRemaining === null) {
-      return { action: "block", reason: "No deadline is on file, so silence-send cannot freeze a packet.", humanActionRequired: [] };
-    }
     if (deadline.hoursRemaining > 0) {
       return { action: "block", reason: "Deadline has not been reached. The packet stays editable.", humanActionRequired: [] };
     }
-  } else if (deadline.hoursRemaining !== null && deadline.hoursRemaining > policy.boundedToDeadlineHours) {
+  } else if (policy.submitToHost) {
+    const leadHours = Math.max(policy.submitLeadHours, policy.boundedToDeadlineHours);
+    if (deadline.hoursRemaining > leadHours) {
+      return {
+        action: "block",
+        reason: `Deadline is ${Math.round(deadline.hoursRemaining)} hours away, outside the ${leadHours}-hour auto-submit window.`,
+        humanActionRequired: [],
+      };
+    }
+    if (deadline.hoursRemaining <= 0) {
+      return {
+        action: "proceed",
+        reason: "Deadline passed. Submit to host now with the current packet.",
+        humanActionRequired: [],
+      };
+    }
+  } else if (deadline.hoursRemaining > policy.boundedToDeadlineHours) {
     return {
       action: "block",
       reason: `Deadline is ${Math.round(deadline.hoursRemaining)} hours away, outside the ${policy.boundedToDeadlineHours}-hour auto-submit window.`,
@@ -386,9 +418,11 @@ export function evaluateAutoSubmit(
 
   return {
     action: "proceed",
-    reason: policy.freezeOnlyAtOrAfterDeadline
-      ? "Deadline reached. Freeze the current packet snapshot. Do not click host Submit."
-      : "All checks passed. Ready for user-confirmed submission.",
+    reason: policy.submitToHost
+      ? "Within the pre-deadline window. Queue host form fill and submit."
+      : policy.freezeOnlyAtOrAfterDeadline
+        ? "Deadline reached. Freeze the current packet snapshot."
+        : "All checks passed. Ready for user-confirmed submission.",
     humanActionRequired: [],
   };
 }
