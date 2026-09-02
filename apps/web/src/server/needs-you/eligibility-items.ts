@@ -168,6 +168,7 @@ export async function buildEligibilityNeedsYouItems(
         required: true,
         payload: {
           eligibilityId: target.gapId,
+          requirementId: gap?.requirementId ?? null,
           mappingId: target.mappingId,
           questionId: target.questionId,
           answerId: target.answerId,
@@ -229,6 +230,7 @@ export async function buildEligibilityNeedsYouItems(
         inputType === "select" || inputType === "multi-select" ? choiceOptions : undefined,
       payload: {
         eligibilityId: target.gapId,
+        requirementId: gap?.requirementId ?? null,
         mappingId: target.mappingId,
         questionId: target.questionId,
         answerId: target.answerId,
@@ -257,6 +259,7 @@ export async function buildEligibilityNeedsYouItems(
       required: true,
       payload: {
         eligibilityId: gap.id,
+        requirementId: gap.requirementId ?? null,
         eligibilityIssue: gap.explanation,
         eligibilityRequirement: gap.requirementText,
         allowDeleteApplication: true,

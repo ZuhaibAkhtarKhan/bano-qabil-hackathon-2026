@@ -26,6 +26,7 @@ import {
 } from "@/lib/needs-you-field-kinds";
 import { polishFormQuestionLabels } from "@/server/needs-you/polish-labels";
 import { buildEligibilityNeedsYouItems, type EligibilityJob } from "@/server/needs-you/eligibility-items";
+import { markEligibilityAckOnly } from "@/server/needs-you/confirm-eligibility";
 import { loadNeedsYouRawContext } from "@/server/needs-you/raw-context";
 import type { EligibilityGap } from "@/server/needs-you/resolve-eligibility-actions-ai";
 import { verifyEligibilityFromMemory } from "@/server/needs-you/verify-eligibility-from-memory";
@@ -615,6 +616,7 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
     if (appEligibility.length > 0) {
       const gaps: EligibilityGap[] = appEligibility.slice(0, 6).map((row) => ({
         id: String(row.id),
+        requirementId: row.requirement_id ? String(row.requirement_id) : null,
         requirementText: String(row.requirement_text ?? ""),
         requirementKind: String(row.requirement_kind ?? "general"),
         explanation: String(row.explanation ?? ""),
@@ -623,6 +625,10 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
 
       if (skipAi) {
         const memoryCheck = await verifyEligibilityFromMemory(supabase, actor, applicationId, gaps);
+        const ackIds = memoryCheck.remaining
+          .filter((gap) => gap.state !== "not_met")
+          .map((gap) => gap.id);
+        await markEligibilityAckOnly(supabase, actor.userId, ackIds);
         for (const gap of memoryCheck.remaining) {
           const needsAck = gap.state !== "not_met";
           pushItem({
@@ -636,6 +642,7 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
             required: true,
             payload: {
               eligibilityId: gap.id,
+              requirementId: gap.requirementId ?? null,
               eligibilityIssue: gap.explanation,
               eligibilityRequirement: gap.requirementText,
               allowDeleteApplication: true,

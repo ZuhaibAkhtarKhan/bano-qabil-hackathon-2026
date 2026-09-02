@@ -251,7 +251,7 @@ async function loadRemainingGaps(
 ): Promise<EligibilityGap[]> {
   const { data: refreshed } = await supabase
     .from("eligibility_results")
-    .select("id, state, explanation, requirement_text, requirement_kind, user_confirmed_at")
+    .select("id, requirement_id, state, explanation, requirement_text, requirement_kind, user_confirmed_at")
     .eq("application_id", applicationId)
     .eq("user_id", userId)
     .in(
@@ -267,6 +267,7 @@ async function loadRemainingGaps(
     )
     .map((row) => ({
       id: String(row.id),
+      requirementId: row.requirement_id ? String(row.requirement_id) : null,
       requirementText: String(row.requirement_text ?? ""),
       requirementKind: String(row.requirement_kind ?? "general"),
       explanation: String(row.explanation ?? ""),

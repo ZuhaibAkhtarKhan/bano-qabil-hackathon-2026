@@ -310,6 +310,7 @@ function ItemCard({
           <NeedsYouEligibilityConfirm
             applicationId={item.applicationId}
             eligibilityId={item.payload.eligibilityId}
+            requirementId={item.payload.requirementId}
             itemId={item.id}
           />
         ) : (

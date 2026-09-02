@@ -45,6 +45,7 @@ export type NeedsYouItem = {
     mappingId?: string;
     reviewItemId?: string;
     eligibilityId?: string;
+    requirementId?: string | null;
     requiredLabel?: string;
     factKey?: string;
     profileField?: ProfileMemoryField | null;

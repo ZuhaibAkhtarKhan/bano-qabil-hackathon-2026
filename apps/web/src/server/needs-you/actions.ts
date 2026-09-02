@@ -25,7 +25,12 @@ import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate"
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { applyValueToApplication } from "@/server/needs-you/apply-needs-you-value";
-import { confirmEligibilityResult } from "@/server/needs-you/confirm-eligibility";
+import {
+  canApplicantConfirmEligibility,
+  confirmEligibilityResult,
+  markEligibilityAckOnly,
+  resolveEligibilityForConfirm,
+} from "@/server/needs-you/confirm-eligibility";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
@@ -577,6 +582,7 @@ export async function confirmNeedsYouEligibility(formData: FormData): Promise<Ne
   const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "").trim();
   const eligibilityId = String(formData.get("eligibilityId") ?? "").trim();
+  const requirementId = String(formData.get("requirementId") ?? "").trim() || null;
 
   if (!applicationId || !eligibilityId) {
     return { ok: false, error: "required" };
@@ -592,18 +598,31 @@ export async function confirmNeedsYouEligibility(formData: FormData): Promise<Ne
     return { ok: false, error: "not_found" };
   }
 
-  const { data: eligibility } = await supabase
-    .from("eligibility_results")
-    .select("id, application_id, ack_only")
-    .eq("id", eligibilityId)
-    .eq("application_id", applicationId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!eligibility?.ack_only) {
+  const eligibility = await resolveEligibilityForConfirm(
+    supabase,
+    user.id,
+    applicationId,
+    eligibilityId,
+    requirementId,
+  );
+  if (!eligibility) {
     return { ok: false, error: "confirm_failed" };
   }
 
-  const confirmed = await confirmEligibilityResult(supabase, actor, eligibilityId);
+  if (eligibility.user_confirmed_at) {
+    revalidateNeedsYou(applicationId);
+    return { ok: true, notice: "eligibility_confirmed" };
+  }
+
+  if (!canApplicantConfirmEligibility(eligibility)) {
+    return { ok: false, error: "confirm_failed" };
+  }
+
+  if (!eligibility.ack_only) {
+    await markEligibilityAckOnly(supabase, user.id, [String(eligibility.id)]);
+  }
+
+  const confirmed = await confirmEligibilityResult(supabase, actor, String(eligibility.id));
   if (!confirmed) {
     return { ok: false, error: "confirm_failed" };
   }

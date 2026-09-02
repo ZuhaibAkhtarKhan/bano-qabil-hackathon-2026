@@ -9,6 +9,7 @@ import {
 
 export type EligibilityGap = {
   id: string;
+  requirementId?: string | null;
   requirementText: string;
   requirementKind: string;
   explanation: string;

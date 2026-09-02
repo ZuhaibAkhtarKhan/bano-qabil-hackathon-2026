@@ -7,10 +7,12 @@ import { SubmitButton } from "@/components/ui/button";
 export function NeedsYouEligibilityConfirm({
   applicationId,
   eligibilityId,
+  requirementId,
   itemId,
 }: {
   applicationId: string;
   eligibilityId: string;
+  requirementId?: string | null;
   itemId: string;
 }) {
   const { isPending, feedbackNotice, handleSubmit } = useNeedsYouSave({ itemId });
@@ -22,6 +24,7 @@ export function NeedsYouEligibilityConfirm({
     >
       <input type="hidden" name="applicationId" value={applicationId} />
       <input type="hidden" name="eligibilityId" value={eligibilityId} />
+      {requirementId ? <input type="hidden" name="requirementId" value={requirementId} /> : null}
       {feedbackNotice}
       <SubmitButton pending={isPending} pendingText="Saving…">
         Yes, I am eligible

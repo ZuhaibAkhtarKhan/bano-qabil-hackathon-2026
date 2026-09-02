@@ -220,14 +220,15 @@ export async function persistIntelligence(
 ) {
   const { userId, applicationId, eligibility, fit, resumes } = input;
 
-  const { data: priorConfirmed } = await supabase
+  const { data: priorRows } = await supabase
     .from("eligibility_results")
-    .select("requirement_id, user_confirmed_at, auto_confirmed, explanation, ack_only")
-    .eq("application_id", applicationId)
-    .not("user_confirmed_at", "is", null);
+    .select(
+      "id, requirement_id, user_confirmed_at, auto_confirmed, explanation, ack_only, memory_checked_at",
+    )
+    .eq("application_id", applicationId);
 
-  const confirmedByRequirement = new Map(
-    (priorConfirmed ?? []).map((row) => [String(row.requirement_id), row] as const),
+  const priorByRequirement = new Map(
+    (priorRows ?? []).map((row) => [String(row.requirement_id), row] as const),
   );
 
   await supabase.from("eligibility_results").delete().eq("application_id", applicationId);
@@ -235,9 +236,10 @@ export async function persistIntelligence(
   if (eligibilityRows.length > 0) {
     await supabase.from("eligibility_results").insert(
       eligibilityRows.map((item) => {
-        const prior = confirmedByRequirement.get(item.requirementId);
-        if (prior) {
+        const prior = priorByRequirement.get(item.requirementId);
+        if (prior?.user_confirmed_at) {
           return {
+            ...(prior.id ? { id: prior.id } : {}),
             user_id: userId,
             application_id: applicationId,
             requirement_id: item.requirementId,
@@ -250,9 +252,11 @@ export async function persistIntelligence(
             user_confirmed_at: prior.user_confirmed_at,
             auto_confirmed: Boolean(prior.auto_confirmed),
             ack_only: Boolean(prior.ack_only),
+            memory_checked_at: prior.memory_checked_at ?? null,
           };
         }
         return {
+          ...(prior?.id ? { id: prior.id } : {}),
           user_id: userId,
           application_id: applicationId,
           requirement_id: item.requirementId,
@@ -264,7 +268,8 @@ export async function persistIntelligence(
           needs_confirmation: item.needsConfirmation,
           user_confirmed_at: null,
           auto_confirmed: false,
-          ack_only: false,
+          ack_only: Boolean(prior?.ack_only),
+          memory_checked_at: prior?.memory_checked_at ?? null,
         };
       }),
     );

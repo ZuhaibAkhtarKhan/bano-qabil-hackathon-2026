@@ -306,7 +306,7 @@ export const loadNeedsYouRawContext = cache(async (): Promise<NeedsYouRawContext
     supabase
       .from("eligibility_results")
       .select(
-        "id, application_id, state, explanation, requirement_text, requirement_kind, needs_confirmation, user_confirmed_at, ack_only",
+        "id, application_id, requirement_id, state, explanation, requirement_text, requirement_kind, needs_confirmation, user_confirmed_at, ack_only, memory_checked_at",
       )
       .eq("user_id", user.id)
       .in("application_id", appIds),
