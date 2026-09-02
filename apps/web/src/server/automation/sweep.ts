@@ -5,6 +5,8 @@ import type { Actor } from "@/auth/actor";
 import { computeApplicationCompleteness } from "@/lib/application-workflow";
 import { probeApplicationSubmission } from "@/server/applications/fill-lifecycle";
 import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
+import { autoFillNeedsYouTextForNearDeadlineApplications } from "@/server/needs-you/auto-fill-deadline";
+import { autoConfirmAckOnlyEligibilityBeforeDeadline } from "@/server/needs-you/confirm-eligibility";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { logError } from "@/lib/log";
@@ -137,6 +139,40 @@ export async function runUserAutomationSweep(supabase: SupabaseClient, actor: Ac
       }
     }
 
+    const nearDeadlineSnapshots = snapshots.filter((snapshot) => {
+      const deadline = computeDeadlineInfo(snapshot.deadlineAt, snapshot.deadlineTimezone, new Date());
+      return (
+        deadline.urgency === "imminent" ||
+        deadline.urgency === "soon" ||
+        deadline.urgency === "overdue"
+      );
+    });
+
+    if (nearDeadlineSnapshots.length > 0) {
+      try {
+        const filled = await autoFillNeedsYouTextForNearDeadlineApplications(
+          supabase,
+          actor,
+          nearDeadlineSnapshots.map((snapshot) => ({
+            applicationId: snapshot.applicationId,
+            deadlineAt: snapshot.deadlineAt,
+            deadlineTimezone: snapshot.deadlineTimezone,
+          })),
+        );
+        if (filled > 0) {
+          await emitDomainEvent(supabase, {
+            name: "answer.generated",
+            userId: actor.userId,
+            subjectId: `${actor.userId}:needs_you_auto_fill`,
+            title: "Need You fields auto-filled",
+            body: `${filled} open text field${filled === 1 ? "" : "s"} were drafted from Application Memory before the deadline.`,
+          });
+        }
+      } catch (err) {
+        logError("automation.needs_you_auto_fill_failed", { err });
+      }
+    }
+
     for (const snapshot of snapshots) {
       const deadline = computeDeadlineInfo(snapshot.deadlineAt, snapshot.deadlineTimezone, new Date());
       if (
@@ -152,6 +188,27 @@ export async function runUserAutomationSweep(supabase: SupabaseClient, actor: Ac
           });
         } catch (err) {
           logError("automation.resume_auto_select_failed", { err, applicationId: snapshot.applicationId });
+        }
+        try {
+          const confirmed = await autoConfirmAckOnlyEligibilityBeforeDeadline(
+            supabase,
+            actor,
+            snapshot.applicationId,
+            snapshot.deadlineAt,
+            snapshot.deadlineTimezone,
+          );
+          if (confirmed > 0) {
+            await emitDomainEvent(supabase, {
+              name: "intelligence.updated",
+              userId: actor.userId,
+              applicationId: snapshot.applicationId,
+              subjectId: `${snapshot.applicationId}:eligibility-auto`,
+              title: "Eligibility auto-confirmed",
+              body: `${confirmed} eligibility requirement${confirmed === 1 ? "" : "s"} were auto-confirmed before the deadline.`,
+            });
+          }
+        } catch (err) {
+          logError("automation.eligibility_auto_confirm_failed", { err, applicationId: snapshot.applicationId });
         }
       }
 

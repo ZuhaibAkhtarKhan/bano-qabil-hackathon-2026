@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { NeedsYouDeleteApplication } from "@/components/app/needs-you-delete-application";
+import { NeedsYouEligibilityConfirm } from "@/components/app/needs-you-eligibility-confirm";
 import { NeedsYouQuestionForm } from "@/components/app/needs-you-question-form";
 import { needsYouKindLabel, type NeedsYouItem } from "@/lib/needs-you";
 import { resolveNeedsYouDeadline, resolveNeedsYouDocument } from "@/server/needs-you/actions";
@@ -169,6 +170,7 @@ function ItemCard({
   const isUpload = item.kind === "document" || item.inputType === "document" || item.inputType === "image";
   const isDeadline = item.kind === "deadline";
   const isEligibility = item.kind === "eligibility";
+  const confirmEligible = item.payload.confirmEligible === true;
   const canEdit =
     Boolean(item.payload.profileField || item.payload.mappingId || item.payload.questionId) ||
     (!isEligibility && !isUpload && !isDeadline);
@@ -246,6 +248,11 @@ function ItemCard({
           <DocumentForm item={item} documents={documents} />
         ) : canEdit ? (
           <NeedsYouQuestionForm item={item} />
+        ) : confirmEligible && item.payload.eligibilityId ? (
+          <NeedsYouEligibilityConfirm
+            applicationId={item.applicationId}
+            eligibilityId={item.payload.eligibilityId}
+          />
         ) : (
           <p className="text-sm text-ink-muted">
             There is no single answer to edit for this blocker. If you are not eligible, remove the

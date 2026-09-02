@@ -16,6 +16,7 @@ import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-res
 import { mapEvidence } from "@/server/memory/map-evidence";
 import { syncDeadlineReminders } from "@/server/applications/reminders";
 import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
+import { loadApplicationTrackerDocumentMaps, type ApplicationTrackerDocumentContext } from "@/server/workspace/tracker-documents";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import type { PendingPacket } from "@/lib/dashboard";
 import {
@@ -101,33 +102,21 @@ export async function loadDashboard() {
   const opportunityList = (opportunities ?? []) as OpportunityListRow[];
 
   const applicationIds = applicationRows.map((row) => row.id);
-  const opportunityIds = [
-    ...new Set(applicationRows.map((row) => row.opportunity_id).filter((id): id is string => Boolean(id))),
-  ];
   const fitByApplication = new Map<string, number>();
-  const requiredDocsByOpportunity = new Map<string, string[]>();
-  const attachedLabelsByApplication = new Map<string, string[]>();
+  let trackerDocs = new Map<string, ApplicationTrackerDocumentContext>();
 
   if (applicationIds.length > 0) {
-    const [{ data: fits }, { data: requiredDocs }, { data: attachedRows }, { data: userDocuments }] = await Promise.all([
+    const [{ data: fits }, trackerDocumentMaps] = await Promise.all([
       supabase
         .from("fit_evaluations")
         .select("application_id, score")
         .eq("user_id", profile.id)
         .in("application_id", applicationIds),
-      opportunityIds.length > 0
-        ? supabase
-            .from("opportunity_documents")
-            .select("opportunity_id, label, required")
-            .eq("user_id", profile.id)
-            .in("opportunity_id", opportunityIds)
-        : Promise.resolve({ data: [] as Array<{ opportunity_id: string; label: string; required: boolean }> }),
-      supabase
-        .from("application_documents")
-        .select("application_id, document_id")
-        .eq("user_id", profile.id)
-        .in("application_id", applicationIds),
-      supabase.from("documents").select("id, label, type").eq("user_id", profile.id),
+      loadApplicationTrackerDocumentMaps(
+        supabase,
+        profile.id,
+        applicationRows.map((row) => ({ id: row.id, opportunity_id: row.opportunity_id })),
+      ),
     ]);
 
     for (const row of fits ?? []) {
@@ -135,32 +124,7 @@ export async function loadDashboard() {
         fitByApplication.set(row.application_id, row.score);
       }
     }
-
-    for (const row of requiredDocs ?? []) {
-      if (!row.required) continue;
-      const list = requiredDocsByOpportunity.get(String(row.opportunity_id)) ?? [];
-      list.push(String(row.label));
-      requiredDocsByOpportunity.set(String(row.opportunity_id), list);
-    }
-
-    const docMeta = new Map(
-      (userDocuments ?? []).map((doc) => [
-        String(doc.id),
-        { label: String(doc.label ?? ""), type: String(doc.type ?? "") },
-      ]),
-    );
-
-    for (const row of attachedRows ?? []) {
-      const meta = docMeta.get(String(row.document_id));
-      if (!meta) continue;
-      const labels = attachedLabelsByApplication.get(String(row.application_id)) ?? [];
-      // Prefer the vault label; also surface type so resume-typed docs count even if mislabeled.
-      labels.push(meta.label || meta.type);
-      if (meta.type === "resume" && !/\bresume\b|\bcv\b/i.test(meta.label)) {
-        labels.push("resume");
-      }
-      attachedLabelsByApplication.set(String(row.application_id), labels);
-    }
+    trackerDocs = trackerDocumentMaps;
   }
 
   const applications = applicationRows.map((row) => {
@@ -169,6 +133,7 @@ export async function loadDashboard() {
       opportunityList.find((item) => item.id === row.opportunity_id) ??
       null;
     const score = fitByApplication.get(row.id);
+    const tracker = trackerDocs.get(row.id);
     return {
       ...row,
       opportunities: opportunity
@@ -185,8 +150,9 @@ export async function loadDashboard() {
           }
         : row.opportunities,
       fit_evaluations: score != null ? { score } : null,
-      requiredDocumentLabels: requiredDocsByOpportunity.get(row.opportunity_id) ?? [],
-      attachedDocumentLabels: attachedLabelsByApplication.get(row.id) ?? [],
+      requiredDocumentLabels: tracker?.requiredDocumentLabels ?? [],
+      resumeStatus: tracker?.resume,
+      coverStatus: tracker?.cover,
     };
   });
 
@@ -403,62 +369,25 @@ export async function loadApplicationsWorkspace() {
     .order("updated_at", { ascending: false });
 
   const applicationRows = (data ?? []) as ApplicationListRow[];
-  const applicationIds = applicationRows.map((row) => row.id);
-  const opportunityIds = [
-    ...new Set(applicationRows.map((row) => row.opportunity_id).filter((id): id is string => Boolean(id))),
-  ];
-  const requiredDocsByOpportunity = new Map<string, string[]>();
-  const attachedLabelsByApplication = new Map<string, string[]>();
-
-  if (applicationIds.length > 0) {
-    const [{ data: requiredDocs }, { data: attachedRows }, { data: userDocuments }] = await Promise.all([
-      opportunityIds.length > 0
-        ? supabase
-            .from("opportunity_documents")
-            .select("opportunity_id, label, required")
-            .eq("user_id", profile.id)
-            .in("opportunity_id", opportunityIds)
-        : Promise.resolve({ data: [] as Array<{ opportunity_id: string; label: string; required: boolean }> }),
-      supabase
-        .from("application_documents")
-        .select("application_id, document_id")
-        .eq("user_id", profile.id)
-        .in("application_id", applicationIds),
-      supabase.from("documents").select("id, label, type").eq("user_id", profile.id),
-    ]);
-
-    for (const row of requiredDocs ?? []) {
-      if (!row.required) continue;
-      const list = requiredDocsByOpportunity.get(String(row.opportunity_id)) ?? [];
-      list.push(String(row.label));
-      requiredDocsByOpportunity.set(String(row.opportunity_id), list);
-    }
-
-    const docMeta = new Map(
-      (userDocuments ?? []).map((doc) => [
-        String(doc.id),
-        { label: String(doc.label ?? ""), type: String(doc.type ?? "") },
-      ]),
-    );
-
-    for (const row of attachedRows ?? []) {
-      const meta = docMeta.get(String(row.document_id));
-      if (!meta) continue;
-      const labels = attachedLabelsByApplication.get(String(row.application_id)) ?? [];
-      labels.push(meta.label || meta.type);
-      if (meta.type === "resume" && !/\bresume\b|\bcv\b/i.test(meta.label)) {
-        labels.push("resume");
-      }
-      attachedLabelsByApplication.set(String(row.application_id), labels);
-    }
-  }
+  const trackerDocs =
+    applicationRows.length > 0
+      ? await loadApplicationTrackerDocumentMaps(
+          supabase,
+          profile.id,
+          applicationRows.map((row) => ({ id: row.id, opportunity_id: row.opportunity_id })),
+        )
+      : new Map<string, ApplicationTrackerDocumentContext>();
 
   return {
-    applications: applicationRows.map((row) => ({
-      ...row,
-      requiredDocumentLabels: requiredDocsByOpportunity.get(row.opportunity_id) ?? [],
-      attachedDocumentLabels: attachedLabelsByApplication.get(row.id) ?? [],
-    })),
+    applications: applicationRows.map((row) => {
+      const tracker = trackerDocs.get(row.id);
+      return {
+        ...row,
+        requiredDocumentLabels: tracker?.requiredDocumentLabels ?? [],
+        resumeStatus: tracker?.resume,
+        coverStatus: tracker?.cover,
+      };
+    }),
   };
 }
 

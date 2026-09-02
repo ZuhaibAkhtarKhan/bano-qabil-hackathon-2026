@@ -36,6 +36,7 @@ import {
   type EligibilityCandidate,
   type EligibilityGap,
 } from "@/server/needs-you/resolve-eligibility-actions-ai";
+import { verifyEligibilityFromMemory } from "@/server/needs-you/verify-eligibility-from-memory";
 import { asOne } from "@/server/types";
 
 const ACTIVE_STATUSES = new Set([
@@ -183,7 +184,7 @@ function groupNeedsYouItems(
 }
 
 async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
-  const { user, supabase, profile } = await requireWorkspace();
+  const { user, supabase, profile, actor } = await requireWorkspace();
 
   const [{ data: applications }, { data: documents }, { data: resumeRows }] = await Promise.all([
     supabase
@@ -329,7 +330,7 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
     supabase
       .from("eligibility_results")
       .select(
-        "id, application_id, state, explanation, requirement_text, requirement_kind, needs_confirmation",
+        "id, application_id, state, explanation, requirement_text, requirement_kind, needs_confirmation, user_confirmed_at, ack_only",
       )
       .eq("user_id", user.id)
       .in("application_id", appIds),
@@ -839,16 +840,24 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
     const appEligibility = (eligibilityRows ?? []).filter(
       (row) =>
         String(row.application_id) === applicationId &&
+        !row.user_confirmed_at &&
         ["unclear", "not_met", "partial", "needs_confirmation"].includes(String(row.state ?? "")),
     );
     if (appEligibility.length > 0) {
-      const gaps: EligibilityGap[] = appEligibility.slice(0, 6).map((row) => ({
+      let gaps: EligibilityGap[] = appEligibility.slice(0, 6).map((row) => ({
         id: String(row.id),
         requirementText: String(row.requirement_text ?? ""),
         requirementKind: String(row.requirement_kind ?? "general"),
         explanation: String(row.explanation ?? ""),
         state: String(row.state ?? "unclear"),
       }));
+
+      const memoryCheck = await verifyEligibilityFromMemory(supabase, actor, applicationId, gaps);
+      gaps = memoryCheck.remaining;
+
+      if (gaps.length === 0) {
+        continue;
+      }
 
       const candidates: EligibilityCandidate[] = [...defaultProfileCandidates()];
       const seenCandidate = new Set(candidates.map((c) => c.id));
@@ -887,6 +896,24 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
       }
 
       const { targets, unresolvedGaps } = await resolveEligibilityActionTargets({ gaps, candidates });
+      const targetedGapIds = new Set(targets.map((target) => target.gapId));
+      if (targetedGapIds.size > 0) {
+        await supabase
+          .from("eligibility_results")
+          .update({ ack_only: false })
+          .eq("user_id", user.id)
+          .in("id", [...targetedGapIds]);
+      }
+      if (unresolvedGaps.length > 0) {
+        await supabase
+          .from("eligibility_results")
+          .update({ ack_only: true })
+          .eq("user_id", user.id)
+          .in(
+            "id",
+            unresolvedGaps.map((gap) => gap.id),
+          );
+      }
       const seenTarget = new Set<string>();
       const mappingById = new Map(
         (fieldMappings ?? [])
@@ -1015,20 +1042,24 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
       }
 
       for (const gap of unresolvedGaps) {
+        const needsAck = gap.state !== "not_met";
         pushItem({
           ...base,
           id: `eligibility:${applicationId}:${gap.id}:unresolved`,
           kind: "eligibility",
           title: gap.requirementText || "Eligibility requirement",
-          detail: "This requirement may block the application. Update related answers above if possible, or remove the application.",
-          inputLabel: "Note (optional)",
-          inputType: "textarea",
+          detail: needsAck
+            ? "This requirement may block the application. Confirm you are eligible, or remove the application if you are not."
+            : "Application Memory does not support this requirement. Remove the application if you are not eligible.",
+          inputLabel: needsAck ? "Confirm eligibility" : "Eligibility",
+          inputType: "text",
           required: true,
           payload: {
             eligibilityId: gap.id,
             eligibilityIssue: gap.explanation,
             eligibilityRequirement: gap.requirementText,
             allowDeleteApplication: true,
+            confirmEligible: needsAck,
           },
         });
       }

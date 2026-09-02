@@ -10,6 +10,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { mapEvidence } from "@/server/memory/map-evidence";
+import { verifyEligibilityFromMemory } from "@/server/needs-you/verify-eligibility-from-memory";
+import type { EligibilityGap } from "@/server/needs-you/resolve-eligibility-actions-ai";
 import type { EvidenceRow } from "@/server/types";
 
 function factValue(value: unknown): string {
@@ -218,21 +220,53 @@ export async function persistIntelligence(
 ) {
   const { userId, applicationId, eligibility, fit, resumes } = input;
 
+  const { data: priorConfirmed } = await supabase
+    .from("eligibility_results")
+    .select("requirement_id, user_confirmed_at, auto_confirmed, explanation, ack_only")
+    .eq("application_id", applicationId)
+    .not("user_confirmed_at", "is", null);
+
+  const confirmedByRequirement = new Map(
+    (priorConfirmed ?? []).map((row) => [String(row.requirement_id), row] as const),
+  );
+
   await supabase.from("eligibility_results").delete().eq("application_id", applicationId);
   const eligibilityRows = eligibility.filter((item) => item.requirementId !== "none");
   if (eligibilityRows.length > 0) {
     await supabase.from("eligibility_results").insert(
-      eligibilityRows.map((item) => ({
-        user_id: userId,
-        application_id: applicationId,
-        requirement_id: item.requirementId,
-        state: item.state,
-        explanation: item.explanation,
-        evidence_id: item.evidenceId,
-        requirement_text: item.requirementText,
-        requirement_kind: item.kind,
-        needs_confirmation: item.needsConfirmation,
-      })),
+      eligibilityRows.map((item) => {
+        const prior = confirmedByRequirement.get(item.requirementId);
+        if (prior) {
+          return {
+            user_id: userId,
+            application_id: applicationId,
+            requirement_id: item.requirementId,
+            state: "met",
+            explanation: String(prior.explanation ?? item.explanation),
+            evidence_id: item.evidenceId,
+            requirement_text: item.requirementText,
+            requirement_kind: item.kind,
+            needs_confirmation: false,
+            user_confirmed_at: prior.user_confirmed_at,
+            auto_confirmed: Boolean(prior.auto_confirmed),
+            ack_only: Boolean(prior.ack_only),
+          };
+        }
+        return {
+          user_id: userId,
+          application_id: applicationId,
+          requirement_id: item.requirementId,
+          state: item.state,
+          explanation: item.explanation,
+          evidence_id: item.evidenceId,
+          requirement_text: item.requirementText,
+          requirement_kind: item.kind,
+          needs_confirmation: item.needsConfirmation,
+          user_confirmed_at: null,
+          auto_confirmed: false,
+          ack_only: false,
+        };
+      }),
     );
   }
 
@@ -301,6 +335,24 @@ export async function evaluateApplicationIntelligence(
     fit,
     resumes: selection.ranked,
   });
+
+  const { data: pendingRows } = await supabase
+    .from("eligibility_results")
+    .select("id, state, explanation, requirement_text, requirement_kind")
+    .eq("application_id", applicationId)
+    .eq("user_id", actor.userId)
+    .in("state", ["unclear", "partial", "needs_confirmation"]);
+
+  if ((pendingRows ?? []).length > 0) {
+    const gaps: EligibilityGap[] = (pendingRows ?? []).map((row) => ({
+      id: String(row.id),
+      requirementText: String(row.requirement_text ?? ""),
+      requirementKind: String(row.requirement_kind ?? "general"),
+      explanation: String(row.explanation ?? ""),
+      state: String(row.state ?? "unclear"),
+    }));
+    await verifyEligibilityFromMemory(supabase, actor, applicationId, gaps);
+  }
 
   return { eligibility, fit, resumes: selection.ranked, resumeSelection: selection };
 }

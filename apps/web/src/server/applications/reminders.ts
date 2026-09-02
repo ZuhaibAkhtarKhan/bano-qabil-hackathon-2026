@@ -11,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { freezeApplicationPacket } from "@/server/applications/freeze-packet";
+import { autoFillNeedsYouTextBeforeDeadline } from "@/server/needs-you/auto-fill-deadline";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 
@@ -31,6 +32,28 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
 
   const now = new Date();
   const identityPresent = Boolean(actor.profile.display_name?.trim());
+  const needsYouQueue =
+    prefs.prepareAndSendIfSilent || applications?.some((row) => {
+      const deadline = computeDeadlineInfo(
+        (row.deadline_at as string | null) ?? null,
+        (row.deadline_timezone as string | null) || actor.profile.timezone,
+        now,
+      );
+      return ["imminent", "soon", "overdue"].includes(deadline.urgency);
+    })
+      ? await (async () => {
+          const { loadNeedsYouQueue } = await import("@/server/needs-you/queries");
+          return loadNeedsYouQueue({ polish: false });
+        })()
+      : null;
+  const needsYouItemsByApp = new Map<string, NonNullable<typeof needsYouQueue>["items"]>();
+  if (needsYouQueue) {
+    for (const item of needsYouQueue.items) {
+      const list = needsYouItemsByApp.get(item.applicationId) ?? [];
+      list.push(item);
+      needsYouItemsByApp.set(item.applicationId, list);
+    }
+  }
 
   for (const application of applications ?? []) {
     const deadline = computeDeadlineInfo(
@@ -149,7 +172,57 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
       }
     }
 
+    const deadlineUrgent = ["imminent", "soon", "overdue"].includes(deadline.urgency);
+    if (deadlineUrgent) {
+      try {
+        await autoFillNeedsYouTextBeforeDeadline(
+          supabase,
+          actor,
+          application.id as string,
+          (application.deadline_at as string | null) ?? null,
+          (application.deadline_timezone as string | null) || actor.profile.timezone,
+          needsYouItemsByApp.get(application.id as string),
+        );
+      } catch {
+        // Non-fatal — silence-send may still proceed with existing drafts.
+      }
+    }
+
     if (!prefs.prepareAndSendIfSilent) continue;
+
+    const [
+      { data: answersAfterFill },
+      { data: attachedAfterFill },
+    ] = deadlineUrgent
+      ? await Promise.all([
+          supabase
+            .from("application_answers")
+            .select("question_id, state, approved_text, original_ai_text, user_edited_text")
+            .eq("application_id", application.id),
+          supabase.from("application_documents").select("document_id").eq("application_id", application.id),
+        ])
+      : [{ data: answers }, { data: attached }];
+
+    const answersForSubmit = answersAfterFill ?? answers ?? [];
+    const attachedForSubmit = attachedAfterFill ?? attached ?? [];
+    const attachedIdsForSubmit = new Set((attachedForSubmit ?? []).map((row) => String(row.document_id)));
+    const attachedVaultForSubmit = (attachedDocs ?? [])
+      .filter((row) => attachedIdsForSubmit.has(String(row.id)))
+      .map((row) => ({ type: String(row.type), label: String(row.label) }));
+    const missingDocsForSubmit = required
+      .filter((row) => !requiredDocumentCovered(String(row.label), attachedVaultForSubmit))
+      .map((row) => String(row.label));
+    const packetCountForSubmit = (questions ?? []).filter((question) =>
+      (answersForSubmit ?? []).some(
+        (answer) =>
+          String(answer.question_id) === String(question.id) &&
+          packetAnswerText({
+            approvedText: (answer.approved_text as string | null) ?? null,
+            userEditedText: (answer.user_edited_text as string | null) ?? null,
+            originalAiText: (answer.original_ai_text as string | null) ?? null,
+          }),
+      ),
+    ).length;
 
     const decision = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
@@ -160,8 +233,8 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
         deadlineTimezone: (application.deadline_timezone as string | null) || actor.profile.timezone,
         completenessPercent: 80,
         totalQuestions: (questions ?? []).length,
-        answeredQuestions: packetCount,
-        pendingDocuments: missingDocs.length,
+        answeredQuestions: packetCountForSubmit,
+        pendingDocuments: missingDocsForSubmit.length,
         fitScore: null,
         status: application.status as string,
         submittedAt: null,
@@ -174,9 +247,12 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
         followUps: [],
         identityPresent,
         packetNoticeSent: Boolean(application.last_reminder_at) || dueForNotice,
-        allQuestionsHavePacketText: (questions ?? []).length === 0 || packetCount === (questions ?? []).length,
-        allAnswersApproved: (answers ?? []).every((row) => row.state === "approved") && (questions ?? []).length === packetCount,
-        documentsAttached: missingDocs.length === 0,
+        allQuestionsHavePacketText:
+          (questions ?? []).length === 0 || packetCountForSubmit === (questions ?? []).length,
+        allAnswersApproved:
+          (answersForSubmit ?? []).every((row) => row.state === "approved") &&
+          (questions ?? []).length === packetCountForSubmit,
+        documentsAttached: missingDocsForSubmit.length === 0,
         hasUnsupportedClaims: false,
       },
       now,

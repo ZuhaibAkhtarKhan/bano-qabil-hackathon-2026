@@ -149,6 +149,8 @@ export type ApplicationListRow = {
   fit_evaluations: { score: number } | { score: number }[] | null;
   requiredDocumentLabels?: string[];
   attachedDocumentLabels?: string[];
+  resumeStatus?: import("@/lib/dashboard-display").DashboardDocStatus;
+  coverStatus?: import("@/lib/dashboard-display").DashboardDocStatus;
 };
 
 export type NotificationRow = {

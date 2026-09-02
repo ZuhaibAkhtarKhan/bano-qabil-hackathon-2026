@@ -48,6 +48,8 @@ export const FLASH = {
   duplicate_prevented: "Duplicate submission prevented. An identical snapshot already exists.",
   continued:
     "Saved to Application Memory. That application is continuing in the background with the new information.",
+  eligibility_confirmed:
+    "Eligibility confirmed. That application is continuing in the background.",
 } as const;
 
 export const ERRORS = {
@@ -59,6 +61,7 @@ export const ERRORS = {
   not_found: "That record was not found.",
   grounding: "The draft was rejected because it was not grounded in verified evidence.",
   snapshot: "Could not freeze a snapshot.",
+  confirm_failed: "Could not confirm eligibility. Try again.",
 } as const;
 
 export type FlashCode = keyof typeof FLASH;

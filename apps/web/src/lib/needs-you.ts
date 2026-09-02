@@ -54,6 +54,8 @@ export type NeedsYouItem = {
     eligibilityRequirement?: string | null;
     /** Offer hard-delete of the application when eligibility cannot be met */
     allowDeleteApplication?: boolean;
+    /** Show "Yes, I am eligible" when there is no editable field for this blocker */
+    confirmEligible?: boolean;
     currentValue?: string | null;
     /** Document / resume Need You state */
     documentStatus?: "unavailable" | "not_best_fit" | "attach";

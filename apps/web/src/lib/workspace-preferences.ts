@@ -12,7 +12,7 @@ export function parseWorkspacePreferences(raw: Record<string, unknown> | null | 
   return {
     onboardingSkippedDocuments: value.onboardingSkippedDocuments === true,
     onboardingSkippedProfile: value.onboardingSkippedProfile === true,
-    prepareAndSendIfSilent: value.prepareAndSendIfSilent === true,
+    prepareAndSendIfSilent: value.prepareAndSendIfSilent !== false,
     university: typeof value.university === "string" ? value.university.trim() : "",
     educationSummary: typeof value.educationSummary === "string" ? value.educationSummary.trim() : "",
     guideDismissed: value.guideDismissed === true,

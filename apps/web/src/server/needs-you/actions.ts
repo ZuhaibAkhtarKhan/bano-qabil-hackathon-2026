@@ -22,6 +22,8 @@ import { redirectWith } from "@/server/http/flash";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
+import { applyValueToApplication } from "@/server/needs-you/apply-needs-you-value";
+import { confirmEligibilityResult } from "@/server/needs-you/confirm-eligibility";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
@@ -231,112 +233,6 @@ async function continueApplicationInBackground(input: {
         next_action: "Could not finish background refresh — open the application and run Analyze again",
       })
       .eq("id", input.applicationId);
-  }
-}
-
-async function applyValueToApplication(input: {
-  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"];
-  userId: string;
-  applicationId: string;
-  label: string;
-  value: string;
-  mappingId?: string | null;
-  questionId?: string | null;
-  answerId?: string | null;
-  reviewItemId?: string | null;
-  scope: "memory" | "application";
-}) {
-  const value = input.value.trim();
-  if (!value) return;
-  const source =
-    input.scope === "memory" ? "Application Memory (Needs You)" : "Needs You (this application only)";
-
-  if (input.reviewItemId) {
-    await input.supabase
-      .from("review_items")
-      .update({ resolved: true })
-      .eq("id", input.reviewItemId)
-      .eq("user_id", input.userId);
-  }
-
-  if (input.mappingId) {
-    await input.supabase
-      .from("field_mappings")
-      .update({
-        value: value.slice(0, 4000),
-        source,
-        confidence: 1,
-        excluded_by_default: false,
-      })
-      .eq("id", input.mappingId)
-      .eq("user_id", input.userId);
-  } else if (!input.questionId) {
-    // Application-scoped fill for eligibility / missing facts without a mapping row.
-    const fieldKey = `needs_you:${input.label.trim().toLowerCase().slice(0, 80).replace(/\s+/g, "_")}`;
-    const { data: existing } = await input.supabase
-      .from("field_mappings")
-      .select("id")
-      .eq("application_id", input.applicationId)
-      .eq("user_id", input.userId)
-      .eq("field_key", fieldKey)
-      .maybeSingle();
-
-    if (existing?.id) {
-      await input.supabase
-        .from("field_mappings")
-        .update({
-          value: value.slice(0, 4000),
-          label: input.label.slice(0, 200),
-          source,
-          confidence: 1,
-          excluded_by_default: false,
-        })
-        .eq("id", existing.id);
-    } else {
-      await input.supabase.from("field_mappings").insert({
-        user_id: input.userId,
-        application_id: input.applicationId,
-        field_key: fieldKey,
-        label: input.label.slice(0, 200) || "Application fact",
-        value: value.slice(0, 4000),
-        source,
-        confidence: 1,
-        excluded_by_default: false,
-        sensitive: false,
-      });
-    }
-  }
-
-  if (input.questionId) {
-    if (input.answerId) {
-      await input.supabase
-        .from("application_answers")
-        .update({
-          user_edited_text: value,
-          approved_text: value,
-          state: "approved",
-          missing_facts: [],
-          warnings: [],
-        })
-        .eq("id", input.answerId)
-        .eq("user_id", input.userId);
-    } else {
-      await input.supabase.from("application_answers").insert({
-        user_id: input.userId,
-        application_id: input.applicationId,
-        question_id: input.questionId,
-        user_edited_text: value,
-        approved_text: value,
-        state: "approved",
-        missing_facts: [],
-        warnings: [],
-        evidence_ids: [],
-        claim_flags: [],
-        grounding_score: 0,
-        generation_count: 0,
-        model: null,
-      });
-    }
   }
 }
 
@@ -644,6 +540,59 @@ function parseNeedsYouDeadlineInput(value: string): string | null {
   const parsed = Date.parse(trimmed);
   if (Number.isNaN(parsed)) return null;
   return new Date(parsed).toISOString();
+}
+
+/** Applicant confirms they meet an eligibility requirement with no editable field. */
+export async function confirmNeedsYouEligibility(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "").trim();
+  const eligibilityId = String(formData.get("eligibilityId") ?? "").trim();
+
+  if (!applicationId || !eligibilityId) {
+    redirectWith(NEEDS_YOU, { error: "required" });
+  }
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!application) {
+    redirectWith(NEEDS_YOU, { error: "not_found" });
+  }
+
+  const { data: eligibility } = await supabase
+    .from("eligibility_results")
+    .select("id, application_id, ack_only")
+    .eq("id", eligibilityId)
+    .eq("application_id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!eligibility?.ack_only) {
+    redirectWith(NEEDS_YOU, { error: "confirm_failed" });
+  }
+
+  const confirmed = await confirmEligibilityResult(supabase, actor, eligibilityId);
+  if (!confirmed) {
+    redirectWith(NEEDS_YOU, { error: "confirm_failed" });
+  }
+
+  await supabase
+    .from("applications")
+    .update({ next_action: "Eligibility confirmed — continuing application prep" })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+
+  await continueApplicationInBackground({
+    supabase,
+    actor,
+    userId: user.id,
+    applicationId,
+  });
+
+  revalidateNeedsYou(applicationId);
+  redirectWith(NEEDS_YOU, { notice: "eligibility_confirmed" });
 }
 
 /** Save application deadline when LLM/ingest could not extract one. */

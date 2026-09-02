@@ -119,6 +119,8 @@ export type ApplicationsTrackerRowInput = {
     | null;
   requiredDocumentLabels?: string[];
   attachedDocumentLabels?: string[];
+  resumeStatus?: DashboardDocStatus;
+  coverStatus?: DashboardDocStatus;
 };
 
 /** Map an application list row into the shared tracker table shape (dashboard + /app/applications). */
@@ -126,10 +128,13 @@ export function toApplicationsTrackerRow(row: ApplicationsTrackerRowInput) {
   const opportunity = Array.isArray(row.opportunities) ? row.opportunities[0] ?? null : row.opportunities;
   const company = companyFromOpportunity(opportunity);
   const meta = applicationTableMeta(row.status, row.next_action);
-  const docs = dashboardDocumentStatuses({
-    requiredLabels: row.requiredDocumentLabels ?? [],
-    attachedLabels: row.attachedDocumentLabels ?? [],
-  });
+  const docs =
+    row.resumeStatus && row.coverStatus
+      ? { resume: row.resumeStatus, cover: row.coverStatus }
+      : dashboardDocumentStatuses({
+          requiredLabels: row.requiredDocumentLabels ?? [],
+          attachedLabels: row.attachedDocumentLabels ?? [],
+        });
   return {
     id: row.id,
     href: `/app/applications/${row.id}`,

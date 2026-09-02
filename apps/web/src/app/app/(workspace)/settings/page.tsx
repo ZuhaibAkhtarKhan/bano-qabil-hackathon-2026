@@ -81,8 +81,9 @@ export default async function SettingsPage({
         <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Prepare and send if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            Off by default. When on, Dashboard shows the packet that will freeze at the deadline unless you edit.
-            1-Apply never clicks host Submit, and never bypasses CAPTCHA, signature, or payment.
+            On by default. When enabled, unfilled Need You text fields are auto-drafted from Application Memory
+            before the deadline, then the packet freezes unless you edit. 1-Apply never clicks host Submit, and never
+            bypasses CAPTCHA, signature, or payment.
           </p>
           <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
             <label className="flex items-start gap-3 text-sm">
