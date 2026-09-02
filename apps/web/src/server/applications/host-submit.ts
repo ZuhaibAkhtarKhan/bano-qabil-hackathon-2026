@@ -205,6 +205,33 @@ export async function scheduleHostSubmitJob(input: {
   });
 }
 
+/** Queue submit immediately when there is no deadline and every form field is filled. */
+export async function scheduleHostSubmitWhenFullyComplete(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  const { assessNoDeadlineHostSubmitReadiness } = await import("./host-submit-readiness");
+  const readiness = await assessNoDeadlineHostSubmitReadiness(input);
+  if (!readiness.ready) return { ok: false, reason: readiness.reason ?? "not_ready" };
+
+  const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
+  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  return upsertHostJob({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+    sourceUrl: ctx.sourceUrl,
+    jobKind: "submit",
+    dueAt: new Date(),
+    idempotencyKey: `${input.applicationId}:host_submit:no_deadline_complete`,
+    nextAction: "All form fields are filled — submitting to the host now.",
+    eventTitle: `Auto-submit queued — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+    eventBody: "Every required and optional field is complete. The server will fill and submit this form.",
+  });
+}
+
 export async function queueHostSubmitJob(input: {
   supabase: SupabaseClient;
   actor: Actor;

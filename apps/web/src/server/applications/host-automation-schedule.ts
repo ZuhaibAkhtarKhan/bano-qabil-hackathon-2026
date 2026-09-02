@@ -8,6 +8,7 @@ import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 import {
   queueHostPrefillJob,
   scheduleHostSubmitJob,
+  scheduleHostSubmitWhenFullyComplete,
 } from "./host-submit";
 import { kickHostSubmitWorkerIfEnabled } from "./host-submit-worker-kick";
 import { maybeSendPreDeadlineReviewForApplication } from "./pre-deadline-review-email";
@@ -41,7 +42,24 @@ export async function syncHostAutomationForApplication(input: {
     actor: input.actor,
     applicationId: input.applicationId,
   });
-  if (!submit.ok && submit.reason !== "no_deadline") {
+  if (!submit.ok && submit.reason === "no_deadline") {
+    const complete = await scheduleHostSubmitWhenFullyComplete({
+      supabase: input.supabase,
+      actor: input.actor,
+      applicationId: input.applicationId,
+    });
+    if (
+      !complete.ok &&
+      complete.reason !== "not_ready" &&
+      complete.reason !== "open_needs_you" &&
+      complete.reason !== "no_form_inventory"
+    ) {
+      logError("host_automation.no_deadline_submit_failed", {
+        applicationId: input.applicationId,
+        reason: complete.reason,
+      });
+    }
+  } else if (!submit.ok) {
     logError("host_automation.submit_schedule_failed", {
       applicationId: input.applicationId,
       reason: submit.reason,
@@ -58,4 +76,21 @@ export async function syncHostAutomationForApplication(input: {
   after(() => {
     void kickHostSubmitWorkerIfEnabled();
   });
+}
+
+/** After Need You edits, queue host submit when every field is filled and no deadline is set. */
+export async function tryNoDeadlineHostSubmitIfComplete(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+}): Promise<void> {
+  const prefs = parseWorkspacePreferences(input.actor.profile.preferences);
+  if (!prefs.prepareAndSendIfSilent) return;
+
+  const result = await scheduleHostSubmitWhenFullyComplete(input);
+  if (result.ok) {
+    after(() => {
+      void kickHostSubmitWorkerIfEnabled();
+    });
+  }
 }

@@ -81,11 +81,12 @@ export default async function SettingsPage({
         <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Auto-submit if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            On by default. When you add a form URL, the server prefills it from your profile right away.
+            When you add a form URL, the server prefills it from your profile right away.
             About 2 hours before the deadline (or sooner if you set the deadline late), 1-Apply emails you
             so you can review answers, documents, and Need You items. Whether or not you edit, the form
-            auto-submits 1 hour before the deadline — your laptop can be off; only the EC2 server needs
-            to stay up. CAPTCHA, signature, and payment still need you.
+            auto-submits 1 hour before the deadline. With no deadline set, it auto-submits once every
+            form field is filled — including optional ones — in Need You. Your laptop can be off; only
+            the EC2 server needs to stay up. CAPTCHA, signature, and payment still need you.
           </p>
           <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
             <label className="flex items-start gap-3 text-sm">

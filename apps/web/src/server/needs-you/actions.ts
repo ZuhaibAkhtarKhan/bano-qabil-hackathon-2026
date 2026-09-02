@@ -234,6 +234,15 @@ async function continueApplicationInBackground(input: {
             : "Your new Application Memory was applied. Eligibility and drafts were refreshed in the background.",
           "intelligence.updated",
         );
+
+        const { tryNoDeadlineHostSubmitIfComplete } = await import(
+          "@/server/applications/host-automation-schedule"
+        );
+        await tryNoDeadlineHostSubmitIfComplete({
+          supabase: input.supabase,
+          actor: input.actor,
+          applicationId: input.applicationId,
+        });
       },
     );
   } catch (err) {
@@ -379,6 +388,8 @@ export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYou
   }
 
   revalidateNeedsYou(applicationId);
+  const { tryNoDeadlineHostSubmitIfComplete } = await import("@/server/applications/host-automation-schedule");
+  await tryNoDeadlineHostSubmitIfComplete({ supabase, actor, applicationId });
   return { ok: true, notice: "continued" };
 }
 
@@ -570,6 +581,8 @@ export async function resolveNeedsYouDocument(formData: FormData): Promise<Needs
 
   revalidateNeedsYou(applicationId);
   revalidatePath("/app/documents");
+  const { tryNoDeadlineHostSubmitIfComplete } = await import("@/server/applications/host-automation-schedule");
+  await tryNoDeadlineHostSubmitIfComplete({ supabase, actor, applicationId });
   return { ok: true, notice: "continued" };
 }
 
@@ -634,6 +647,8 @@ export async function confirmNeedsYouEligibility(formData: FormData): Promise<Ne
     .eq("user_id", user.id);
 
   revalidateNeedsYou(applicationId);
+  const { tryNoDeadlineHostSubmitIfComplete } = await import("@/server/applications/host-automation-schedule");
+  await tryNoDeadlineHostSubmitIfComplete({ supabase, actor, applicationId });
   return { ok: true, notice: "eligibility_confirmed" };
 }
 
