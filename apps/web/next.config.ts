@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@1apply/contracts", "@1apply/domain", "@1apply/form-engine"],
-  serverExternalPackages: ["mammoth"],
+  serverExternalPackages: ["mammoth", "playwright"],
   poweredByHeader: false,
   eslint: {
     // On 2GB EC2, run lint separately; build uses scripts/ec2-build.sh

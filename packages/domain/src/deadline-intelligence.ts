@@ -262,6 +262,16 @@ export const DEFAULT_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
 
 export const PRE_DEADLINE_REVIEW_NOTICE_HOURS = 2;
 
+/** Auto-submit runs this many hours before the deadline (after the review email window opens). */
+export const HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS = 1;
+
+export function computeHostSubmitDueAt(deadlineAt: string, now: Date = new Date()): Date {
+  const deadline = new Date(deadlineAt);
+  if (Number.isNaN(deadline.getTime())) return now;
+  const oneHourBefore = new Date(deadline.getTime() - HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS * 60 * 60 * 1000);
+  return oneHourBefore.getTime() > now.getTime() ? oneHourBefore : now;
+}
+
 /** True when silence-send is on and the deadline is within the final review window (default 2h). */
 export function shouldSendPreDeadlineReviewNotice(
   hoursRemaining: number | null,
@@ -269,7 +279,7 @@ export function shouldSendPreDeadlineReviewNotice(
 ): boolean {
   if (!prepareAndSendIfSilent) return false;
   if (hoursRemaining === null) return false;
-  return hoursRemaining > 0 && hoursRemaining <= PRE_DEADLINE_REVIEW_NOTICE_HOURS;
+  return hoursRemaining > HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS && hoursRemaining <= PRE_DEADLINE_REVIEW_NOTICE_HOURS;
 }
 
 export function buildPreDeadlineReviewNotice(input: {
@@ -282,7 +292,7 @@ export function buildPreDeadlineReviewNotice(input: {
   const org = input.organization ? ` at ${input.organization}` : "";
   const summary = input.packetSummary ? ` ${input.packetSummary}` : "";
   const title = `Review before auto-submit — ${input.applicationTitle}${org}`;
-  const body = `About ${PRE_DEADLINE_REVIEW_NOTICE_HOURS} hours remain before the deadline (${input.deadlineLabel}). Unless you edit, 1-Apply will fill and submit this form before the deadline.${summary} Open the application to change answers, documents, or Need You items. CAPTCHA, signature, and payment still need you.`;
+  const body = `The deadline is ${input.deadlineLabel}. 1-Apply already filled this form from your profile.${summary} Review and edit anything you want changed. Unless you update it, the form will auto-submit ${HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS} hour${HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS === 1 ? "" : "s"} before the deadline. CAPTCHA, signature, and payment still need you.`;
   const emailSubject = title;
   const emailHtml = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111">
 <p>${body.replace(/\n/g, "<br>")}</p>
@@ -301,7 +311,7 @@ export const SILENCE_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   silenceTreatsSuggestionsAsPacket: true,
   freezeOnlyAtOrAfterDeadline: false,
   submitToHost: true,
-  submitLeadHours: 24,
+  submitLeadHours: HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS,
   requireIdentity: true,
   requirePriorPacketNotice: true,
   requireDocumentsAttached: false,
@@ -393,11 +403,11 @@ export function evaluateAutoSubmit(
       return { action: "block", reason: "Deadline has not been reached. The packet stays editable.", humanActionRequired: [] };
     }
   } else if (policy.submitToHost) {
-    const leadHours = Math.max(policy.submitLeadHours, policy.boundedToDeadlineHours);
+    const leadHours = policy.submitLeadHours;
     if (deadline.hoursRemaining > leadHours) {
       return {
         action: "block",
-        reason: `Deadline is ${Math.round(deadline.hoursRemaining)} hours away, outside the ${leadHours}-hour auto-submit window.`,
+        reason: `Deadline is ${Math.round(deadline.hoursRemaining)} hours away. Auto-submit is scheduled ${leadHours} hour${leadHours === 1 ? "" : "s"} before the deadline.`,
         humanActionRequired: [],
       };
     }

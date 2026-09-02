@@ -1,6 +1,9 @@
 import {
   buildPreDeadlineReviewNotice,
+  computeDeadlineInfo,
   notificationIdempotencyKey,
+  packetAnswerText,
+  packetSummary,
   shouldSendPreDeadlineReviewNotice,
   type DeadlineInfo,
 } from "@1apply/domain";
@@ -146,4 +149,78 @@ export async function sendPreDeadlineReviewNoticeIfDue(input: {
   });
 
   return true;
+}
+
+const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+/** Send the review email immediately when a deadline is already inside the 2h→1h window. */
+export async function maybeSendPreDeadlineReviewForApplication(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+  prepareAndSendIfSilent: boolean;
+}): Promise<boolean> {
+  if (!input.prepareAndSendIfSilent) return false;
+
+  const { data: application } = await input.supabase
+    .from("applications")
+    .select(
+      "id, opportunity_id, deadline_at, deadline_timezone, opportunities ( title, organization )",
+    )
+    .eq("id", input.applicationId)
+    .eq("user_id", input.actor.userId)
+    .maybeSingle();
+
+  if (!application?.deadline_at) return false;
+
+  const opportunity = Array.isArray(application.opportunities)
+    ? application.opportunities[0]
+    : application.opportunities;
+  const deadline = computeDeadlineInfo(
+    String(application.deadline_at),
+    (application.deadline_timezone as string | null) || input.actor.profile.timezone,
+  );
+
+  const [{ data: questions }, { data: answers }, { data: requiredDocs }, { data: attached }] =
+    await Promise.all([
+      input.supabase.from("opportunity_questions").select("id").eq("opportunity_id", application.opportunity_id),
+      input.supabase
+        .from("application_answers")
+        .select("question_id, approved_text, original_ai_text, user_edited_text")
+        .eq("application_id", input.applicationId),
+      input.supabase.from("opportunity_documents").select("label, required").eq("opportunity_id", application.opportunity_id),
+      input.supabase.from("application_documents").select("document_id").eq("application_id", input.applicationId),
+    ]);
+
+  const packetCount = (questions ?? []).filter((question) =>
+    (answers ?? []).some(
+      (answer) =>
+        String(answer.question_id) === String(question.id) &&
+        packetAnswerText({
+          approvedText: (answer.approved_text as string | null) ?? null,
+          userEditedText: (answer.user_edited_text as string | null) ?? null,
+          originalAiText: (answer.original_ai_text as string | null) ?? null,
+        }),
+    ),
+  ).length;
+  const summary = packetSummary({
+    attachedCount: (attached ?? []).length,
+    requiredCount: (requiredDocs ?? []).filter((row) => row.required).length,
+    questionCount: (questions ?? []).length,
+    packetAnswerCount: packetCount,
+    suggestionCount: 0,
+  });
+
+  return sendPreDeadlineReviewNoticeIfDue({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+    opportunityId: (application.opportunity_id as string | null) ?? null,
+    applicationTitle: (opportunity as { title?: string } | null)?.title ?? "Application",
+    organization: (opportunity as { organization?: string | null } | null)?.organization ?? null,
+    deadline,
+    packetSummary: summary,
+    prepareAndSendIfSilent: input.prepareAndSendIfSilent,
+    appBaseUrl: APP_BASE_URL,
+  });
 }

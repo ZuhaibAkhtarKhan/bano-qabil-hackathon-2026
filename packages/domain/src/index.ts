@@ -107,6 +107,8 @@ export {
   DEFAULT_AUTO_SUBMIT_POLICY,
   SILENCE_AUTO_SUBMIT_POLICY,
   PRE_DEADLINE_REVIEW_NOTICE_HOURS,
+  HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS,
+  computeHostSubmitDueAt,
   shouldSendPreDeadlineReviewNotice,
   buildPreDeadlineReviewNotice,
   evaluateAutoSubmit,

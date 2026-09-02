@@ -9,6 +9,7 @@ import { isDeadlineDateInPast, normalizeOpportunityUrl } from "@1apply/domain";
 import { UnsafeUrlError, parsePublicHttpUrl } from "@/lib/security/public-url";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { redirectWith } from "@/server/http/flash";
+import { syncHostAutomationForApplication } from "@/server/applications/host-automation-schedule";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { parseDiscoveryQuery, runOpportunityAnalysisJob } from "@/server/opportunities/analyze";
@@ -115,6 +116,12 @@ export async function ingestOpportunityUrl(formData: FormData) {
     canonicalUrl: page.url,
     pageText: page.text,
     pageTitle: page.title,
+  });
+
+  await syncHostAutomationForApplication({
+    supabase,
+    actor,
+    applicationId: result.applicationId,
   });
 
   revalidatePath("/app/opportunities");

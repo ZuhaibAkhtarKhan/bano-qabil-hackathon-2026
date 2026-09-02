@@ -183,6 +183,15 @@ export async function persistOpportunityAnalysis(input: {
 
   if (deadlineAt) {
     await input.supabase.from("applications").update({ deadline_at: deadlineAt }).eq("id", input.applicationId);
+    if (input.actor) {
+      const { syncHostAutomationForApplication } = await import("@/server/applications/host-automation-schedule");
+      await syncHostAutomationForApplication({
+        supabase: input.supabase,
+        actor: input.actor,
+        applicationId: input.applicationId,
+        queuePrefill: false,
+      });
+    }
   }
 
   await input.supabase.from("opportunity_questions").delete().eq("opportunity_id", input.opportunityId);

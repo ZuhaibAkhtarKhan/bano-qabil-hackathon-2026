@@ -10,6 +10,7 @@ import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 import { ingestFormPageCapture } from "@/server/extension/ingest-form-page";
 import { ingestOpportunityPage } from "@/server/opportunities/ingest";
 import { recordAuditEvent } from "@/server/audit";
+import { syncHostAutomationForApplication } from "@/server/applications/host-automation-schedule";
 
 const envelope = createApiEnvelopeSchema(
   z.object({
@@ -146,6 +147,12 @@ export async function POST(request: Request) {
       opportunityId: result.opportunityId,
       duplicate: result.duplicate,
       source: parsed.data.source,
+    });
+
+    await syncHostAutomationForApplication({
+      supabase,
+      actor,
+      applicationId: result.applicationId,
     });
 
     revalidatePath("/app");

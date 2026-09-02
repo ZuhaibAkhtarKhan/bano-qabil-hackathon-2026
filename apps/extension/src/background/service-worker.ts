@@ -8,8 +8,6 @@ import {
   generateAiDraft,
   ingestOpportunity,
   listApplications,
-  listPendingHostSubmits,
-  reportHostSubmit,
 } from "../api/client";
 import type { DetectedField } from "@1apply/form-engine";
 
@@ -69,16 +67,11 @@ type FillSession = {
   updatedAt: number;
   fillSessionId?: string;
   pageIndex?: number;
-  autoSubmitHost?: boolean;
-  hostSubmitJobId?: string;
 };
 
 const FILL_SESSION_KEY = "fillSession";
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
-const HOST_SUBMIT_ALARM = "host-submit-poll";
-const autoFillInFlight = new Set<number>();
-const hostSubmitInFlight = new Set<string>();
-/** Bumped on Stop so in-flight continueFillOnTab aborts and cannot resurrect the session. */
+/** Bumped on Stop so in-flight work aborts cleanly. */
 let fillHaltGeneration = 0;
 
 async function activeTab(): Promise<chrome.tabs.Tab> {
@@ -234,7 +227,7 @@ async function runBatchFillOnTab(input: {
     type: "APPLY_BATCH_RESULTS",
     origin: input.origin,
     applicationId: input.applicationId,
-    autoContinue: true,
+    autoContinue: false,
     resumeFill: Boolean(input.resumeFill),
     results: plan.fields.map((item) => ({
       ...item,
@@ -274,7 +267,7 @@ async function applyMappingsToTab(input: {
     origin: input.origin,
     applicationId: input.applicationId,
     highlightKeys,
-    autoContinue: true,
+    autoContinue: false,
     resumeFill: Boolean(input.resumeFill),
     mappings: mappings.map((item) => {
       const versionId = item.attachment?.versionId || item.proposedValue;
@@ -312,112 +305,26 @@ async function applyMappingsToTab(input: {
   });
 }
 
-async function continueFillOnTab(tabId: number): Promise<{ ok: boolean; reason?: string; filled?: number }> {
-  if (autoFillInFlight.has(tabId)) return { ok: false, reason: "busy" };
-  const session = await loadFillSession();
-  if (!session) return { ok: false, reason: "no-session" };
-  const haltAtStart = fillHaltGeneration;
-
-  const tab = await chrome.tabs.get(tabId);
-  let origin: string;
+async function syncManualFillCapture(input: {
+  tabId: number;
+  applicationId: string;
+  origin: string;
+  fillSessionId?: string;
+}): Promise<void> {
+  const captured = await captureFilledState(input.tabId);
   try {
-    origin = tabOrigin(tab);
-  } catch (error) {
-    // During navigation the URL can be briefly unavailable — do not kill the session.
-    return { ok: false, reason: error instanceof Error ? error.message : "bad-tab" };
-  }
-  if (origin !== session.origin) return { ok: false, reason: "origin-mismatch" };
-
-  autoFillInFlight.add(tabId);
-  try {
-    if (fillHaltGeneration !== haltAtStart) return { ok: false, reason: "stopped" };
-    await ensureHostAccess(origin).catch(() => undefined);
-    await ensureContentScript(tabId);
-    if (fillHaltGeneration !== haltAtStart) return { ok: false, reason: "stopped" };
-
-    try {
-      const pageIndex = session.pageIndex ?? 0;
-      const batch = await runBatchFillOnTab({
-        tabId,
-        origin,
-        applicationId: session.applicationId,
-        pageIndex,
-        resumeFill: false,
-      });
-      if (fillHaltGeneration !== haltAtStart || batch.stopped || !(await loadFillSession())) {
-        return { ok: false, reason: "stopped" };
-      }
-      await saveFillSession({
-        ...session,
-        tabId,
-        origin,
-        updatedAt: Date.now(),
-        enabled: true,
-        fillSessionId: batch.fillSessionId || session.fillSessionId,
-        pageIndex: pageIndex + 1,
-      });
-      return { ok: true, filled: batch.filledCount };
-    } catch {
-      // Fall through to the existing per-field fill-plan path.
-    }
-
-    // Next-step UIs (Google Forms) often paint fields after the click; retry briefly.
-    let inventory: InventoryResponse | null = null;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (fillHaltGeneration !== haltAtStart || !(await loadFillSession())) {
-        return { ok: false, reason: "stopped" };
-      }
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
-      try {
-        inventory = await sendToTab<InventoryResponse>(tabId, { type: "INVENTORY" });
-      } catch {
-        inventory = null;
-      }
-      if (inventory?.fields?.length) break;
-    }
-    if (!inventory?.fields?.length) return { ok: false, reason: "no-fields" };
-    if (fillHaltGeneration !== haltAtStart || !(await loadFillSession())) {
-      return { ok: false, reason: "stopped" };
-    }
-
-    const plan = await createFillPlan({
-      applicationId: session.applicationId,
-      origin,
-      fields: inventory.fields,
-      hazards: inventory.hazards,
+    await endFillSession({
+      applicationId: input.applicationId,
+      reason: "stopped",
+      origin: captured?.origin || input.origin,
+      fillSessionId: input.fillSessionId,
+      pageUrl: captured?.pageUrl,
+      pageText: captured?.pageText,
+      fields: captured?.fields ?? [],
+      formPage: captured?.formPage,
     });
-
-    if (fillHaltGeneration !== haltAtStart || !(await loadFillSession())) {
-      return { ok: false, reason: "stopped" };
-    }
-
-    const result = (await applyMappingsToTab({
-      tabId,
-      origin,
-      applicationId: session.applicationId,
-      mappings: plan.mappings as Mapping[],
-      highlightKeys: inventory.fields.map((field) => field.key),
-      resumeFill: false,
-    })) as { filled?: Array<{ filled?: boolean }>; stopped?: boolean };
-
-    if (fillHaltGeneration !== haltAtStart || result.stopped || !(await loadFillSession())) {
-      return { ok: false, reason: "stopped" };
-    }
-
-    await saveFillSession({
-      ...session,
-      tabId,
-      origin,
-      updatedAt: Date.now(),
-      enabled: true,
-      fillSessionId: plan.fillSessionId || session.fillSessionId,
-    });
-    const filled = result.filled?.filter((item) => item.filled).length ?? 0;
-    return { ok: true, filled };
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : "continue-failed" };
-  } finally {
-    autoFillInFlight.delete(tabId);
+  } catch {
+    // Best-effort sync after a one-shot manual fill.
   }
 }
 
@@ -511,48 +418,13 @@ async function syncFillSessionEnd(
   }
 }
 
-chrome.tabs.onUpdated.addListener((tabId, info) => {
-  // Keep filling across soft and hard navigations while a session is active.
-  if (info.status && info.status !== "complete" && !info.url) return;
-  void (async () => {
-    const session = await loadFillSession();
-    if (!session || session.tabId !== tabId) return;
-
-    if (info.status === "loading") return;
-
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("about:")) return;
-      const origin = tabOrigin(tab);
-      if (origin !== session.origin) {
-        // Only clear when the user clearly left the site.
-        if (info.status === "complete") await clearFillSession(tabId, "origin_left");
-        return;
-      }
-    } catch {
-      // Transient get failures during navigation — keep session and try again later.
-      return;
-    }
-
-    // Small delay so SPA step content can mount after history/URL updates.
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await continueFillOnTab(tabId);
-  })();
-});
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  void clearFillSession(tabId, "tab_closed");
-});
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const task = (async () => {
     if (message?.type === "SESSION") return fetchSession();
     if (message?.type === "CONNECT_WEBSITE") return connectWithWebsiteSession();
     if (message?.type === "LIST_APPLICATIONS") return listApplications();
     if (message?.type === "FILL_SESSION_STATUS") {
-      const session = await loadFillSession();
-      if (!session) return { active: false };
-      return { active: true, origin: session.origin, tabId: session.tabId, applicationId: session.applicationId };
+      return { active: false };
     }
     if (message?.type === "GENERATE_AI_DRAFT") {
       return generateAiDraft({
@@ -564,12 +436,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         limitUnit:
           message.limitUnit === "words" || message.limitUnit === "characters" ? message.limitUnit : null,
       });
-    }
-
-    if (message?.type === "AUTO_CONTINUE_FILL") {
-      const tabId = sender.tab?.id;
-      if (!tabId) throw new Error("No tab for auto-continue.");
-      return continueFillOnTab(tabId);
     }
 
     if (message?.type === "STOP_FILL_SESSION") {
@@ -704,16 +570,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureHostAccess(origin);
       const applicationId = String(message.applicationId ?? "");
       if (!applicationId) throw new Error("Save this page to 1-Apply first.");
-      fillHaltGeneration += 1;
       const pageIndex = typeof message.pageIndex === "number" ? message.pageIndex : 0;
-      await saveFillSession({
-        applicationId,
-        origin,
-        tabId: tab.id,
-        enabled: true,
-        updatedAt: Date.now(),
-        pageIndex,
-      });
       const result = await runBatchFillOnTab({
         tabId: tab.id,
         origin,
@@ -721,14 +578,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pageIndex,
         resumeFill: true,
       });
-      await saveFillSession({
+      await syncManualFillCapture({
+        tabId: tab.id,
         applicationId,
         origin,
-        tabId: tab.id,
-        enabled: true,
-        updatedAt: Date.now(),
-        fillSessionId: result.fillSessionId || undefined,
-        pageIndex: pageIndex + 1,
+        fillSessionId: result.fillSessionId,
       });
       return result;
     }
@@ -758,19 +612,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureHostAccess(origin);
       const applicationId = String(message.applicationId ?? "");
       const fillSessionId = message.fillSessionId ? String(message.fillSessionId) : undefined;
-      if (applicationId) {
-        fillHaltGeneration += 1;
-        await saveFillSession({
-          applicationId,
-          origin,
-          tabId: tab.id,
-          enabled: true,
-          updatedAt: Date.now(),
-          fillSessionId,
-        });
-      }
 
-      return applyMappingsToTab({
+      const applied = await applyMappingsToTab({
         tabId: tab.id,
         origin,
         applicationId,
@@ -778,6 +621,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         highlightKeys: Array.isArray(message.highlightKeys) ? (message.highlightKeys as string[]) : undefined,
         resumeFill: true,
       });
+      if (applicationId) {
+        await syncManualFillCapture({ tabId: tab.id, applicationId, origin, fillSessionId });
+      }
+      return applied;
     }
 
     throw new Error("Unknown message.");
@@ -786,152 +633,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   task.then(sendResponse).catch((error: Error) => sendResponse({ error: error.message }));
   return true;
 });
-
-async function waitForTabComplete(tabId: number, timeoutMs = 45_000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.status === "complete") return;
-    await new Promise((resolve) => setTimeout(resolve, 400));
-  }
-}
-
-async function runHostSubmitJob(job: {
-  id: string;
-  applicationId: string;
-  sourceUrl: string;
-}): Promise<void> {
-  if (hostSubmitInFlight.has(job.id)) return;
-  hostSubmitInFlight.add(job.id);
-
-  let tabId: number | undefined;
-  try {
-    await reportHostSubmit({ jobId: job.id, running: true });
-
-    const url = new URL(job.sourceUrl);
-    await chrome.permissions.request({ origins: [`${url.origin}/*`] });
-
-    const tab = await chrome.tabs.create({ url: job.sourceUrl, active: false });
-    if (!tab.id) throw new Error("Could not open the form tab.");
-    tabId = tab.id;
-    await waitForTabComplete(tabId);
-    const origin = url.origin;
-
-    fillHaltGeneration += 1;
-    await saveFillSession({
-      applicationId: job.applicationId,
-      origin,
-      tabId,
-      enabled: true,
-      updatedAt: Date.now(),
-      pageIndex: 0,
-      autoSubmitHost: true,
-      hostSubmitJobId: job.id,
-    });
-
-    await sendToTab(tabId, { type: "SET_AUTO_SUBMIT_HOST", enabled: true });
-
-    for (let step = 0; step < 14; step += 1) {
-      const fillResult = await continueFillOnTab(tabId);
-      if (fillResult.reason === "stopped") break;
-
-      await new Promise((resolve) => setTimeout(resolve, 1400));
-
-      const advance = (await sendToTab<{ clicked?: boolean; reason?: string }>(tabId, {
-        type: "TRY_AUTO_ADVANCE",
-      }).catch(() => ({ clicked: false, reason: "advance-failed" }))) as {
-        clicked?: boolean;
-        reason?: string;
-      };
-
-      if (advance.clicked && advance.reason !== "no-change") {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        continue;
-      }
-
-      const submitTry = (await sendToTab<{
-        clicked?: boolean;
-        submitted?: boolean;
-        reason?: string;
-        blockedReason?: string;
-      }>(tabId, { type: "TRY_AUTO_SUBMIT" }).catch(() => null)) as {
-        clicked?: boolean;
-        submitted?: boolean;
-        reason?: string;
-        blockedReason?: string;
-      } | null;
-
-      if (submitTry?.blockedReason) {
-        await reportHostSubmit({
-          jobId: job.id,
-          blockedReason: submitTry.blockedReason,
-        });
-        return;
-      }
-
-      if (submitTry?.clicked) {
-        await reportHostSubmit({
-          jobId: job.id,
-          submitted: Boolean(submitTry.submitted),
-          hostSubmitClicked: true,
-          error: submitTry.submitted ? null : "Submit clicked but confirmation not detected.",
-        });
-        await clearFillSession(tabId, "submitted_detected");
-        return;
-      }
-
-      if (!advance.clicked && (fillResult.reason === "no-fields" || submitTry?.reason === "no-submit")) {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        continue;
-      }
-
-      if (!advance.clicked) break;
-    }
-
-    await reportHostSubmit({
-      jobId: job.id,
-      submitted: false,
-      hostSubmitClicked: false,
-      error: "Could not reach the Submit step. Fill missing fields in Need You and try again.",
-    });
-  } catch (error) {
-    await reportHostSubmit({
-      jobId: job.id,
-      submitted: false,
-      hostSubmitClicked: false,
-      error: error instanceof Error ? error.message : "host_submit_failed",
-    }).catch(() => undefined);
-  } finally {
-    hostSubmitInFlight.delete(job.id);
-    if (tabId) {
-      try {
-        await chrome.tabs.remove(tabId);
-      } catch {
-        // Tab may already be closed.
-      }
-    }
-  }
-}
-
-async function pollPendingHostSubmits(): Promise<void> {
-  try {
-    const session = await fetchSession().catch(() => null);
-    if (!session?.connected) return;
-    const jobs = await listPendingHostSubmits();
-    for (const job of jobs.slice(0, 2)) {
-      if (job.attemptCount >= 5) continue;
-      await runHostSubmitJob(job);
-    }
-  } catch {
-    // Extension may be offline or user signed out.
-  }
-}
-
-chrome.alarms.create(HOST_SUBMIT_ALARM, { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === HOST_SUBMIT_ALARM) {
-    void pollPendingHostSubmits();
-  }
-});
-
-void pollPendingHostSubmits();

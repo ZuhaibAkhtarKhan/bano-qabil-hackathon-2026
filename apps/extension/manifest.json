@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "1-Apply",
-  "version": "0.3.12",
-  "description": "Save opportunities to 1-Apply and fill approved fields from your session.",
+  "version": "0.3.13",
+  "description": "Save opportunities to 1-Apply and manually fill approved fields from your session.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -27,7 +27,7 @@
     "page": "options.html",
     "open_in_tab": true
   },
-  "permissions": ["activeTab", "storage", "scripting", "cookies", "tabs", "alarms"],
+  "permissions": ["activeTab", "storage", "scripting", "cookies", "tabs"],
   "host_permissions": ["http://3.108.122.44/*", "http://localhost:3000/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"]
 }

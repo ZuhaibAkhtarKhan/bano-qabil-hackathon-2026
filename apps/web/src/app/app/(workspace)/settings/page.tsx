@@ -81,10 +81,11 @@ export default async function SettingsPage({
         <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Auto-submit if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            On by default. About 2 hours before the deadline, 1-Apply emails you so you can review answers,
-            documents, and Need You items. If you do not edit, the extension fills and submits the host form
-            before the deadline. Keep Chrome running with the extension connected. CAPTCHA, signature, and payment
-            still need you.
+            On by default. When you add a form URL, the server prefills it from your profile right away.
+            About 2 hours before the deadline (or sooner if you set the deadline late), 1-Apply emails you
+            so you can review answers, documents, and Need You items. Whether or not you edit, the form
+            auto-submits 1 hour before the deadline — your laptop can be off; only the EC2 server needs
+            to stay up. CAPTCHA, signature, and payment still need you.
           </p>
           <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
             <label className="flex items-start gap-3 text-sm">
@@ -94,7 +95,7 @@ export default async function SettingsPage({
                 defaultChecked={prefs.prepareAndSendIfSilent}
                 className="mt-1"
               />
-              <span>Auto-submit this form before the deadline if I stay silent. You get an email 2 hours before to review.</span>
+              <span>Auto-submit this form before the deadline if I stay silent (server-side — no browser required).</span>
             </label>
             <SubmitButton variant="secondary">
               Save send preference
@@ -109,7 +110,8 @@ export default async function SettingsPage({
             <a className="underline" href="/app/integrations">
               Integrations
             </a>
-            . The extension fills forms and can auto-submit before deadlines when enabled in Settings.
+            . Use the extension to save form URLs and manually fill the current page from memory.
+            Deadline automation (prefill, review email, auto-submit) runs headless on the server.
           </p>
           <ExtensionConnectCard appUrl={appUrl} />
         </Card>

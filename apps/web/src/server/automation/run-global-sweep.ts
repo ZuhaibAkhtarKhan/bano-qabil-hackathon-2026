@@ -82,3 +82,10 @@ export async function runGlobalAutomationSweep(): Promise<{
 
   return { usersProcessed, userErrors };
 }
+
+/** Process queued host submit jobs with headless Playwright (no extension). */
+export async function runGlobalHostSubmitWorker() {
+  const supabase = createServiceRoleSupabaseClient();
+  const { runServerHostSubmitWorker } = await import("@/server/applications/host-submit-worker");
+  return runServerHostSubmitWorker(supabase);
+}

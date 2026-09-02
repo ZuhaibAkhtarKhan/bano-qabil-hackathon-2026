@@ -21,6 +21,7 @@ import { requireWorkspace } from "@/server/auth/require-workspace";
 import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@1apply/domain";
 import type { NeedsYouActionResult } from "@/server/needs-you/actions";
 import { redirectWith, type ErrorCode } from "@/server/http/flash";
+import { syncHostAutomationForApplication } from "@/server/applications/host-automation-schedule";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { mapEvidence } from "@/server/memory/map-evidence";
@@ -191,7 +192,7 @@ export async function updateApplicationPersona(formData: FormData) {
 }
 
 export async function updateApplicationSchedule(formData: FormData) {
-  const { user, supabase } = await requireWorkspace();
+  const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   const timezone = String(formData.get("timezone") ?? "").trim() || null;
   const deadlineAt = parseDeadlineInput(String(formData.get("deadline") ?? ""), timezone);
@@ -215,6 +216,13 @@ export async function updateApplicationSchedule(formData: FormData) {
   if (error) {
     redirectWith(applicationPath(applicationId), { error: "save" }, "opportunity");
   }
+
+  await syncHostAutomationForApplication({
+    supabase,
+    actor,
+    applicationId,
+    queuePrefill: false,
+  });
 
   revalidateApplication(applicationId);
   redirectWith(applicationPath(applicationId), { notice: "saved" }, "opportunity");

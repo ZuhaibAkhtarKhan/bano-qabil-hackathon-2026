@@ -685,6 +685,14 @@ export async function resolveNeedsYouDeadline(formData: FormData): Promise<Needs
     source: "needs_you",
   });
 
+  const { syncHostAutomationForApplication } = await import("@/server/applications/host-automation-schedule");
+  await syncHostAutomationForApplication({
+    supabase,
+    actor,
+    applicationId,
+    queuePrefill: false,
+  });
+
   revalidateNeedsYou(applicationId);
   return { ok: true, notice: "saved" };
 }

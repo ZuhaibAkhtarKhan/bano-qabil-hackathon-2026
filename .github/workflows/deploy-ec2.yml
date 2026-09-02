@@ -49,6 +49,8 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             npm ci
+            cd apps/web && npx playwright install chromium --with-deps || npx playwright install chromium
+            cd ~/bano-qabil-hackathon-2026
 
       - name: Upload build archive
         uses: appleboy/scp-action@v0.1.7

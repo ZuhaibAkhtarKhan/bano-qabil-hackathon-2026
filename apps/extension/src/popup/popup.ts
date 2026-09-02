@@ -25,11 +25,9 @@ type ApplicationOption = {
 };
 
 const statusEl = document.getElementById("status")!;
-const sessionEl = document.getElementById("session")!;
 const hazardEl = document.getElementById("hazard")!;
 const logEl = document.getElementById("log")!;
 const matchEl = document.getElementById("match")!;
-const stopEl = document.getElementById("stop") as HTMLButtonElement;
 const applicationEl = document.getElementById("application") as HTMLSelectElement;
 
 let cachedApps: ApplicationOption[] = [];
@@ -74,7 +72,7 @@ async function ensureSiteAccessFromGesture(tabUrl: string): Promise<string> {
   if (already) return parsed.origin;
   const granted = await chrome.permissions.request({ origins });
   if (!granted) {
-    throw new Error("Allow access to this site so 1-Apply can fill it and continue on later steps.");
+    throw new Error("Allow access to this site so 1-Apply can fill the current page.");
   }
   return parsed.origin;
 }
@@ -94,28 +92,10 @@ function selectApplicationForUrl(pageUrl: string | null): ApplicationOption | nu
   return null;
 }
 
-async function refreshFillSessionUi() {
-  try {
-    const session = await send<{ active: boolean; origin?: string }>({ type: "FILL_SESSION_STATUS" });
-    if (session.active) {
-      sessionEl.textContent = `Filling until you Stop or close the page${session.origin ? ` · ${session.origin}` : ""}.`;
-      sessionEl.classList.remove("hidden");
-      stopEl.classList.remove("hidden");
-    } else {
-      sessionEl.textContent = "";
-      sessionEl.classList.add("hidden");
-      stopEl.classList.add("hidden");
-    }
-  } catch {
-    sessionEl.classList.add("hidden");
-    stopEl.classList.add("hidden");
-  }
-}
-
 async function refreshSession() {
   try {
     const session = await send<{ email: string }>({ type: "SESSION" });
-    statusEl.textContent = `Connected as ${session.email}. After Fill, it keeps going on Next until you Stop.`;
+    statusEl.textContent = `Connected as ${session.email}. Tap Fill from memory on each form step — server automation handles deadlines.`;
     cachedApps = await send<ApplicationOption[]>({ type: "LIST_APPLICATIONS" });
     applicationEl.innerHTML = cachedApps
       .map(
@@ -130,14 +110,11 @@ async function refreshSession() {
       const tab = await activeTab().catch(() => null);
       selectApplicationForUrl(tab?.url ?? null);
     }
-    await refreshFillSessionUi();
   } catch (error) {
     statusEl.textContent =
       error instanceof Error
         ? error.message
         : "Not connected. Sign in to 1-Apply, then Options → Connect with website session.";
-    sessionEl.classList.add("hidden");
-    stopEl.classList.add("hidden");
   }
 }
 
@@ -186,11 +163,10 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       const filled = result.filledCount ?? result.filled?.filter((item) => item.filled).length ?? 0;
       const highlighted = result.highlighted ?? 0;
       log(
-        `Filled ${filled}. Keeps filling after Next until you Stop. ${
-          highlighted ? `${highlighted} still empty — highlighted for Need You.` : "Submit remains yours."
+        `Filled ${filled} on this page. Click Next yourself, then tap Fill again for the next step. ${
+          highlighted ? `${highlighted} still empty — highlighted for Need You.` : "Submit stays manual unless auto-submit is on in Settings."
         }`,
       );
-      await refreshFillSessionUi();
       return;
     } catch {
       // Fall back to the existing per-field fill-plan + 1A chip path.
@@ -252,23 +228,12 @@ document.getElementById("fill")!.addEventListener("click", async () => {
     const highlighted = result.highlighted ?? 0;
     const aiCount = plan.mappings.filter((item) => item.aiAnswerable).length;
     log(
-      `Filled ${filled.length}. Keeps filling after Next until you Stop. ${aiCount ? `${aiCount} AI assistant(s) — tap 1A on the page, Generate, Confirm. ` : ""}${
+      `Filled ${filled.length} on this page. Click Next yourself, then tap Fill again. ${aiCount ? `${aiCount} AI assistant(s) — tap 1A on the page, Generate, Confirm. ` : ""}${
         chips && !aiCount ? `${chips} chip(s) for alternates. ` : ""
-      }${highlighted ? `${highlighted} still empty — highlighted.` : "Submit remains yours."}`,
+      }${highlighted ? `${highlighted} still empty — highlighted.` : "Submit stays manual unless auto-submit is on in Settings."}`,
     );
-    await refreshFillSessionUi();
   } catch (error) {
     log(error instanceof Error ? error.message : "Fill failed.");
-  }
-});
-
-stopEl.addEventListener("click", async () => {
-  try {
-    await send({ type: "STOP_FILL_SESSION" });
-    log("Stopped. Values synced to Application Memory — 1-Apply continues in the background.");
-    await refreshFillSessionUi();
-  } catch (error) {
-    log(error instanceof Error ? error.message : "Could not stop.");
   }
 });
 

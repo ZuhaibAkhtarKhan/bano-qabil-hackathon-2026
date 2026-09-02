@@ -11,7 +11,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { freezeApplicationPacket } from "@/server/applications/freeze-packet";
-import { queueHostSubmitJob } from "@/server/applications/host-submit";
+import { scheduleHostSubmitJob } from "@/server/applications/host-submit";
+import { syncHostAutomationForApplication } from "@/server/applications/host-automation-schedule";
 import {
   hasPreDeadlineReviewNotice,
   sendPreDeadlineReviewNoticeIfDue,
@@ -206,6 +207,13 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
 
     if (!prefs.prepareAndSendIfSilent) continue;
 
+    await syncHostAutomationForApplication({
+      supabase,
+      actor,
+      applicationId: application.id as string,
+      queuePrefill: false,
+    });
+
     const [
       { data: answersAfterFill },
       { data: attachedAfterFill },
@@ -290,11 +298,10 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
 
     if (decision.action === "proceed") {
       if (SILENCE_AUTO_SUBMIT_POLICY.submitToHost) {
-        await queueHostSubmitJob({
+        await scheduleHostSubmitJob({
           supabase,
           actor,
           applicationId: application.id as string,
-          dueAt: now,
         });
       } else {
         await freezeApplicationPacket({

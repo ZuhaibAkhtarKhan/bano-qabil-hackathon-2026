@@ -373,13 +373,13 @@ describe("auto-submit policy", () => {
       },
     );
     expect(beforeWindow.action).toBe("block");
-    expect(beforeWindow.reason).toMatch(/outside.*window/);
+    expect(beforeWindow.reason).toMatch(/Auto-submit is scheduled/);
 
     const inWindow = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
       {
         ...makeReminderInput({
-          deadlineAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+          deadlineAt: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
           identityPresent: true,
           packetNoticeSent: true,
           allQuestionsHavePacketText: true,
@@ -390,7 +390,7 @@ describe("auto-submit policy", () => {
       },
     );
     expect(inWindow.action).toBe("proceed");
-    expect(inWindow.reason).toMatch(/host form fill and submit/i);
+    expect(inWindow.reason).toMatch(/pre-deadline window|host form fill and submit/i);
 
     const missingNotice = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
@@ -426,7 +426,7 @@ describe("auto-submit policy", () => {
       reviewUrl: "https://app.example/app/applications/app-1#submission",
     });
     expect(notice.title).toMatch(/Review before auto-submit/);
-    expect(notice.body).toMatch(/2 hours remain/);
+    expect(notice.body).toMatch(/already filled this form|auto-submit 1 hour before/i);
     expect(notice.emailHtml).toMatch(/Review application/);
   });
 

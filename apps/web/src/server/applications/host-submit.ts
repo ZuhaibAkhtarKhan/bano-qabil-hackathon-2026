@@ -1,3 +1,4 @@
+import { computeHostSubmitDueAt } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
@@ -6,6 +7,8 @@ import { recordApplicationEvent } from "@/services/platform";
 
 import { freezeApplicationPacket } from "./freeze-packet";
 
+export type HostSubmitJobKind = "prefill" | "submit";
+
 export type HostSubmitJobRow = {
   id: string;
   application_id: string;
@@ -13,6 +16,7 @@ export type HostSubmitJobRow = {
   due_at: string;
   status: string;
   attempt_count: number;
+  job_kind: HostSubmitJobKind;
 };
 
 function publicFormUrl(raw: string | null | undefined): string | null {
@@ -27,15 +31,11 @@ function publicFormUrl(raw: string | null | undefined): string | null {
   }
 }
 
-export async function queueHostSubmitJob(input: {
-  supabase: SupabaseClient;
-  actor: Actor;
-  applicationId: string;
-  dueAt?: Date;
-}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
-  const { supabase, actor, applicationId } = input;
-  const dueAt = input.dueAt ?? new Date();
-
+async function loadApplicationContext(
+  supabase: SupabaseClient,
+  actor: Actor,
+  applicationId: string,
+) {
   const { data: application } = await supabase
     .from("applications")
     .select("id, status, deadline_at, opportunity_id, opportunities ( source_url, canonical_url, title )")
@@ -43,9 +43,9 @@ export async function queueHostSubmitJob(input: {
     .eq("user_id", actor.userId)
     .maybeSingle();
 
-  if (!application) return { ok: false, reason: "not_found" };
+  if (!application) return null;
   if (["submitted", "rejected", "withdrawn", "archived", "offer"].includes(String(application.status))) {
-    return { ok: false, reason: "already_closed" };
+    return null;
   }
 
   const opportunity = Array.isArray(application.opportunities)
@@ -54,10 +54,34 @@ export async function queueHostSubmitJob(input: {
   const sourceUrl =
     publicFormUrl((opportunity as { canonical_url?: string | null } | null)?.canonical_url) ??
     publicFormUrl((opportunity as { source_url?: string | null } | null)?.source_url);
-  if (!sourceUrl) return { ok: false, reason: "no_source_url" };
 
-  const dayKey = (application.deadline_at as string | null)?.slice(0, 10) ?? dueAt.toISOString().slice(0, 10);
-  const idempotencyKey = `${applicationId}:host_submit:${dayKey}`;
+  return { application, opportunity, sourceUrl };
+}
+
+async function upsertHostJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+  sourceUrl: string;
+  jobKind: HostSubmitJobKind;
+  dueAt: Date;
+  idempotencyKey: string;
+  nextAction: string;
+  eventTitle: string;
+  eventBody: string;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  const {
+    supabase,
+    actor,
+    applicationId,
+    sourceUrl,
+    jobKind,
+    dueAt,
+    idempotencyKey,
+    nextAction,
+    eventTitle,
+    eventBody,
+  } = input;
 
   const { data: existing } = await supabase
     .from("host_submit_jobs")
@@ -65,7 +89,20 @@ export async function queueHostSubmitJob(input: {
     .eq("idempotency_key", idempotencyKey)
     .maybeSingle();
 
-  if (existing && ["pending", "running", "submitted"].includes(String(existing.status))) {
+  if (existing) {
+    const terminal = ["submitted", "completed", "blocked", "cancelled"];
+    if (terminal.includes(String(existing.status))) {
+      return { ok: true, jobId: String(existing.id) };
+    }
+    await supabase
+      .from("host_submit_jobs")
+      .update({
+        due_at: dueAt.toISOString(),
+        source_url: sourceUrl,
+        status: "pending",
+        last_error: null,
+      })
+      .eq("id", existing.id);
     return { ok: true, jobId: String(existing.id) };
   }
 
@@ -77,6 +114,7 @@ export async function queueHostSubmitJob(input: {
       source_url: sourceUrl,
       due_at: dueAt.toISOString(),
       status: "pending",
+      job_kind: jobKind,
       idempotency_key: idempotencyKey,
     })
     .select("id")
@@ -86,9 +124,7 @@ export async function queueHostSubmitJob(input: {
 
   await supabase
     .from("applications")
-    .update({
-      next_action: "Queued for auto-submit before deadline. Keep Chrome open with the 1-Apply extension.",
-    })
+    .update({ next_action: nextAction })
     .eq("id", applicationId)
     .eq("user_id", actor.userId);
 
@@ -96,12 +132,90 @@ export async function queueHostSubmitJob(input: {
     name: "automation.host_submit",
     userId: actor.userId,
     applicationId,
-    subjectId: `${applicationId}:host_submit`,
-    title: `Auto-submit queued — ${(opportunity as { title?: string } | null)?.title ?? "Application"}`,
-    body: "1-Apply will fill and submit this form before the deadline. CAPTCHA, signature, or payment still need you.",
+    subjectId: `${applicationId}:host_${jobKind}`,
+    title: eventTitle,
+    body: eventBody,
   });
 
   return { ok: true, jobId: String(job.id) };
+}
+
+/** Immediate server visit: inventory + fill all pages (no final Submit). */
+export async function queueHostPrefillJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
+  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  return upsertHostJob({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+    sourceUrl: ctx.sourceUrl,
+    jobKind: "prefill",
+    dueAt: new Date(),
+    idempotencyKey: `${input.applicationId}:host_prefill`,
+    nextAction: "Server prefill queued — fields will be filled from your profile shortly.",
+    eventTitle: `Prefill queued — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+    eventBody: "1-Apply will visit the form now and fill it from Application Memory. You can review before auto-submit.",
+  });
+}
+
+/** Schedule final submit for 1 hour before the deadline (or immediately if deadline is sooner). */
+export async function scheduleHostSubmitJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
+  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  const deadlineAt = (ctx.application.deadline_at as string | null) ?? null;
+  if (!deadlineAt) return { ok: false, reason: "no_deadline" };
+
+  const dueAt = computeHostSubmitDueAt(deadlineAt);
+  const idempotencyKey = `${input.applicationId}:host_submit:${deadlineAt}`;
+
+  return upsertHostJob({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+    sourceUrl: ctx.sourceUrl,
+    jobKind: "submit",
+    dueAt,
+    idempotencyKey,
+    nextAction: `Auto-submit scheduled ${dueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })} (1 hour before deadline).`,
+    eventTitle: `Auto-submit scheduled — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+    eventBody:
+      "You'll get a review email up to 2 hours before the deadline. The form submits automatically 1 hour before unless you edit.",
+  });
+}
+
+export async function queueHostSubmitJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+  dueAt?: Date;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  if (input.dueAt) {
+    const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
+    if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+    return upsertHostJob({
+      supabase: input.supabase,
+      actor: input.actor,
+      applicationId: input.applicationId,
+      sourceUrl: ctx.sourceUrl,
+      jobKind: "submit",
+      dueAt: input.dueAt,
+      idempotencyKey: `${input.applicationId}:host_submit:${input.dueAt.toISOString().slice(0, 16)}`,
+      nextAction: "Queued for server auto-submit.",
+      eventTitle: "Auto-submit queued",
+      eventBody: "1-Apply will fill and submit this form on the server.",
+    });
+  }
+  return scheduleHostSubmitJob(input);
 }
 
 export async function listPendingHostSubmitJobs(
@@ -110,8 +224,9 @@ export async function listPendingHostSubmitJobs(
 ): Promise<HostSubmitJobRow[]> {
   const { data } = await supabase
     .from("host_submit_jobs")
-    .select("id, application_id, source_url, due_at, status, attempt_count")
+    .select("id, application_id, source_url, due_at, status, attempt_count, job_kind")
     .eq("user_id", userId)
+    .eq("job_kind", "submit")
     .in("status", ["pending", "running"])
     .lte("due_at", new Date(Date.now() + 5 * 60 * 1000).toISOString())
     .order("due_at", { ascending: true })
@@ -124,6 +239,7 @@ export async function listPendingHostSubmitJobs(
     due_at: String(row.due_at),
     status: String(row.status),
     attempt_count: Number(row.attempt_count ?? 0),
+    job_kind: (row.job_kind as HostSubmitJobKind) ?? "submit",
   }));
 }
 
@@ -153,6 +269,74 @@ export async function markHostSubmitJobRunning(
     .maybeSingle();
 
   return Boolean(data);
+}
+
+export async function completeHostPrefillJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  jobId: string;
+  filledFields: number;
+  error?: string | null;
+  blockedReason?: string | null;
+}): Promise<{ ok: boolean }> {
+  const { supabase, actor, jobId, filledFields, error, blockedReason } = input;
+
+  const { data: job } = await supabase
+    .from("host_submit_jobs")
+    .select("id, application_id")
+    .eq("id", jobId)
+    .eq("user_id", actor.userId)
+    .maybeSingle();
+
+  if (!job) return { ok: false };
+
+  const applicationId = String(job.application_id);
+  const now = new Date().toISOString();
+
+  if (blockedReason) {
+    await supabase
+      .from("host_submit_jobs")
+      .update({ status: "blocked", last_error: blockedReason.slice(0, 500), completed_at: now })
+      .eq("id", jobId);
+    return { ok: true };
+  }
+
+  if (error) {
+    await supabase
+      .from("host_submit_jobs")
+      .update({ status: "failed", last_error: error.slice(0, 500), completed_at: now })
+      .eq("id", jobId);
+    return { ok: true };
+  }
+
+  await supabase
+    .from("host_submit_jobs")
+    .update({ status: "completed", completed_at: now, last_error: null })
+    .eq("id", jobId);
+
+  await supabase
+    .from("applications")
+    .update({
+      next_action: `Prefilled ${filledFields} field(s) from your profile. Review before auto-submit 1 hour before the deadline.`,
+    })
+    .eq("id", applicationId)
+    .eq("user_id", actor.userId);
+
+  await recordApplicationEvent(supabase, actor, applicationId, "application.host_prefilled", {
+    jobId,
+    filledFields,
+  });
+
+  await emitDomainEvent(supabase, {
+    name: "answer.generated",
+    userId: actor.userId,
+    applicationId,
+    subjectId: `${applicationId}:host_prefill`,
+    title: "Form prefilled from your profile",
+    body: `The server filled ${filledFields} field(s). Open the application to review before auto-submit.`,
+  });
+
+  return { ok: true };
 }
 
 export async function completeHostSubmitJob(input: {
