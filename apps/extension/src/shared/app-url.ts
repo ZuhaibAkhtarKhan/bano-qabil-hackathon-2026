@@ -9,7 +9,7 @@ export const DEFAULT_APP_BASE_URL =
   typeof __EXTENSION_APP_BASE_URL__ !== "undefined" ? __EXTENSION_APP_BASE_URL__ : PRODUCTION_APP_BASE_URL;
 
 export async function resolveAppBaseUrl(): Promise<string> {
-  const stored = await chrome.storage.local.get(APP_BASE_URL_STORAGE_KEY);
+  const stored = await chrome.storage.local.get([APP_BASE_URL_STORAGE_KEY]);
   const value = stored[APP_BASE_URL_STORAGE_KEY];
   if (typeof value === "string" && value.trim()) {
     const normalized = value.trim().replace(/\/$/, "");
