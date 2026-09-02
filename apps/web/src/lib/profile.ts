@@ -1,3 +1,4 @@
+import { cache } from "react";
 import {
   canFinishOnboarding,
   consentUpdateFields,
@@ -33,7 +34,7 @@ function parseOnboardingStep(value: string | null | undefined): OnboardingStep |
   return parsed.success ? parsed.data : null;
 }
 
-export async function getCurrentUserAndProfile() {
+export const getCurrentUserAndProfile = cache(async function getCurrentUserAndProfile() {
   if (!isSupabaseConfigured()) {
     return { user: null, profile: null as ProfileRow | null };
   }
@@ -106,7 +107,7 @@ export async function getCurrentUserAndProfile() {
       preferences: (created.preferences as Record<string, unknown> | null) ?? {},
     },
   };
-}
+});
 
 export async function loadOnboardingState() {
   const { user, profile } = await getCurrentUserAndProfile();

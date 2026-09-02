@@ -11,7 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { freezeApplicationPacket } from "@/server/applications/freeze-packet";
-import { autoFillNeedsYouTextBeforeDeadline } from "@/server/needs-you/auto-fill-deadline";
+import { autoFillNeedsYouTextForNearDeadlineApplications } from "@/server/needs-you/auto-fill-deadline";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 
@@ -32,28 +32,38 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
 
   const now = new Date();
   const identityPresent = Boolean(actor.profile.display_name?.trim());
-  const needsYouQueue =
-    prefs.prepareAndSendIfSilent || applications?.some((row) => {
+
+  const urgentApplications = (applications ?? [])
+    .map((row) => {
       const deadline = computeDeadlineInfo(
         (row.deadline_at as string | null) ?? null,
         (row.deadline_timezone as string | null) || actor.profile.timezone,
         now,
       );
-      return ["imminent", "soon", "overdue"].includes(deadline.urgency);
+      return { row, deadline };
     })
-      ? await (async () => {
-          const { loadNeedsYouQueue } = await import("@/server/needs-you/queries");
-          return loadNeedsYouQueue({ polish: false });
-        })()
-      : null;
-  const needsYouItemsByApp = new Map<string, NonNullable<typeof needsYouQueue>["items"]>();
-  if (needsYouQueue) {
-    for (const item of needsYouQueue.items) {
-      const list = needsYouItemsByApp.get(item.applicationId) ?? [];
-      list.push(item);
-      needsYouItemsByApp.set(item.applicationId, list);
+    .filter(({ deadline }) => ["imminent", "soon", "overdue"].includes(deadline.urgency));
+
+  if (urgentApplications.length > 0) {
+    try {
+      await autoFillNeedsYouTextForNearDeadlineApplications(
+        supabase,
+        actor,
+        urgentApplications.map(({ row }) => ({
+          applicationId: row.id as string,
+          deadlineAt: (row.deadline_at as string | null) ?? null,
+          deadlineTimezone: (row.deadline_timezone as string | null) || actor.profile.timezone,
+        })),
+      );
+    } catch {
+      // Non-fatal — silence-send may still proceed with existing drafts.
     }
   }
+
+  const { data: attachedDocs } = await supabase
+    .from("documents")
+    .select("id, type, label")
+    .eq("user_id", actor.userId);
 
   for (const application of applications ?? []) {
     const deadline = computeDeadlineInfo(
@@ -69,7 +79,6 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
       { data: answers },
       { data: requiredDocs },
       { data: attached },
-      { data: attachedDocs },
     ] = await Promise.all([
       supabase.from("opportunity_questions").select("id").eq("opportunity_id", application.opportunity_id),
       supabase
@@ -78,7 +87,6 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
         .eq("application_id", application.id),
       supabase.from("opportunity_documents").select("label, required").eq("opportunity_id", application.opportunity_id),
       supabase.from("application_documents").select("document_id").eq("application_id", application.id),
-      supabase.from("documents").select("id, type, label").eq("user_id", actor.userId),
     ]);
 
     const attachedIds = new Set((attached ?? []).map((row) => String(row.document_id)));
@@ -173,20 +181,6 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
     }
 
     const deadlineUrgent = ["imminent", "soon", "overdue"].includes(deadline.urgency);
-    if (deadlineUrgent) {
-      try {
-        await autoFillNeedsYouTextBeforeDeadline(
-          supabase,
-          actor,
-          application.id as string,
-          (application.deadline_at as string | null) ?? null,
-          (application.deadline_timezone as string | null) || actor.profile.timezone,
-          needsYouItemsByApp.get(application.id as string),
-        );
-      } catch {
-        // Non-fatal — silence-send may still proceed with existing drafts.
-      }
-    }
 
     if (!prefs.prepareAndSendIfSilent) continue;
 

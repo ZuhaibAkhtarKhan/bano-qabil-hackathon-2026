@@ -1,10 +1,11 @@
+import { cache } from "react";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 import { isSupabaseConfigured } from "@/lib/env";
 
-export async function createServerSupabaseClient() {
+export const createServerSupabaseClient = cache(async function createServerSupabaseClient() {
   if (!isSupabaseConfigured()) {
     throw new Error("Supabase is not configured");
   }
@@ -31,7 +32,7 @@ export async function createServerSupabaseClient() {
       },
     },
   );
-}
+});
 
 export function createAccessTokenSupabaseClient(accessToken: string) {
   if (!isSupabaseConfigured()) {

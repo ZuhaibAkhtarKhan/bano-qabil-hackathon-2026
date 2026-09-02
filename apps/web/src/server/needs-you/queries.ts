@@ -183,7 +183,7 @@ function groupNeedsYouItems(
   }));
 }
 
-async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
+async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<NeedsYouQueue> {
   const { user, supabase, profile, actor } = await requireWorkspace();
 
   const [{ data: applications }, { data: documents }, { data: resumeRows }] = await Promise.all([
@@ -852,6 +852,30 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
         state: String(row.state ?? "unclear"),
       }));
 
+      if (skipAi) {
+        for (const gap of gaps) {
+          const needsAck = gap.state !== "not_met";
+          pushItem({
+            ...base,
+            id: `eligibility:${applicationId}:${gap.id}:count`,
+            kind: "eligibility",
+            title: gap.requirementText || "Eligibility requirement",
+            detail: gap.explanation,
+            inputLabel: needsAck ? "Confirm eligibility" : "Eligibility",
+            inputType: "text",
+            required: true,
+            payload: {
+              eligibilityId: gap.id,
+              eligibilityIssue: gap.explanation,
+              eligibilityRequirement: gap.requirementText,
+              allowDeleteApplication: true,
+              confirmEligible: needsAck,
+            },
+          });
+        }
+        continue;
+      }
+
       const memoryCheck = await verifyEligibilityFromMemory(supabase, actor, applicationId, gaps);
       gaps = memoryCheck.remaining;
 
@@ -1102,21 +1126,22 @@ async function loadNeedsYouQueueImpl(polish: boolean): Promise<NeedsYouQueue> {
   };
 }
 
-const loadNeedsYouQueueCached = cache(async (polishFlag: "yes" | "no"): Promise<NeedsYouQueue> =>
-  loadNeedsYouQueueImpl(polishFlag === "yes"),
-);
+const loadNeedsYouQueueCached = cache(async (mode: "full-yes" | "full-no" | "counts"): Promise<NeedsYouQueue> => {
+  if (mode === "counts") return loadNeedsYouQueueImpl(false, true);
+  return loadNeedsYouQueueImpl(mode === "full-yes", false);
+});
 
 export function loadNeedsYouQueue(options?: { polish?: boolean }): Promise<NeedsYouQueue> {
-  return loadNeedsYouQueueCached(options?.polish === false ? "no" : "yes");
+  return loadNeedsYouQueueCached(options?.polish === false ? "full-no" : "full-yes");
 }
 
-/** Lightweight counts for nav badge + applications table (skips label polish). */
+/** Lightweight counts for nav badge + applications table (skips label polish and eligibility AI). */
 export const loadNeedsYouFieldCounts = cache(async (): Promise<{
   applicationCount: number;
   totalFields: number;
   fieldCountByApplicationId: Record<string, number>;
 }> => {
-  const queue = await loadNeedsYouQueue({ polish: false });
+  const queue = await loadNeedsYouQueueCached("counts");
   const fieldCountByApplicationId: Record<string, number> = {};
   for (const group of queue.groups) {
     fieldCountByApplicationId[group.applicationId] = group.fieldCount;
