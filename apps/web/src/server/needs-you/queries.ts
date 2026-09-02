@@ -1,14 +1,11 @@
 import { humanQuestionLabel, humanizeFieldToken, isMachineFieldToken } from "@1apply/form-engine";
 import {
   classifyRequiredDocumentLabel,
-  classifyVaultDocument,
-  isWeakResumeFit,
   matchVaultDocument,
   requiredDocumentCovered,
 } from "@1apply/domain";
 import { cache } from "react";
 
-import { normalizeApplicationStatus } from "@/lib/application-workflow";
 import { sourceLabelFromOpportunity } from "@/lib/dashboard-display";
 import {
   detectProfileMemoryField,
@@ -21,34 +18,17 @@ import {
   type NeedsYouItem,
 } from "@/lib/needs-you";
 import {
-  formatNeedsYouDocumentOption,
   inputTypeFromHostFieldType,
   isChoiceFieldType,
   isImageUploadRequest,
   normalizeNeedsYouFieldType,
   resolveNeedsYouChoiceOptions,
 } from "@/lib/needs-you-field-kinds";
-import { requireWorkspace } from "@/server/auth/require-workspace";
 import { polishFormQuestionLabels } from "@/server/needs-you/polish-labels";
-import {
-  defaultProfileCandidates,
-  resolveEligibilityActionTargets,
-  type EligibilityCandidate,
-  type EligibilityGap,
-} from "@/server/needs-you/resolve-eligibility-actions-ai";
-import { verifyEligibilityFromMemory } from "@/server/needs-you/verify-eligibility-from-memory";
+import { buildEligibilityNeedsYouItems, type EligibilityJob } from "@/server/needs-you/eligibility-items";
+import { loadNeedsYouRawContext } from "@/server/needs-you/raw-context";
+import type { EligibilityGap } from "@/server/needs-you/resolve-eligibility-actions-ai";
 import { asOne } from "@/server/types";
-
-const ACTIVE_STATUSES = new Set([
-  "saved",
-  "analyzing",
-  "ready_to_apply",
-  "in_progress",
-  "review_required",
-  "draft",
-  "preparing",
-  "ready",
-]);
 
 function oppMeta(row: {
   opportunities?:
@@ -102,11 +82,29 @@ export type NeedsYouQueue = {
   items: NeedsYouItem[];
   groups: NeedsYouApplicationGroup[];
   documents: NeedsYouDocumentOption[];
+  /** Open (non-closed) application ids — used for background resume selection. */
+  openApplicationIds: string[];
   counts: {
     total: number;
     byKind: Record<string, number>;
   };
 };
+
+export function countsFromNeedsYouQueue(queue: NeedsYouQueue): {
+  applicationCount: number;
+  totalFields: number;
+  fieldCountByApplicationId: Record<string, number>;
+} {
+  const fieldCountByApplicationId: Record<string, number> = {};
+  for (const group of queue.groups) {
+    fieldCountByApplicationId[group.applicationId] = group.fieldCount;
+  }
+  return {
+    applicationCount: queue.groups.length,
+    totalFields: queue.counts.total,
+    fieldCountByApplicationId,
+  };
+}
 
 function emptyWalls(originHost: string | null = null): NeedsYouWallInfo {
   return {
@@ -128,28 +126,6 @@ function isEligibilityExplanation(text: string): boolean {
     /\bnot satisfied\b/i.test(text) ||
     /\beligibility\b/i.test(text)
   );
-}
-
-function parseHazards(raw: unknown, origin: string | null): NeedsYouWallInfo {
-  const host = (() => {
-    if (!origin) return null;
-    try {
-      return new URL(origin).host;
-    } catch {
-      return origin.slice(0, 80);
-    }
-  })();
-  if (!raw || typeof raw !== "object") return emptyWalls(host);
-  const h = raw as Record<string, unknown>;
-  return {
-    captcha: Boolean(h.captcha),
-    captchaMessage: typeof h.captchaMessage === "string" ? h.captchaMessage : null,
-    accountCreation: Boolean(h.accountCreation),
-    accountMessage: typeof h.accountMessage === "string" ? h.accountMessage : null,
-    unsupported: Boolean(h.unsupported),
-    unsupportedReason: typeof h.unsupportedReason === "string" ? h.unsupportedReason : null,
-    originHost: host,
-  };
 }
 
 function groupNeedsYouItems(
@@ -184,248 +160,38 @@ function groupNeedsYouItems(
 }
 
 async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<NeedsYouQueue> {
-  const { user, supabase, profile, actor } = await requireWorkspace();
-
-  const [{ data: applications }, { data: documents }, { data: resumeRows }] = await Promise.all([
-    supabase
-      .from("applications")
-      .select(
-        "id, status, next_action, opportunity_id, deadline_at, deadline_timezone, updated_at, opportunities ( title, organization, source, deadline_at )",
-      )
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false }),
-    supabase
-      .from("documents")
-      .select(
-        "id, type, label, current_version_id, document_versions!document_id ( id, version_label, original_filename, status )",
-      )
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false }),
-    supabase
-      .from("resumes")
-      .select("document_id, category_key, category_label, target_role")
-      .eq("user_id", user.id),
-  ]);
-
-  const resumeMetaByDoc = new Map(
-    (resumeRows ?? []).map((row) => [
-      String(row.document_id),
-      {
-        categoryLabel:
-          String(row.category_label ?? "").trim() ||
-          String(row.target_role ?? "").trim() ||
-          (row.category_key ? String(row.category_key).replace(/_/g, " ") : null),
-      },
-    ]),
-  );
-
-  const mappedDocs: NeedsYouDocumentOption[] = (documents ?? []).map((doc) => {
-    const versions = Array.isArray(doc.document_versions)
-      ? doc.document_versions
-      : doc.document_versions
-        ? [doc.document_versions]
-        : [];
-    const currentId = (doc.current_version_id as string | null) ?? null;
-    const current =
-      versions.find((item) => String((item as { id?: string }).id) === currentId) ?? versions[0] ?? null;
-    const versionLabel = current
-      ? String((current as { version_label?: string | null }).version_label ?? "").trim() || null
-      : null;
-    const fileName = current
-      ? String((current as { original_filename?: string | null }).original_filename ?? "").trim() || null
-      : null;
-    const categoryLabel = resumeMetaByDoc.get(String(doc.id))?.categoryLabel ?? null;
-    const label = String(doc.label);
-    const type = String(doc.type);
-    return {
-      id: String(doc.id),
-      label,
-      type,
-      currentVersionId: currentId,
-      versionLabel,
-      categoryLabel,
-      fileName,
-      displayLabel: formatNeedsYouDocumentOption({
-        label,
-        type,
-        versionLabel,
-        categoryLabel,
-        fileName,
-      }),
-    };
-  });
-
-  const active = (applications ?? []).filter((row) =>
-    ACTIVE_STATUSES.has(normalizeApplicationStatus(row.status as Parameters<typeof normalizeApplicationStatus>[0])),
-  );
+  const ctx = await loadNeedsYouRawContext();
+  const {
+    profile,
+    active,
+    openApplicationIds,
+    mappedDocs,
+    wallsByApp,
+    sourceByApp,
+    requiredDocuments,
+    fieldMappings,
+    fitRows,
+    eligibilityRows,
+    attachedVaultByApp,
+    recommendedResumeByApp,
+    questionsByOpp,
+    latestAnswerByQuestion,
+    vaultResumes,
+  } = ctx;
 
   if (active.length === 0) {
     return {
       items: [],
       groups: [],
       documents: mappedDocs,
+      openApplicationIds,
       counts: { total: 0, byKind: {} },
     };
   }
 
-  const appIds = active.map((row) => String(row.id));
-  const oppIds = [...new Set(active.map((row) => String(row.opportunity_id)))];
-  const sourceByApp = new Map(
-    active.map((row) => [String(row.id), oppMeta(row).sourceLabel] as const),
-  );
-
-  const [
-    { data: answers },
-    { data: questions },
-    { data: requiredDocuments },
-    { data: attached },
-    { data: fieldMappings },
-    { data: fitRows },
-    { data: fillSessions },
-    { data: eligibilityRows },
-    { data: resumeMatches },
-  ] = await Promise.all([
-    supabase
-      .from("application_answers")
-      .select(
-        "id, application_id, question_id, state, approved_text, user_edited_text, original_ai_text, missing_facts, created_at",
-      )
-      .eq("user_id", user.id)
-      .in("application_id", appIds),
-    supabase
-      .from("opportunity_questions")
-      .select("id, opportunity_id, prompt, required, sort_order")
-      .eq("user_id", user.id)
-      .in("opportunity_id", oppIds)
-      .order("sort_order", { ascending: true }),
-    supabase
-      .from("opportunity_documents")
-      .select("id, opportunity_id, label, required")
-      .eq("user_id", user.id)
-      .in("opportunity_id", oppIds),
-    supabase
-      .from("application_documents")
-      .select("id, application_id, document_id")
-      .eq("user_id", user.id)
-      .in("application_id", appIds),
-    supabase
-      .from("field_mappings")
-      .select(
-        "id, application_id, field_key, label, value, confidence, excluded_by_default, sensitive, created_at, field_type, options, meta",
-      )
-      .eq("user_id", user.id)
-      .in("application_id", appIds)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("fit_evaluations")
-      .select("application_id, missing")
-      .eq("user_id", user.id)
-      .in("application_id", appIds),
-    supabase
-      .from("fill_sessions")
-      .select("application_id, origin, hazards, created_at")
-      .eq("user_id", user.id)
-      .in("application_id", appIds)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("eligibility_results")
-      .select(
-        "id, application_id, state, explanation, requirement_text, requirement_kind, needs_confirmation, user_confirmed_at, ack_only",
-      )
-      .eq("user_id", user.id)
-      .in("application_id", appIds),
-    supabase
-      .from("resume_matches")
-      .select("application_id, document_id, score, recommended, suggestion, label")
-      .eq("user_id", user.id)
-      .in("application_id", appIds),
-  ]);
-
-  const wallsByApp = new Map<string, NeedsYouWallInfo>();
-  for (const session of fillSessions ?? []) {
-    const applicationId = String(session.application_id);
-    if (wallsByApp.has(applicationId)) continue;
-    wallsByApp.set(
-      applicationId,
-      parseHazards(session.hazards, typeof session.origin === "string" ? session.origin : null),
-    );
-  }
-
-  // Legacy fill-plans stored kit chip suggestions in options for text/textarea — scrub those rows.
-  const pollutedMappingIds = (fieldMappings ?? [])
-    .filter((row) => {
-      const fieldType = normalizeNeedsYouFieldType(
-        typeof row.field_type === "string" ? row.field_type : null,
-      );
-      if (!fieldType || isChoiceFieldType(fieldType)) return false;
-      return Array.isArray(row.options) && row.options.length > 0;
-    })
-    .map((row) => String(row.id));
-  if (pollutedMappingIds.length > 0) {
-    void supabase.from("field_mappings").update({ options: [] }).in("id", pollutedMappingIds);
-    for (const row of fieldMappings ?? []) {
-      if (pollutedMappingIds.includes(String(row.id))) {
-        (row as { options?: unknown }).options = [];
-      }
-    }
-  }
-
-  const docById = new Map(
-    mappedDocs.map((doc) => [doc.id, doc] as const),
-  );
-  const vaultResumes = mappedDocs.filter((doc) => classifyVaultDocument(doc) === "resume");
-  const attachedVaultByApp = new Map<string, Array<{ type: string; label: string; id: string }>>();
-  for (const row of attached ?? []) {
-    const appId = String(row.application_id);
-    const doc = docById.get(String(row.document_id));
-    if (!doc) continue;
-    const list = attachedVaultByApp.get(appId) ?? [];
-    list.push({ id: doc.id, type: doc.type, label: doc.label });
-    attachedVaultByApp.set(appId, list);
-  }
-
-  const recommendedResumeByApp = new Map<
-    string,
-    { documentId: string; label: string; score: number; suggestion: string | null; weakFit: boolean }
-  >();
-  for (const row of resumeMatches ?? []) {
-    if (!row.recommended) continue;
-    const applicationId = String(row.application_id);
-    const documentId = String(row.document_id);
-    const score = typeof row.score === "number" ? row.score : Number(row.score ?? 0);
-    const suggestion = typeof row.suggestion === "string" ? row.suggestion : null;
-    const doc = docById.get(documentId);
-    recommendedResumeByApp.set(applicationId, {
-      documentId,
-      label: (typeof row.label === "string" && row.label.trim()) || doc?.label || "Recommended resume",
-      score,
-      suggestion,
-      weakFit: isWeakResumeFit(score) || Boolean(suggestion),
-    });
-  }
-
-  const questionsByOpp = new Map<string, typeof questions>();
-  for (const question of questions ?? []) {
-    const oppId = String(question.opportunity_id);
-    const list = questionsByOpp.get(oppId) ?? [];
-    list.push(question);
-    questionsByOpp.set(oppId, list);
-  }
-
-  const latestAnswerByQuestion = new Map<
-    string,
-    NonNullable<typeof answers>[number]
-  >();
-  for (const answer of answers ?? []) {
-    const key = `${answer.application_id}:${answer.question_id}`;
-    const existing = latestAnswerByQuestion.get(key);
-    if (!existing || String(answer.created_at) > String(existing.created_at)) {
-      latestAnswerByQuestion.set(key, answer);
-    }
-  }
-
   const seenMappingKeys = new Set<string>();
   const items: NeedsYouItem[] = [];
+  const eligibilityJobs: EligibilityJob[] = [];
 
   const pushItem = (item: NeedsYouItem) => {
     items.push(item);
@@ -844,7 +610,7 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
         ["unclear", "not_met", "partial", "needs_confirmation"].includes(String(row.state ?? "")),
     );
     if (appEligibility.length > 0) {
-      let gaps: EligibilityGap[] = appEligibility.slice(0, 6).map((row) => ({
+      const gaps: EligibilityGap[] = appEligibility.slice(0, 6).map((row) => ({
         id: String(row.id),
         requirementText: String(row.requirement_text ?? ""),
         requirementKind: String(row.requirement_kind ?? "general"),
@@ -876,216 +642,22 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
         continue;
       }
 
-      const memoryCheck = await verifyEligibilityFromMemory(supabase, actor, applicationId, gaps);
-      gaps = memoryCheck.remaining;
+      eligibilityJobs.push({
+        applicationId,
+        base,
+        gaps,
+        appQuestions,
+      });
+    }
+  }
 
-      if (gaps.length === 0) {
-        continue;
-      }
-
-      const candidates: EligibilityCandidate[] = [...defaultProfileCandidates()];
-      const seenCandidate = new Set(candidates.map((c) => c.id));
-
-      for (const mapping of (fieldMappings ?? []).filter((row) => String(row.application_id) === applicationId)) {
-        const label = String(mapping.label || mapping.field_key || "").trim();
-        if (!label || isMachineFieldToken(label)) continue;
-        const id = `mapping:${mapping.id}`;
-        if (seenCandidate.has(id)) continue;
-        seenCandidate.add(id);
-        candidates.push({
-          id,
-          kind: "mapping",
-          label,
-          currentValue: String(mapping.value ?? "").trim() || null,
-          mappingId: String(mapping.id),
-          profileField: detectProfileMemoryField(label),
-        });
-      }
-
-      for (const question of appQuestions) {
-        const prompt = String(question.prompt ?? "").trim();
-        if (!prompt || isStructuredFormFieldPrompt(prompt)) continue;
-        const id = `question:${question.id}`;
-        if (seenCandidate.has(id)) continue;
-        seenCandidate.add(id);
-        const answer = latestAnswerByQuestion.get(`${applicationId}:${question.id}`);
-        candidates.push({
-          id,
-          kind: "question",
-          label: prompt,
-          currentValue: String(answer?.approved_text || answer?.user_edited_text || "").trim() || null,
-          questionId: String(question.id),
-          answerId: answer ? String(answer.id) : null,
-        });
-      }
-
-      const { targets, unresolvedGaps } = await resolveEligibilityActionTargets({ gaps, candidates });
-      const targetedGapIds = new Set(targets.map((target) => target.gapId));
-      if (targetedGapIds.size > 0) {
-        await supabase
-          .from("eligibility_results")
-          .update({ ack_only: false })
-          .eq("user_id", user.id)
-          .in("id", [...targetedGapIds]);
-      }
-      if (unresolvedGaps.length > 0) {
-        await supabase
-          .from("eligibility_results")
-          .update({ ack_only: true })
-          .eq("user_id", user.id)
-          .in(
-            "id",
-            unresolvedGaps.map((gap) => gap.id),
-          );
-      }
-      const seenTarget = new Set<string>();
-      const mappingById = new Map(
-        (fieldMappings ?? [])
-          .filter((row) => String(row.application_id) === applicationId)
-          .map((row) => [String(row.id), row] as const),
-      );
-
-      for (const target of targets) {
-        const dedupeKey = `${target.gapId}:${target.id}`;
-        if (seenTarget.has(dedupeKey)) continue;
-        seenTarget.add(dedupeKey);
-        const gap = gaps.find((g) => g.id === target.gapId);
-        const issue =
-          gap?.explanation ||
-          target.reason ||
-          "Eligibility needs confirmation before this application can continue.";
-        const requirement = gap?.requirementText || null;
-        const linkedMapping = target.mappingId ? mappingById.get(target.mappingId) : undefined;
-        const linkedFieldType = linkedMapping
-          ? normalizeNeedsYouFieldType(
-              typeof linkedMapping.field_type === "string" ? linkedMapping.field_type : null,
-            )
-          : null;
-        const resumeOrFileTarget =
-          linkedFieldType === "file" ||
-          classifyRequiredDocumentLabel(target.label) === "resume" ||
-          /\b(upload|attach).{0,40}\b(resume|cv)\b|\b(resume|cv)\b.{0,20}\b(upload|attach)\b/i.test(
-            target.label,
-          );
-
-        if (resumeOrFileTarget) {
-          const recommended =
-            recommendedResumeByApp.get(applicationId) ??
-            (vaultResumes[0]
-              ? {
-                  documentId: vaultResumes[0].id,
-                  label: vaultResumes[0].label,
-                  score: null as number | null,
-                  suggestion: null as string | null,
-                  weakFit: false,
-                }
-              : null);
-          pushItem({
-            ...base,
-            id: `eligibility:${applicationId}:${target.gapId}:${target.id}`,
-            kind: "eligibility",
-            title: target.label,
-            detail: target.reason,
-            inputLabel: "Attach a resume from Application Memory",
-            inputType: "document",
-            required: true,
-            payload: {
-              eligibilityId: target.gapId,
-              mappingId: target.mappingId,
-              questionId: target.questionId,
-              answerId: target.answerId,
-              profileField: target.profileField ?? detectProfileMemoryField(target.label),
-              requiredLabel: target.label,
-              uploadKind: "document",
-              documentStatus: vaultResumes.length === 0 ? "unavailable" : recommended?.weakFit ? "not_best_fit" : "attach",
-              recommendedDocumentId: recommended?.documentId ?? null,
-              recommendedDocumentLabel: recommended?.label ?? null,
-              fitScore: typeof recommended?.score === "number" ? recommended.score : null,
-              fitSuggestion: recommended?.suggestion ?? null,
-              eligibilityIssue: issue,
-              eligibilityRequirement: requirement,
-              allowDeleteApplication: true,
-              currentValue: target.currentValue ?? null,
-            },
-          });
-          continue;
-        }
-
-        const choiceOptions = resolveNeedsYouChoiceOptions({
-          label: target.label,
-          fieldType: linkedFieldType,
-          mappingOptions: linkedMapping?.options,
-        });
-        const hostInputType = inputTypeFromHostFieldType(
-          linkedFieldType,
-          target.label,
-          choiceOptions.length,
-        );
-        const inputType: NeedsYouInputType =
-          hostInputType === "multi-select" && choiceOptions.length > 0
-            ? "multi-select"
-            : hostInputType === "select" && choiceOptions.length > 0
-              ? "select"
-              : hostInputType && hostInputType !== "select" && hostInputType !== "multi-select"
-                ? hostInputType
-                : choiceOptions.length > 1
-                  ? "multi-select"
-                  : choiceOptions.length > 0
-                    ? "select"
-                    : needsYouInputType(target.label, "eligibility");
-
-        pushItem({
-          ...base,
-          id: `eligibility:${applicationId}:${target.gapId}:${target.id}`,
-          kind: "eligibility",
-          title: target.label,
-          detail: target.reason,
-          inputLabel:
-            inputType === "multi-select"
-              ? "Choose all that apply"
-              : inputType === "select"
-                ? "Choose an option"
-                : "Updated answer",
-          inputType,
-          required: true,
-          options:
-            inputType === "select" || inputType === "multi-select" ? choiceOptions : undefined,
-          payload: {
-            eligibilityId: target.gapId,
-            mappingId: target.mappingId,
-            questionId: target.questionId,
-            answerId: target.answerId,
-            profileField: target.profileField ?? detectProfileMemoryField(target.label),
-            requiredLabel: target.label,
-            eligibilityIssue: issue,
-            eligibilityRequirement: requirement,
-            allowDeleteApplication: true,
-            currentValue: target.currentValue ?? null,
-          },
-        });
-      }
-
-      for (const gap of unresolvedGaps) {
-        const needsAck = gap.state !== "not_met";
-        pushItem({
-          ...base,
-          id: `eligibility:${applicationId}:${gap.id}:unresolved`,
-          kind: "eligibility",
-          title: gap.requirementText || "Eligibility requirement",
-          detail: needsAck
-            ? "This requirement may block the application. Confirm you are eligible, or remove the application if you are not."
-            : "Application Memory does not support this requirement. Remove the application if you are not eligible.",
-          inputLabel: needsAck ? "Confirm eligibility" : "Eligibility",
-          inputType: "text",
-          required: true,
-          payload: {
-            eligibilityId: gap.id,
-            eligibilityIssue: gap.explanation,
-            eligibilityRequirement: gap.requirementText,
-            allowDeleteApplication: true,
-            confirmEligible: needsAck,
-          },
-        });
+  if (eligibilityJobs.length > 0) {
+    const eligibilityBatches = await Promise.all(
+      eligibilityJobs.map((job) => buildEligibilityNeedsYouItems(ctx, job)),
+    );
+    for (const batch of eligibilityBatches) {
+      for (const item of batch) {
+        pushItem(item);
       }
     }
   }
@@ -1122,6 +694,7 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
     items: deduped,
     groups: groupNeedsYouItems(deduped, wallsByApp, sourceByApp),
     documents: mappedDocs,
+    openApplicationIds,
     counts: { total: deduped.length, byKind },
   };
 }
@@ -1141,14 +714,5 @@ export const loadNeedsYouFieldCounts = cache(async (): Promise<{
   totalFields: number;
   fieldCountByApplicationId: Record<string, number>;
 }> => {
-  const queue = await loadNeedsYouQueueCached("counts");
-  const fieldCountByApplicationId: Record<string, number> = {};
-  for (const group of queue.groups) {
-    fieldCountByApplicationId[group.applicationId] = group.fieldCount;
-  }
-  return {
-    applicationCount: queue.groups.length,
-    totalFields: queue.counts.total,
-    fieldCountByApplicationId,
-  };
+  return countsFromNeedsYouQueue(await loadNeedsYouQueueCached("counts"));
 });

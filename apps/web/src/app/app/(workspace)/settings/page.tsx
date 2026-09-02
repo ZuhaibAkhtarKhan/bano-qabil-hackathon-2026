@@ -81,9 +81,9 @@ export default async function SettingsPage({
         <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Prepare and send if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            On by default. When enabled, unfilled Need You text fields are auto-drafted from Application Memory
-            before the deadline, then the packet freezes unless you edit. 1-Apply never clicks host Submit, and never
-            bypasses CAPTCHA, signature, or payment.
+            On by default. When enabled, 1-Apply emails you about 2 hours before the deadline so you can review
+            answers, documents, and Need You items. If you do not edit, the packet freezes at the deadline.
+            1-Apply never clicks host Submit, and never bypasses CAPTCHA, signature, or payment.
           </p>
           <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
             <label className="flex items-start gap-3 text-sm">
@@ -93,7 +93,7 @@ export default async function SettingsPage({
                 defaultChecked={prefs.prepareAndSendIfSilent}
                 className="mt-1"
               />
-              <span>Freeze this packet at the deadline if I stay silent. Email/in-app notice goes out first.</span>
+              <span>Freeze this packet at the deadline if I stay silent. You get an email 2 hours before to review.</span>
             </label>
             <SubmitButton variant="secondary">
               Save send preference

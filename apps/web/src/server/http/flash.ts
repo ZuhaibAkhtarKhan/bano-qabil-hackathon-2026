@@ -62,6 +62,7 @@ export const ERRORS = {
   grounding: "The draft was rejected because it was not grounded in verified evidence.",
   snapshot: "Could not freeze a snapshot.",
   confirm_failed: "Could not confirm eligibility. Try again.",
+  deadline_past: "Choose a deadline in the future.",
 } as const;
 
 export type FlashCode = keyof typeof FLASH;

@@ -8,6 +8,8 @@ import {
   evaluateSubmissionGuard,
   generateReminder,
   prioritizeApplications,
+  shouldSendPreDeadlineReviewNotice,
+  buildPreDeadlineReviewNotice,
   type AutoSubmitPolicy,
   type ReminderInput,
   type SubmissionInput,
@@ -355,7 +357,7 @@ describe("auto-submit policy", () => {
     expect(decision.action).toBe("proceed");
   });
 
-  it("freezes a silence packet only at or after the deadline", () => {
+  it("freezes a silence packet only at or after the deadline once review notice was sent", () => {
     const beforeDeadline = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
       {
@@ -388,6 +390,43 @@ describe("auto-submit policy", () => {
     );
     expect(atDeadline.action).toBe("proceed");
     expect(atDeadline.reason).toMatch(/Do not click host Submit/);
+
+    const missingNotice = evaluateAutoSubmit(
+      SILENCE_AUTO_SUBMIT_POLICY,
+      {
+        ...makeReminderInput({
+          deadlineAt: new Date(Date.now() - 60 * 1000).toISOString(),
+          identityPresent: true,
+          packetNoticeSent: false,
+          allQuestionsHavePacketText: true,
+        }),
+        allAnswersApproved: false,
+        documentsAttached: true,
+        hasUnsupportedClaims: false,
+      },
+    );
+    expect(missingNotice.action).toBe("block");
+    expect(missingNotice.reason).toMatch(/Pre-deadline packet notice/);
+  });
+
+  it("schedules the 2-hour pre-deadline review email when silence-send is enabled", () => {
+    expect(
+      shouldSendPreDeadlineReviewNotice(1.5, true),
+    ).toBe(true);
+    expect(shouldSendPreDeadlineReviewNotice(3, true)).toBe(false);
+    expect(shouldSendPreDeadlineReviewNotice(1.5, false)).toBe(false);
+    expect(shouldSendPreDeadlineReviewNotice(-1, true)).toBe(false);
+
+    const notice = buildPreDeadlineReviewNotice({
+      applicationTitle: "SWE Intern",
+      organization: "Acme",
+      deadlineLabel: "Due today: Sep 2, 2026, 6:31 PM",
+      packetSummary: "2 answers · 1 document attached.",
+      reviewUrl: "https://app.example/app/applications/app-1#submission",
+    });
+    expect(notice.title).toMatch(/Review before auto-freeze/);
+    expect(notice.body).toMatch(/2 hours remain/);
+    expect(notice.emailHtml).toMatch(/Review application/);
   });
 
   it("never bypasses CAPTCHA/signature/payment even when enabled", () => {

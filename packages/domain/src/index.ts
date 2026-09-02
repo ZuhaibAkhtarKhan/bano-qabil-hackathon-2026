@@ -106,6 +106,9 @@ export {
   computeDeadlineInfo,
   DEFAULT_AUTO_SUBMIT_POLICY,
   SILENCE_AUTO_SUBMIT_POLICY,
+  PRE_DEADLINE_REVIEW_NOTICE_HOURS,
+  shouldSendPreDeadlineReviewNotice,
+  buildPreDeadlineReviewNotice,
   evaluateAutoSubmit,
   generateReminder,
   prioritizeApplications,
@@ -117,6 +120,16 @@ export {
   type Reminder,
   type ReminderInput,
 } from "./deadline-intelligence";
+
+export {
+  formatDeadlineLocalInput,
+  getZonedDateTimeParts,
+  parseDeadlineLocalInput,
+  isDeadlineInPast,
+  minDeadlineLocalInput,
+  isDeadlineDateInPast,
+  minDeadlineDateInput,
+} from "./deadline-timezone";
 
 export {
   currentGuideStep,

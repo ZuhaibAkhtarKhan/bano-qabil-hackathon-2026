@@ -6,6 +6,8 @@ import { applicationStatusSchema } from "@1apply/contracts";
 import {
   classifyRequirementKind,
   evaluateSubmissionGuard,
+  isDeadlineInPast,
+  parseDeadlineLocalInput,
   parsePersona,
   type SubmissionInput,
 } from "@1apply/domain";
@@ -160,12 +162,8 @@ export async function addQuestion(formData: FormData) {
   redirectWith(applicationPath(applicationId), { notice: "saved" }, "answers");
 }
 
-function parseDeadlineInput(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Date.parse(trimmed);
-  if (Number.isNaN(parsed)) return null;
-  return new Date(parsed).toISOString();
+function parseDeadlineInput(value: string, timezone: string | null = null): string | null {
+  return parseDeadlineLocalInput(value, timezone);
 }
 
 export async function updateApplicationPersona(formData: FormData) {
@@ -194,8 +192,11 @@ export async function updateApplicationPersona(formData: FormData) {
 export async function updateApplicationSchedule(formData: FormData) {
   const { user, supabase } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
-  const deadlineAt = parseDeadlineInput(String(formData.get("deadline") ?? ""));
   const timezone = String(formData.get("timezone") ?? "").trim() || null;
+  const deadlineAt = parseDeadlineInput(String(formData.get("deadline") ?? ""), timezone);
+  if (deadlineAt && isDeadlineInPast(deadlineAt)) {
+    redirectWith(applicationPath(applicationId), { error: "deadline_past" }, "opportunity");
+  }
   const { data: application } = await supabase
     .from("applications")
     .select("id")

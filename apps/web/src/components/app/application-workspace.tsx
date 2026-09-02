@@ -2,6 +2,8 @@ import {
   computeDeadlineInfo,
   evaluateSubmissionGuard,
   assessOperatingLoop,
+  formatDeadlineLocalInput,
+  minDeadlineLocalInput,
   PERSONA_PRESETS,
   requiredDocumentCovered,
   type SubmissionInput,
@@ -59,13 +61,6 @@ function fmtDateTime(value: string) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-function toDatetimeLocal(value: string | null | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
 
 function coerceAnswer(answer: CurrentAnswer, applicationId: string) {
   return {
@@ -83,6 +78,39 @@ function coerceAnswer(answer: CurrentAnswer, applicationId: string) {
     warnings: (answer.warnings as string[]) ?? [],
     groundingScore: Number(answer.grounding_score ?? 0),
     generationCount: Number(answer.generation_count ?? 0),
+  };
+}
+
+function buildSubmissionGuardInput(data: Workspace): SubmissionInput {
+  const { application, questions, eligibility, fit, attached, snapshots, reviewItems, resumeMatches } = data;
+  const approved = questions.filter(
+    (q) => q.answer && (String(q.answer.state) === "approved" || Boolean(q.answer.approved_text)),
+  );
+  const recommended = resumeMatches.find((r) => (r as { recommended?: boolean }).recommended);
+
+  return {
+    applicationId: application.id,
+    status: application.status,
+    questions: questions.map((q) => ({ id: q.id, prompt: q.prompt })),
+    approvedAnswerIds: new Map(approved.map((q) => [q.id, String(q.answer?.id ?? "")])),
+    attachedDocumentIds: attached.map((a) => a.document_id as string),
+    resumeMatchRecommended: recommended ? (recommended.document_id as string) : null,
+    eligibilityResults: eligibility.map((e) => ({
+      state: e.state as string,
+      explanation: e.explanation as string,
+    })),
+    reviewItems: reviewItems.map((r) => ({
+      resolved: r.resolved as boolean,
+      prompt: r.prompt as string,
+    })),
+    snapshots: snapshots.map((s) => ({ id: s.id as string })),
+    fitScore: (fit?.score as number | null) ?? null,
+    fitMissing: (fit?.missing as string[]) ?? [],
+    hasSignatureField: false,
+    hasPaymentField: false,
+    hasCaptcha: false,
+    hasSecurityChallenge: false,
+    userAuthenticated: true,
   };
 }
 
@@ -128,6 +156,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
     recommendedResumeSelected: recommendedResumeAttached,
     fieldMappingsPending: mappingReviewCount,
   });
+  const submissionGuard = evaluateSubmissionGuard(buildSubmissionGuardInput(data));
   const submitted = normalizedStatus === "submitted" || snapshots.length > 0;
   const loop = assessOperatingLoop({
     hasOpportunity: Boolean(opportunity),
@@ -269,7 +298,11 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 id={`deadline-${application.id}`}
                 name="deadline"
                 type="datetime-local"
-                defaultValue={toDatetimeLocal(application.deadline_at)}
+                min={minDeadlineLocalInput(application.deadline_timezone ?? null)}
+                defaultValue={formatDeadlineLocalInput(
+                  application.deadline_at,
+                  application.deadline_timezone ?? null,
+                )}
               />
             </Field>
             <Field label="Timezone" htmlFor={`timezone-${application.id}`} hint="IANA name, for example Asia/Karachi">
@@ -490,12 +523,15 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           <p className="mt-2 text-sm text-ink-muted">
             Freeze an immutable snapshot of opportunity, selected versions, final answers, and referenced evidence. This does not submit to the host.
           </p>
-          <DeadlineDisplay deadlineAt={application.deadline_at} />
-          <SubmissionChecklist data={data} />
+          <DeadlineDisplay
+            deadlineAt={application.deadline_at}
+            deadlineTimezone={application.deadline_timezone ?? null}
+          />
+          <SubmissionChecklist data={data} guard={submissionGuard} />
         <div className="mt-6 flex flex-wrap gap-3">
           <form action={markSubmitted}>
             <input type="hidden" name="applicationId" value={application.id} />
-              <SubmitButton disabled={submitted || !completeness.readyForSubmission}>
+              <SubmitButton disabled={submitted || !submissionGuard.safe}>
                 {submitted ? "Snapshot already frozen" : "Freeze submission snapshot"}
             </SubmitButton>
           </form>
@@ -711,9 +747,15 @@ function ApplicationTimeline({
   );
 }
 
-function DeadlineDisplay({ deadlineAt }: { deadlineAt: string | null }) {
+function DeadlineDisplay({
+  deadlineAt,
+  deadlineTimezone,
+}: {
+  deadlineAt: string | null;
+  deadlineTimezone: string | null;
+}) {
   if (!deadlineAt) return null;
-  const info = computeDeadlineInfo(deadlineAt, null);
+  const info = computeDeadlineInfo(deadlineAt, deadlineTimezone);
   const tones: Record<string, string> = {
     overdue: "bg-coral-soft text-coral border-coral/20",
     imminent: "bg-coral-soft text-coral border-coral/20",
@@ -727,48 +769,23 @@ function DeadlineDisplay({ deadlineAt }: { deadlineAt: string | null }) {
       {info.hoursRemaining !== null && info.hoursRemaining > 0 ? (
         <p className="mt-1 text-xs">
           {info.hoursRemaining < 24
-            ? `${Math.round(info.hoursRemaining)} hours remaining`
+            ? `${Math.max(1, Math.round(info.hoursRemaining))} hour${Math.round(info.hoursRemaining) === 1 ? "" : "s"} remaining`
             : `${Math.round(info.hoursRemaining / 24)} days remaining`}
         </p>
+      ) : info.hoursRemaining !== null && info.hoursRemaining <= 0 ? (
+        <p className="mt-1 text-xs">Deadline has passed — freeze the snapshot now if you have not already.</p>
       ) : null}
     </div>
   );
 }
 
-function SubmissionChecklist({ data }: { data: Workspace }) {
-  const { application, questions, eligibility, fit, attached, snapshots, reviewItems, resumeMatches } = data;
-  const approved = questions.filter((q) => q.answer && (String(q.answer.state) === "approved" || Boolean(q.answer.approved_text)));
-  const recommended = resumeMatches.find((r) => (r as { recommended?: boolean }).recommended);
-
-  const guardInput: SubmissionInput = {
-    applicationId: application.id,
-    status: application.status,
-    questions: questions.map((q) => ({ id: q.id, prompt: q.prompt })),
-    approvedAnswerIds: new Map(
-      approved.map((q) => [q.id, String(q.answer?.id ?? "")]),
-    ),
-    attachedDocumentIds: attached.map((a) => a.document_id as string),
-    resumeMatchRecommended: recommended ? (recommended.document_id as string) : null,
-    eligibilityResults: eligibility.map((e) => ({
-      state: e.state as string,
-      explanation: e.explanation as string,
-    })),
-    reviewItems: reviewItems.map((r) => ({
-      resolved: r.resolved as boolean,
-      prompt: r.prompt as string,
-    })),
-    snapshots: snapshots.map((s) => ({ id: s.id as string })),
-    fitScore: (fit?.score as number | null) ?? null,
-    fitMissing: (fit?.missing as string[]) ?? [],
-    hasSignatureField: false,
-    hasPaymentField: false,
-    hasCaptcha: false,
-    hasSecurityChallenge: false,
-    userAuthenticated: true,
-  };
-
-  const guard = evaluateSubmissionGuard(guardInput);
-
+function SubmissionChecklist({
+  data,
+  guard,
+}: {
+  data: Workspace;
+  guard: ReturnType<typeof evaluateSubmissionGuard>;
+}) {
   return (
     <div className="mt-4 rounded-xl border border-line bg-white p-4">
       <h3 className="text-sm font-medium">

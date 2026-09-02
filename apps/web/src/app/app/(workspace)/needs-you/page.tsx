@@ -5,7 +5,6 @@ import { requireWorkspace } from "@/server/auth/require-workspace";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { ensureOpenApplicationsResumeSelection } from "@/server/intelligence/auto-resume";
 import { loadNeedsYouQueue } from "@/server/needs-you/queries";
-import { normalizeApplicationStatus } from "@/lib/application-workflow";
 
 export default async function NeedsYouPage({
   searchParams,
@@ -13,24 +12,13 @@ export default async function NeedsYouPage({
   searchParams: Promise<{ notice?: string; error?: string }>;
 }) {
   const { notice, error } = await searchParams;
-  const { supabase, actor, user } = await requireWorkspace();
+  const { supabase, actor } = await requireWorkspace();
 
   // Refresh kit-resolvable gaps in the background — do not block first paint.
   scheduleRefreshOpenApplicationsFromKit(supabase, actor);
 
-  const [{ data: applications }, data] = await Promise.all([
-    supabase.from("applications").select("id, status").eq("user_id", user.id),
-    loadNeedsYouQueue({ polish: false }),
-  ]);
-
-  const openIds = (applications ?? [])
-    .filter((row) =>
-      ["saved", "analyzing", "ready_to_apply", "in_progress", "review_required", "draft", "preparing", "ready"].includes(
-        normalizeApplicationStatus(row.status as Parameters<typeof normalizeApplicationStatus>[0]),
-      ),
-    )
-    .map((row) => String(row.id));
-  void ensureOpenApplicationsResumeSelection(supabase, actor, openIds).catch(() => null);
+  const data = await loadNeedsYouQueue({ polish: false });
+  void ensureOpenApplicationsResumeSelection(supabase, actor, data.openApplicationIds).catch(() => null);
 
   return (
     <WorkspaceMain>

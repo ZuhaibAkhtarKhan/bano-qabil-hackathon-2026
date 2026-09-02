@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { tryGetAiProvider } from "@/infra/ai/openai";
 import { logError } from "@/lib/log";
 import type { EligibilityGap } from "@/server/needs-you/resolve-eligibility-actions-ai";
+import { requireWorkspace } from "@/server/auth/require-workspace";
 
 const resultSchema = z.object({
   results: z.array(
@@ -87,6 +89,14 @@ async function buildMemorySummary(supabase: SupabaseClient, actor: Actor) {
   };
 }
 
+const loadApplicationMemorySummary = cache(async (userId: string) => {
+  const { supabase, actor } = await requireWorkspace();
+  if (actor.userId !== userId) {
+    throw new Error("Memory summary user mismatch");
+  }
+  return buildMemorySummary(supabase, actor);
+});
+
 /**
  * Ask the LLM whether Application Memory satisfies eligibility gaps the rules engine marked unclear.
  * Clears gaps that are supported by memory; leaves only unverifiable ones for Need You.
@@ -125,7 +135,7 @@ export async function verifyEligibilityFromMemory(
     return { cleared: 0, remaining: gaps };
   }
 
-  const memory = await buildMemorySummary(supabase, actor);
+  const memory = await loadApplicationMemorySummary(actor.userId);
   const checkedAt = new Date().toISOString();
   let cleared = 0;
 

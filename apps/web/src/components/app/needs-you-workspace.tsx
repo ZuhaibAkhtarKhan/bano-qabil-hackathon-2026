@@ -1,3 +1,4 @@
+import { minDeadlineLocalInput } from "@1apply/domain";
 import Link from "next/link";
 
 import { NeedsYouDeleteApplication } from "@/components/app/needs-you-delete-application";
@@ -21,7 +22,13 @@ function DeadlineForm({ item }: { item: NeedsYouItem }) {
     <form action={resolveNeedsYouDeadline} className="grid gap-3">
       <input type="hidden" name="applicationId" value={item.applicationId} />
       <Field label="Deadline" htmlFor={`${item.id}-deadline`} hint="Date and time the application closes">
-        <Input id={`${item.id}-deadline`} name="deadline" type="datetime-local" required />
+        <Input
+          id={`${item.id}-deadline`}
+          name="deadline"
+          type="datetime-local"
+          min={minDeadlineLocalInput(typeof item.payload.timezone === "string" ? item.payload.timezone : null)}
+          required
+        />
       </Field>
       <Field
         label="Timezone (optional)"

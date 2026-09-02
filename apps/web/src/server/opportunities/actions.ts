@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { opportunityCategorySchema } from "@1apply/contracts";
-import { normalizeOpportunityUrl } from "@1apply/domain";
+import { isDeadlineDateInPast, normalizeOpportunityUrl } from "@1apply/domain";
 
 import { UnsafeUrlError, parsePublicHttpUrl } from "@/lib/security/public-url";
 import { requireWorkspace } from "@/server/auth/require-workspace";
@@ -50,6 +50,11 @@ export async function createManualOpportunity(formData: FormData) {
     redirectWith("/app/opportunities", { error: "required" });
   }
 
+  const deadlineAt = parseDeadlineInput(String(formData.get("deadline") ?? ""));
+  if (deadlineAt && isDeadlineDateInPast(deadlineAt)) {
+    redirectWith("/app/opportunities", { error: "deadline_past" });
+  }
+
   const { opportunityId } = await createManualOpportunityRecord({
     supabase,
     actor,
@@ -58,7 +63,7 @@ export async function createManualOpportunity(formData: FormData) {
     organization: String(formData.get("organization") ?? "").trim() || null,
     category: categoryParsed.data,
     location: String(formData.get("location") ?? "").trim() || null,
-    deadlineAt: parseDeadlineInput(String(formData.get("deadline") ?? "")),
+    deadlineAt,
     notes: String(formData.get("notes") ?? "").trim() || null,
     requirements: splitLines(formData.get("requirements")),
     questions: splitLines(formData.get("questions")),

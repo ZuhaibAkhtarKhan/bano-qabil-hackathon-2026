@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { memoryFactKey } from "@1apply/domain";
+import { isDeadlineInPast, memoryFactKey, parseDeadlineLocalInput } from "@1apply/domain";
 
 import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
@@ -534,12 +534,8 @@ export async function resolveNeedsYouDocument(formData: FormData) {
   redirectWith(NEEDS_YOU, { notice: "continued" });
 }
 
-function parseNeedsYouDeadlineInput(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Date.parse(trimmed);
-  if (Number.isNaN(parsed)) return null;
-  return new Date(parsed).toISOString();
+function parseNeedsYouDeadlineInput(value: string, timezone: string | null = null): string | null {
+  return parseDeadlineLocalInput(value, timezone);
 }
 
 /** Applicant confirms they meet an eligibility requirement with no editable field. */
@@ -599,11 +595,15 @@ export async function confirmNeedsYouEligibility(formData: FormData) {
 export async function resolveNeedsYouDeadline(formData: FormData) {
   const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "").trim();
-  const deadlineAt = parseNeedsYouDeadlineInput(String(formData.get("deadline") ?? ""));
   const timezone = String(formData.get("timezone") ?? "").trim() || null;
+  const deadlineAt = parseNeedsYouDeadlineInput(String(formData.get("deadline") ?? ""), timezone);
 
   if (!applicationId || !deadlineAt) {
     redirectWith(NEEDS_YOU, { error: "required" });
+  }
+
+  if (isDeadlineInPast(deadlineAt)) {
+    redirectWith(NEEDS_YOU, { error: "deadline_past" });
   }
 
   const { data: application } = await supabase

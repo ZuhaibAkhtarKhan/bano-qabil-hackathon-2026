@@ -1,4 +1,5 @@
 import { opportunityCategorySchema } from "@1apply/contracts";
+import { minDeadlineDateInput } from "@1apply/domain";
 
 import { DiscoveryPanel } from "@/components/app/discovery-panel";
 import { FlashBanner } from "@/components/app/flash-banner";
@@ -88,7 +89,7 @@ export default async function OpportunitiesPage({
               <Input id="opportunity-location" name="location" placeholder="Remote · Karachi · etc." />
             </Field>
             <Field label="Deadline" htmlFor="opportunity-deadline">
-              <Input id="opportunity-deadline" name="deadline" type="date" />
+              <Input id="opportunity-deadline" name="deadline" type="date" min={minDeadlineDateInput()} />
             </Field>
             <div className="lg:col-span-2">
               <Field label="Requirements (one per line)" htmlFor="opportunity-requirements">

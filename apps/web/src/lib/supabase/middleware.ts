@@ -44,8 +44,14 @@ async function landingPath(
 }
 
 export async function updateSession(request: NextRequest) {
-  const response = NextResponse.next({ request });
   const path = request.nextUrl.pathname;
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", path);
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
   const isApp = path.startsWith("/app");
   const isWorkspace = isApp && !path.startsWith("/app/onboarding");
   const isOnboarding = path.startsWith("/app/onboarding");

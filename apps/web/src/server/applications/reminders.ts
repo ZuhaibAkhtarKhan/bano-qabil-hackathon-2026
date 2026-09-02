@@ -11,12 +11,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { freezeApplicationPacket } from "@/server/applications/freeze-packet";
+import {
+  hasPreDeadlineReviewNotice,
+  sendPreDeadlineReviewNoticeIfDue,
+} from "@/server/applications/pre-deadline-review-email";
 import { autoFillNeedsYouTextForNearDeadlineApplications } from "@/server/needs-you/auto-fill-deadline";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 const TWENTY_HOURS = 20 * 60 * 60 * 1000;
+const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Actor) {
   const prefs = parseWorkspacePreferences(actor.profile.preferences);
@@ -182,6 +187,22 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
 
     const deadlineUrgent = ["imminent", "soon", "overdue"].includes(deadline.urgency);
 
+    let preDeadlineReviewSent = await hasPreDeadlineReviewNotice(supabase, application.id as string);
+    if (!preDeadlineReviewSent && prefs.prepareAndSendIfSilent) {
+      preDeadlineReviewSent = await sendPreDeadlineReviewNoticeIfDue({
+        supabase,
+        actor,
+        applicationId: application.id as string,
+        opportunityId: (application.opportunity_id as string | null) ?? null,
+        applicationTitle: (opportunity as { title?: string } | null)?.title ?? "Application",
+        organization: (opportunity as { organization?: string | null } | null)?.organization ?? null,
+        deadline,
+        packetSummary: summary,
+        prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
+        appBaseUrl: APP_BASE_URL,
+      });
+    }
+
     if (!prefs.prepareAndSendIfSilent) continue;
 
     const [
@@ -240,7 +261,7 @@ export async function syncDeadlineReminders(supabase: SupabaseClient, actor: Act
         contacts: [],
         followUps: [],
         identityPresent,
-        packetNoticeSent: Boolean(application.last_reminder_at) || dueForNotice,
+        packetNoticeSent: preDeadlineReviewSent,
         allQuestionsHavePacketText:
           (questions ?? []).length === 0 || packetCountForSubmit === (questions ?? []).length,
         allAnswersApproved:

@@ -253,6 +253,38 @@ export const DEFAULT_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   auditTrail: true,
 };
 
+export const PRE_DEADLINE_REVIEW_NOTICE_HOURS = 2;
+
+/** True when silence-send is on and the deadline is within the final review window (default 2h). */
+export function shouldSendPreDeadlineReviewNotice(
+  hoursRemaining: number | null,
+  prepareAndSendIfSilent: boolean,
+): boolean {
+  if (!prepareAndSendIfSilent) return false;
+  if (hoursRemaining === null) return false;
+  return hoursRemaining > 0 && hoursRemaining <= PRE_DEADLINE_REVIEW_NOTICE_HOURS;
+}
+
+export function buildPreDeadlineReviewNotice(input: {
+  applicationTitle: string;
+  organization: string | null;
+  deadlineLabel: string;
+  packetSummary?: string;
+  reviewUrl: string;
+}): { title: string; body: string; emailSubject: string; emailHtml: string } {
+  const org = input.organization ? ` at ${input.organization}` : "";
+  const summary = input.packetSummary ? ` ${input.packetSummary}` : "";
+  const title = `Review before auto-freeze — ${input.applicationTitle}${org}`;
+  const body = `About ${PRE_DEADLINE_REVIEW_NOTICE_HOURS} hours remain before the deadline (${input.deadlineLabel}). Unless you edit, 1-Apply will freeze this packet at the deadline.${summary} Open the application to change answers, documents, or Need You items. 1-Apply will not click host Submit or bypass CAPTCHA.`;
+  const emailSubject = title;
+  const emailHtml = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111">
+<p>${body.replace(/\n/g, "<br>")}</p>
+<p><a href="${input.reviewUrl}" style="display:inline-block;padding:10px 16px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px">Review application</a></p>
+<p style="color:#666;font-size:13px">You can also open Need You from your dashboard to fix anything still waiting on you.</p>
+</body></html>`;
+  return { title, body, emailSubject, emailHtml };
+}
+
 export const SILENCE_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   ...DEFAULT_AUTO_SUBMIT_POLICY,
   enabled: true,
