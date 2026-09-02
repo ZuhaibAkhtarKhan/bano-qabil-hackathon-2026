@@ -367,12 +367,25 @@ export function clickFormControl(kind: "next" | "submit"): { clicked: boolean; r
     document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], span[role="link"]'),
   ) as HTMLElement[];
   const matches = buttons.filter((btn) => classifyButton(btn) === kind && visible(btn));
-  const preferred =
+  let preferred =
     matches.find((btn) =>
       kind === "next"
         ? /\b(next|continue)\b/i.test(controlSignal(btn))
         : /\bsubmit\b/i.test(controlSignal(btn)),
     ) ?? matches[matches.length - 1];
+
+  if (!preferred && kind === "submit") {
+    const googleSubmit = document.querySelector(
+      '.freebirdFormviewerViewNavigationSubmitButton, [jsname="M2UYVd"], [data-action-id="submit"]',
+    ) as HTMLElement | null;
+    if (googleSubmit && visible(googleSubmit)) preferred = googleSubmit;
+  }
+
+  if (!preferred && kind === "next") {
+    const googleNext = document.querySelector('[jsname="OCpkoe"], .freebirdFormviewerViewNavigationNextButton') as HTMLElement | null;
+    if (googleNext && visible(googleNext)) preferred = googleNext;
+  }
+
   if (!preferred) return { clicked: false, reason: kind === "next" ? "no-next" : "no-submit" };
   preferred.scrollIntoView({ block: "center" });
   preferred.click();

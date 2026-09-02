@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { after } from "next/server";
 
 import type { Actor } from "@/auth/actor";
 import { logError } from "@/lib/log";
@@ -73,9 +72,8 @@ export async function syncHostAutomationForApplication(input: {
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
   });
 
-  after(() => {
-    void kickHostSubmitWorkerIfEnabled();
-  });
+  // Run worker immediately when jobs are due — do not rely on after() alone.
+  await kickHostSubmitWorkerIfEnabled();
 }
 
 /** After Need You edits, queue host submit when every field is filled and no deadline is set. */
@@ -89,8 +87,6 @@ export async function tryNoDeadlineHostSubmitIfComplete(input: {
 
   const result = await scheduleHostSubmitWhenFullyComplete(input);
   if (result.ok) {
-    after(() => {
-      void kickHostSubmitWorkerIfEnabled();
-    });
+    await kickHostSubmitWorkerIfEnabled();
   }
 }

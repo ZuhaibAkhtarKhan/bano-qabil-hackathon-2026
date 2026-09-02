@@ -3,11 +3,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import type { ProfileRow } from "@/lib/profile";
-import { logError } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 
 import {
   completeHostPrefillJob,
   completeHostSubmitJob,
+  recoverStaleRunningHostJobs,
   type HostSubmitJobKind,
   type HostSubmitJobRow,
 } from "./host-submit";
@@ -18,7 +19,8 @@ import {
 } from "./playwright-host-submit";
 
 const MAX_ATTEMPTS = 5;
-const MAX_JOBS_PER_RUN = 3;
+const MAX_JOBS_PER_RUN = 6;
+const SUBMIT_JOB_RESERVE = 4;
 
 function mapProfile(row: Record<string, unknown>): ProfileRow {
   const step = onboardingStepSchema.safeParse(row.onboarding_step);
@@ -58,16 +60,33 @@ export async function listClaimableHostJobs(
   supabase: SupabaseClient,
   limit = MAX_JOBS_PER_RUN,
 ): Promise<Array<HostSubmitJobRow & { user_id: string }>> {
-  const { data } = await supabase
-    .from("host_submit_jobs")
-    .select("id, user_id, application_id, source_url, due_at, status, attempt_count, job_kind")
-    .eq("status", "pending")
-    .lte("due_at", new Date().toISOString())
-    .lt("attempt_count", MAX_ATTEMPTS)
-    .order("due_at", { ascending: true })
-    .limit(limit);
+  await recoverStaleRunningHostJobs(supabase);
 
-  return (data ?? []).map((row) => ({
+  const nowIso = new Date().toISOString();
+  const baseQuery = () =>
+    supabase
+      .from("host_submit_jobs")
+      .select("id, user_id, application_id, source_url, due_at, status, attempt_count, job_kind")
+      .eq("status", "pending")
+      .lte("due_at", nowIso)
+      .lt("attempt_count", MAX_ATTEMPTS);
+
+  const submitLimit = Math.min(SUBMIT_JOB_RESERVE, limit);
+  const { data: submitRows } = await baseQuery()
+    .eq("job_kind", "submit")
+    .order("due_at", { ascending: true })
+    .limit(submitLimit);
+
+  const remaining = limit - (submitRows?.length ?? 0);
+  const { data: prefillRows } =
+    remaining > 0
+      ? await baseQuery()
+          .eq("job_kind", "prefill")
+          .order("due_at", { ascending: true })
+          .limit(remaining)
+      : { data: [] };
+
+  return [...(submitRows ?? []), ...(prefillRows ?? [])].map((row) => ({
     id: String(row.id),
     user_id: String(row.user_id),
     application_id: String(row.application_id),
@@ -110,7 +129,14 @@ async function requeueOrFail(input: {
   error: string;
   onFinalFail: () => Promise<void>;
 }) {
-  if (input.job.attempt_count + 1 >= MAX_ATTEMPTS) {
+  const { data: current } = await input.supabase
+    .from("host_submit_jobs")
+    .select("attempt_count")
+    .eq("id", input.jobId)
+    .maybeSingle();
+
+  const attempts = Number(current?.attempt_count ?? input.job.attempt_count + 1);
+  if (attempts >= MAX_ATTEMPTS) {
     await input.onFinalFail();
     return;
   }
@@ -133,6 +159,12 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
   }
 
   const jobs = await listClaimableHostJobs(supabase);
+  if (jobs.length > 0) {
+    logInfo("host_submit.worker_claiming", {
+      count: jobs.length,
+      kinds: jobs.map((job) => job.job_kind),
+    });
+  }
   let processed = 0;
   let prefilled = 0;
   let submitted = 0;

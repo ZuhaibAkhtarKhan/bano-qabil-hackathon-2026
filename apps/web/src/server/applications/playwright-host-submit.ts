@@ -83,6 +83,7 @@ async function runPlaywrightHostSession(input: {
 
     let totalFilled = 0;
     let hostSubmitClicked = false;
+    let lastNavigationReason = "no-navigation";
 
     for (let step = 0; step < MAX_STEPS; step += 1) {
       const capture = (await page.evaluate(captureFormPage)) as CapturedFormPage;
@@ -158,13 +159,19 @@ async function runPlaywrightHostSession(input: {
       }
 
       const advance = (await page.evaluate(clickNextControl)) as { clicked: boolean; reason?: string };
+      lastNavigationReason = advance.reason ?? (advance.clicked ? "next-clicked" : "no-next");
       if (advance.clicked) {
+        const previousUrl = page.url();
         await waitForPageReady(page);
+        if (page.url() === previousUrl) {
+          await page.waitForTimeout(800);
+        }
         continue;
       }
 
       if (input.clickFinalSubmit) {
         const submit = (await page.evaluate(clickSubmitControl)) as { clicked: boolean; reason?: string };
+        lastNavigationReason = submit.reason ?? (submit.clicked ? "submit-clicked" : "no-submit");
         if (submit.clicked) {
           hostSubmitClicked = true;
           await page.waitForTimeout(STEP_WAIT_MS);
@@ -210,7 +217,7 @@ async function runPlaywrightHostSession(input: {
     return {
       ok: false,
       error: input.clickFinalSubmit
-        ? "Could not reach Submit — some fields may still need answers in Need You."
+        ? `Could not reach Submit — some fields may still need answers in Need You. (${lastNavigationReason})`
         : "Could not prefill this form.",
     };
   } catch (err) {

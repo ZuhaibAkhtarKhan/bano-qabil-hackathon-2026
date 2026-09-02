@@ -2,7 +2,7 @@ import { computeHostSubmitDueAt } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
-import { logError } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/admin";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
@@ -105,13 +105,21 @@ async function upsertHostJob(input: {
         source_url: sourceUrl,
         status: "pending",
         job_kind: jobKind,
+        attempt_count: 0,
         last_error: null,
+        completed_at: null,
       })
       .eq("id", existing.id);
     if (updateError) {
       logError("host_submit.reschedule_failed", { updateError, applicationId, idempotencyKey });
       return { ok: false, reason: updateError.message };
     }
+    logInfo("host_submit.job_rescheduled", {
+      applicationId,
+      jobKind,
+      jobId: String(existing.id),
+      dueAt: dueAt.toISOString(),
+    });
     return { ok: true, jobId: String(existing.id) };
   }
 
@@ -149,7 +157,109 @@ async function upsertHostJob(input: {
     body: eventBody,
   });
 
+  logInfo("host_submit.job_queued", {
+    applicationId,
+    jobKind,
+    jobId: String(job.id),
+    dueAt: dueAt.toISOString(),
+  });
+
   return { ok: true, jobId: String(job.id) };
+}
+
+const STALE_RUNNING_MS = 12 * 60 * 1000;
+
+/** Reclaim jobs left in `running` after a worker crash or Playwright hang. */
+export async function recoverStaleRunningHostJobs(supabase: SupabaseClient): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_RUNNING_MS).toISOString();
+  const { data, error } = await supabase
+    .from("host_submit_jobs")
+    .update({
+      status: "pending",
+      last_error: "recovered_from_stale_running",
+    })
+    .eq("status", "running")
+    .lt("updated_at", cutoff)
+    .select("id");
+
+  if (error) {
+    logError("host_submit.recover_stale_failed", { error });
+    return 0;
+  }
+  const count = data?.length ?? 0;
+  if (count > 0) {
+    logInfo("host_submit.recovered_stale_running", { count });
+  }
+  return count;
+}
+
+/**
+ * On cron sweeps, re-queue submit jobs for open applications whose submit window
+ * has started but whose job is missing, failed, or exhausted retries.
+ */
+export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): Promise<number> {
+  const { loadActorForUser } = await import("./host-submit-worker");
+  const now = new Date();
+  const { data: applications, error } = await supabase
+    .from("applications")
+    .select("id, user_id, status, deadline_at, opportunities ( canonical_url, source_url )")
+    .not("deadline_at", "is", null)
+    .in("status", ["saved", "analyzing", "ready_to_apply", "in_progress", "review_required", "draft", "preparing", "ready"])
+    .lte("deadline_at", new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString())
+    .limit(80);
+
+  if (error) {
+    logError("host_submit.reconcile_load_failed", { error });
+    return 0;
+  }
+
+  let requeued = 0;
+  for (const application of applications ?? []) {
+    const deadlineAt = String(application.deadline_at);
+    const dueAt = computeHostSubmitDueAt(deadlineAt, now);
+    if (dueAt.getTime() > now.getTime()) continue;
+
+    const opportunity = Array.isArray(application.opportunities)
+      ? application.opportunities[0]
+      : application.opportunities;
+    const sourceUrl =
+      publicFormUrl((opportunity as { canonical_url?: string | null } | null)?.canonical_url) ??
+      publicFormUrl((opportunity as { source_url?: string | null } | null)?.source_url);
+    if (!sourceUrl) continue;
+
+    const idempotencyKey = `${application.id}:host_submit:${deadlineAt}`;
+    const { data: job } = await supabase
+      .from("host_submit_jobs")
+      .select("id, status, attempt_count, job_kind")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+
+    if (job?.status === "submitted") continue;
+    if (job?.status === "pending" || job?.status === "running") continue;
+    if (job?.status === "blocked" || job?.status === "cancelled") continue;
+
+    const actor = await loadActorForUser(supabase, String(application.user_id));
+    if (!actor) continue;
+
+    const result = await upsertHostJob({
+      supabase,
+      actor,
+      applicationId: String(application.id),
+      sourceUrl,
+      jobKind: "submit",
+      dueAt: now,
+      idempotencyKey,
+      nextAction: "Auto-submit re-queued — retrying host form submission.",
+      eventTitle: "Auto-submit re-queued",
+      eventBody: "The server will fill and submit this form again before the deadline passes.",
+    });
+    if (result.ok) requeued += 1;
+  }
+
+  if (requeued > 0) {
+    logInfo("host_submit.reconciled_overdue", { requeued });
+  }
+  return requeued;
 }
 
 /** Immediate server visit: inventory + fill all pages (no final Submit). */
