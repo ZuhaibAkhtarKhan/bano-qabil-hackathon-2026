@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 
+import { useNeedsYouSave } from "@/components/app/needs-you-save-hook";
 import { type NeedsYouItem } from "@/lib/needs-you";
 import { parseNeedsYouMultiValues } from "@/lib/needs-you-field-kinds";
 import { generateNeedsYouDraftAction, resolveNeedsYouValue } from "@/server/needs-you/actions";
@@ -35,15 +36,21 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
   const initialMulti = parseNeedsYouMultiValues(item.payload.currentValue);
   const [value, setValue] = useState(item.payload.currentValue?.trim() || "");
   const [selected, setSelected] = useState<string[]>(initialMulti);
+  const [selectValue, setSelectValue] = useState(
+    item.payload.currentValue && (item.options ?? []).includes(item.payload.currentValue)
+      ? item.payload.currentValue
+      : "",
+  );
   const [tone, setTone] = useState<"formal" | "enthusiastic" | "concise" | "detailed">("formal");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [isGenerating, startGenerate] = useTransition();
+  const { isPending, feedbackNotice, submit } = useNeedsYouSave({ itemId: item.id });
   const canGenerate = supportsNeedsYouAiDraft(item);
   const options = item.options ?? [];
 
   function toggleOption(option: string) {
     setSelected((current) =>
-      current.includes(option) ? current.filter((item) => item !== option) : [...current, option],
+      current.includes(option) ? current.filter((entry) => entry !== option) : [...current, option],
     );
   }
 
@@ -72,6 +79,34 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
     });
   }
 
+  function buildFormData(scope: "memory" | "application") {
+    const fd = new FormData();
+    fd.set("applicationId", item.applicationId);
+    fd.set("label", item.title);
+    fd.set("detail", item.detail ?? "");
+    fd.set("inputType", item.inputType);
+    fd.set("scope", scope);
+    if (item.payload.profileField) fd.set("profileField", item.payload.profileField);
+    if (item.payload.reviewItemId) fd.set("reviewItemId", item.payload.reviewItemId);
+    if (item.payload.questionId) fd.set("questionId", item.payload.questionId);
+    if (item.payload.answerId) fd.set("answerId", item.payload.answerId);
+    if (item.payload.mappingId) fd.set("mappingId", item.payload.mappingId);
+    if (item.payload.eligibilityId) fd.set("eligibilityId", item.payload.eligibilityId);
+
+    if (item.inputType === "multi-select") {
+      for (const option of selected) fd.append("value", option);
+    } else if (item.inputType === "select") {
+      fd.set("value", selectValue);
+    } else {
+      fd.set("value", value);
+    }
+    return fd;
+  }
+
+  function save(scope: "memory" | "application") {
+    submit(() => buildFormData(scope), resolveNeedsYouValue);
+  }
+
   return (
     <div className="grid gap-3">
       {canGenerate ? (
@@ -84,14 +119,14 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
             className="rounded-md border border-line bg-white px-2 py-1.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-ink/15"
             value={tone}
             onChange={(event) => setTone(event.target.value as typeof tone)}
-            disabled={isGenerating}
+            disabled={isGenerating || isPending}
           >
             <option value="formal">Formal</option>
             <option value="enthusiastic">Enthusiastic</option>
             <option value="concise">Concise</option>
             <option value="detailed">Detailed</option>
           </select>
-          <Button type="button" size="sm" variant="secondary" disabled={isGenerating} onClick={runGenerate}>
+          <Button type="button" size="sm" variant="secondary" disabled={isGenerating || isPending} onClick={runGenerate}>
             {isGenerating ? "Generating…" : "Generate by AI"}
           </Button>
           <p className="text-[11px] text-ink-muted">Uses Application Memory only — review before saving.</p>
@@ -105,38 +140,18 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
       ) : null}
 
       {generateError ? <p className="text-xs text-coral">{generateError}</p> : null}
+      {feedbackNotice}
 
-      <form action={resolveNeedsYouValue} className="grid gap-3">
-        <input type="hidden" name="applicationId" value={item.applicationId} />
-        <input type="hidden" name="label" value={item.title} />
-        <input type="hidden" name="detail" value={item.detail ?? ""} />
-        <input type="hidden" name="inputType" value={item.inputType} />
-        {item.payload.profileField ? (
-          <input type="hidden" name="profileField" value={item.payload.profileField} />
-        ) : null}
-        {item.payload.reviewItemId ? (
-          <input type="hidden" name="reviewItemId" value={item.payload.reviewItemId} />
-        ) : null}
-        {item.payload.questionId ? (
-          <input type="hidden" name="questionId" value={item.payload.questionId} />
-        ) : null}
-        {item.payload.answerId ? <input type="hidden" name="answerId" value={item.payload.answerId} /> : null}
-        {item.payload.mappingId ? (
-          <input type="hidden" name="mappingId" value={item.payload.mappingId} />
-        ) : null}
-        {item.payload.eligibilityId ? (
-          <input type="hidden" name="eligibilityId" value={item.payload.eligibilityId} />
-        ) : null}
-
+      <div className="grid gap-3">
         <Field label={item.inputLabel || "Your answer"} htmlFor={inputId}>
           {item.inputType === "textarea" ? (
             <Textarea
               id={inputId}
-              name="value"
               required
               rows={item.kind === "answer" ? 5 : 4}
               placeholder="Enter the value for this question…"
               value={value}
+              disabled={isPending}
               onChange={(event) => setValue(event.target.value)}
             />
           ) : item.inputType === "multi-select" && options.length > 0 ? (
@@ -154,9 +169,9 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
                     <input
                       id={optionId}
                       type="checkbox"
-                      name="value"
                       value={option}
                       checked={checked}
+                      disabled={isPending}
                       required={item.required && selected.length === 0 && index === 0}
                       onChange={() => toggleOption(option)}
                       className="mt-1 h-4 w-4 shrink-0 rounded border-line text-ink focus:ring-ink/20"
@@ -169,13 +184,10 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
           ) : item.inputType === "select" && options.length > 0 ? (
             <Select
               id={inputId}
-              name="value"
               required
-              defaultValue={
-                item.payload.currentValue && options.includes(item.payload.currentValue)
-                  ? item.payload.currentValue
-                  : ""
-              }
+              value={selectValue}
+              disabled={isPending}
+              onChange={(event) => setSelectValue(event.target.value)}
             >
               <option value="" disabled>
                 Select an option…
@@ -189,25 +201,31 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
           ) : (
             <Input
               id={inputId}
-              name="value"
               type={htmlInputType(item)}
               required
               placeholder="Enter the value for this question…"
               value={value}
+              disabled={isPending}
               onChange={(event) => setValue(event.target.value)}
             />
           )}
         </Field>
 
         <div className="flex flex-wrap gap-2">
-          <SubmitButton name="scope" value="memory" pendingText="Saving to memory…">
+          <SubmitButton
+            type="button"
+            pending={isPending}
+            pendingText="Saving to memory…"
+            onClick={() => save("memory")}
+          >
             Save to memory
           </SubmitButton>
           <SubmitButton
-            name="scope"
-            value="application"
+            type="button"
             variant="secondary"
+            pending={isPending}
             pendingText="Filling application…"
+            onClick={() => save("application")}
           >
             Fill just for this application
           </SubmitButton>
@@ -218,7 +236,7 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
           <span className="font-medium text-ink">Fill just for this application</span> uses it only
           here and does not update Application Memory.
         </p>
-      </form>
+      </div>
     </div>
   );
 }

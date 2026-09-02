@@ -19,7 +19,8 @@ import { recordAuditEvent } from "@/server/audit";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@1apply/domain";
-import { redirectWith } from "@/server/http/flash";
+import type { NeedsYouActionResult } from "@/server/needs-you/actions";
+import { redirectWith, type ErrorCode } from "@/server/http/flash";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { runOwnedJob } from "@/infra/jobs/runner";
 import { mapEvidence } from "@/server/memory/map-evidence";
@@ -750,6 +751,78 @@ export async function resolveReviewItem(formData: FormData) {
   redirectWith(applicationPath(applicationId), { notice: "saved" }, "review");
 }
 
+export type DeleteApplicationResult = { ok: true } | { ok: false; error: ErrorCode };
+
+async function deleteApplicationImpl(
+  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"],
+  userId: string,
+  applicationId: string,
+): Promise<DeleteApplicationResult> {
+  if (!applicationId) {
+    return { ok: false, error: "required" };
+  }
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id, opportunity_id")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!application) {
+    return { ok: false, error: "not_found" };
+  }
+
+  const opportunityId = (application.opportunity_id as string | null) ?? null;
+
+  await recordAuditEvent(supabase, "application.deleted", {
+    applicationId,
+    opportunityId,
+  });
+
+  await supabase
+    .from("jobs")
+    .update({ state: "failed", error_code: "APPLICATION_DELETED" })
+    .eq("user_id", userId)
+    .eq("input_ref", applicationId)
+    .in("state", ["queued", "running", "processing"]);
+
+  await supabase
+    .from("notifications")
+    .update({
+      read_at: new Date().toISOString(),
+      action_url: "/app/applications",
+    })
+    .eq("user_id", userId)
+    .eq("action_url", `/app/applications/${applicationId}`);
+
+  const { error } = await supabase
+    .from("applications")
+    .delete()
+    .eq("id", applicationId)
+    .eq("user_id", userId);
+
+  if (error) {
+    return { ok: false, error: "save" };
+  }
+
+  if (opportunityId) {
+    await supabase.from("opportunities").delete().eq("id", opportunityId).eq("user_id", userId);
+  }
+
+  revalidateAfterApplicationDeleted(applicationId, opportunityId);
+  return { ok: true };
+}
+
+/** Client-callable delete — returns a result instead of redirecting. */
+export async function deleteApplicationAction(formData: FormData): Promise<NeedsYouActionResult> {
+  const { user, supabase } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "");
+  const result = await deleteApplicationImpl(supabase, user.id, applicationId);
+  if (!result.ok) return result;
+  return { ok: true, notice: "application_deleted" };
+}
+
 export async function deleteApplication(formData: FormData) {
   const { user, supabase } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
@@ -758,65 +831,12 @@ export async function deleteApplication(formData: FormData) {
     nextRaw === "/app/needs-you" || nextRaw.startsWith("/app/applications")
       ? nextRaw
       : "/app/applications";
-  if (!applicationId) {
-    redirectWith(next, { error: "required" });
+
+  const result = await deleteApplicationImpl(supabase, user.id, applicationId);
+  if (!result.ok) {
+    const path = result.error === "save" ? applicationPath(applicationId) : next;
+    redirectWith(path, { error: result.error });
   }
-
-  const { data: application } = await supabase
-    .from("applications")
-    .select("id, opportunity_id")
-    .eq("id", applicationId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (!application) {
-    redirectWith(next, { error: "not_found" });
-  }
-
-  const opportunityId = (application.opportunity_id as string | null) ?? null;
-
-  // Survives the row delete (application_events cascade away with the application).
-  await recordAuditEvent(supabase, "application.deleted", {
-    applicationId,
-    opportunityId,
-  });
-
-  // Cancel queued/processing work tied to this application so background jobs
-  // cannot write it back or notify about a gone row. (No jobs DELETE RLS.)
-  await supabase
-    .from("jobs")
-    .update({ state: "failed", error_code: "APPLICATION_DELETED" })
-    .eq("user_id", user.id)
-    .eq("input_ref", applicationId)
-    .in("state", ["queued", "running", "processing"]);
-
-  // application_id notifications cascade with the application row. Retarget any
-  // leftover rows that only pointed at this application by URL.
-  await supabase
-    .from("notifications")
-    .update({
-      read_at: new Date().toISOString(),
-      action_url: "/app/applications",
-    })
-    .eq("user_id", user.id)
-    .eq("action_url", `/app/applications/${applicationId}`);
-
-  const { error } = await supabase
-    .from("applications")
-    .delete()
-    .eq("id", applicationId)
-    .eq("user_id", user.id);
-
-  if (error) {
-    redirectWith(applicationPath(applicationId), { error: "save" }, "review");
-  }
-
-  // Remove the linked saved posting so Opportunities stays in sync with Applications.
-  if (opportunityId) {
-    await supabase.from("opportunities").delete().eq("id", opportunityId).eq("user_id", user.id);
-  }
-
-  revalidateAfterApplicationDeleted(applicationId, opportunityId);
   redirectWith(next, { notice: "application_deleted" });
 }
 

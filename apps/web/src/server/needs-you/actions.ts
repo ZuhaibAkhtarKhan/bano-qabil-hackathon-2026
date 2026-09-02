@@ -18,7 +18,8 @@ import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { scheduleDocumentVersionProcessing } from "@/server/documents/schedule-processing";
-import { redirectWith } from "@/server/http/flash";
+import { type ErrorCode, type FlashCode } from "@/server/http/flash";
+import { loadNeedsYouQueue } from "@/server/needs-you/queries";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
@@ -28,6 +29,10 @@ import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
 const NEEDS_YOU = "/app/needs-you";
+
+export type NeedsYouActionResult =
+  | { ok: true; notice?: FlashCode }
+  | { ok: false; error: ErrorCode };
 
 async function notify(
   supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"],
@@ -241,7 +246,12 @@ async function continueApplicationInBackground(input: {
  * scope=memory → Application Memory + this application
  * scope=application → this application only
  */
-export async function resolveNeedsYouValue(formData: FormData) {
+export async function fetchNeedsYouQueueAction() {
+  await requireWorkspace();
+  return loadNeedsYouQueue({ polish: false });
+}
+
+export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYouActionResult> {
   const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   const inputType = String(formData.get("inputType") ?? "").trim();
@@ -263,7 +273,7 @@ export async function resolveNeedsYouValue(formData: FormData) {
   const scope: "memory" | "application" = scopeRaw === "application" ? "application" : "memory";
 
   if (!applicationId || !value) {
-    redirectWith(NEEDS_YOU, { error: "required" });
+    return { ok: false, error: "required" };
   }
 
   if (scope === "memory") {
@@ -341,17 +351,17 @@ export async function resolveNeedsYouValue(formData: FormData) {
   }
 
   revalidateNeedsYou(applicationId);
-  redirectWith(NEEDS_YOU, { notice: "continued" });
+  return { ok: true, notice: "continued" };
 }
 
 /** @deprecated Prefer resolveNeedsYouValue — kept for any stale form posts. */
-export async function resolveNeedsYouMemory(formData: FormData) {
+export async function resolveNeedsYouMemory(formData: FormData): Promise<NeedsYouActionResult> {
   if (!formData.get("scope")) formData.set("scope", "memory");
   return resolveNeedsYouValue(formData);
 }
 
 /** @deprecated Prefer resolveNeedsYouValue */
-export async function resolveNeedsYouAnswer(formData: FormData) {
+export async function resolveNeedsYouAnswer(formData: FormData): Promise<NeedsYouActionResult> {
   if (!formData.get("scope")) formData.set("scope", "memory");
   if (!formData.get("label")) {
     const questionId = String(formData.get("questionId") ?? "");
@@ -360,7 +370,7 @@ export async function resolveNeedsYouAnswer(formData: FormData) {
   return resolveNeedsYouValue(formData);
 }
 
-export async function resolveNeedsYouDocument(formData: FormData) {
+export async function resolveNeedsYouDocument(formData: FormData): Promise<NeedsYouActionResult> {
   const { user, profile, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "");
   const documentId = String(formData.get("documentId") ?? "").trim();
@@ -370,7 +380,7 @@ export async function resolveNeedsYouDocument(formData: FormData) {
   const file = formData.get("file");
 
   if (!applicationId) {
-    redirectWith(NEEDS_YOU, { error: "required" });
+    return { ok: false, error: "required" };
   }
 
   let resolvedDocumentId = documentId;
@@ -382,9 +392,10 @@ export async function resolveNeedsYouDocument(formData: FormData) {
     try {
       upload = await readValidatedUpload(file);
     } catch (error) {
-      redirectWith(NEEDS_YOU, {
+      return {
+        ok: false,
         error: error instanceof UploadValidationError && error.code === "required" ? "required" : "upload",
-      });
+      };
     }
 
     uploadedMime = upload.mimeType;
@@ -403,7 +414,7 @@ export async function resolveNeedsYouDocument(formData: FormData) {
     const { error: uploadError } = await supabase.storage
       .from(bucket)
       .upload(storagePath, upload.buffer, { contentType: upload.mimeType, upsert: false });
-    if (uploadError) redirectWith(NEEDS_YOU, { error: "upload" });
+    if (uploadError) return { ok: false, error: "upload" };
 
     await supabase.from("documents").insert({
       id: newDocumentId,
@@ -454,11 +465,11 @@ export async function resolveNeedsYouDocument(formData: FormData) {
       .eq("user_id", user.id)
       .maybeSingle();
     if (!document?.current_version_id) {
-      redirectWith(NEEDS_YOU, { error: "required" });
+      return { ok: false, error: "required" };
     }
     versionId = String(document.current_version_id);
   } else {
-    redirectWith(NEEDS_YOU, { error: "required" });
+    return { ok: false, error: "required" };
   }
 
   await supabase
@@ -531,7 +542,7 @@ export async function resolveNeedsYouDocument(formData: FormData) {
 
   revalidateNeedsYou(applicationId);
   revalidatePath("/app/documents");
-  redirectWith(NEEDS_YOU, { notice: "continued" });
+  return { ok: true, notice: "continued" };
 }
 
 function parseNeedsYouDeadlineInput(value: string, timezone: string | null = null): string | null {
@@ -539,13 +550,13 @@ function parseNeedsYouDeadlineInput(value: string, timezone: string | null = nul
 }
 
 /** Applicant confirms they meet an eligibility requirement with no editable field. */
-export async function confirmNeedsYouEligibility(formData: FormData) {
+export async function confirmNeedsYouEligibility(formData: FormData): Promise<NeedsYouActionResult> {
   const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "").trim();
   const eligibilityId = String(formData.get("eligibilityId") ?? "").trim();
 
   if (!applicationId || !eligibilityId) {
-    redirectWith(NEEDS_YOU, { error: "required" });
+    return { ok: false, error: "required" };
   }
 
   const { data: application } = await supabase
@@ -555,7 +566,7 @@ export async function confirmNeedsYouEligibility(formData: FormData) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!application) {
-    redirectWith(NEEDS_YOU, { error: "not_found" });
+    return { ok: false, error: "not_found" };
   }
 
   const { data: eligibility } = await supabase
@@ -566,12 +577,12 @@ export async function confirmNeedsYouEligibility(formData: FormData) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!eligibility?.ack_only) {
-    redirectWith(NEEDS_YOU, { error: "confirm_failed" });
+    return { ok: false, error: "confirm_failed" };
   }
 
   const confirmed = await confirmEligibilityResult(supabase, actor, eligibilityId);
   if (!confirmed) {
-    redirectWith(NEEDS_YOU, { error: "confirm_failed" });
+    return { ok: false, error: "confirm_failed" };
   }
 
   await supabase
@@ -588,22 +599,22 @@ export async function confirmNeedsYouEligibility(formData: FormData) {
   });
 
   revalidateNeedsYou(applicationId);
-  redirectWith(NEEDS_YOU, { notice: "eligibility_confirmed" });
+  return { ok: true, notice: "eligibility_confirmed" };
 }
 
 /** Save application deadline when LLM/ingest could not extract one. */
-export async function resolveNeedsYouDeadline(formData: FormData) {
+export async function resolveNeedsYouDeadline(formData: FormData): Promise<NeedsYouActionResult> {
   const { user, supabase, actor } = await requireWorkspace();
   const applicationId = String(formData.get("applicationId") ?? "").trim();
   const timezone = String(formData.get("timezone") ?? "").trim() || null;
   const deadlineAt = parseNeedsYouDeadlineInput(String(formData.get("deadline") ?? ""), timezone);
 
   if (!applicationId || !deadlineAt) {
-    redirectWith(NEEDS_YOU, { error: "required" });
+    return { ok: false, error: "required" };
   }
 
   if (isDeadlineInPast(deadlineAt)) {
-    redirectWith(NEEDS_YOU, { error: "deadline_past" });
+    return { ok: false, error: "deadline_past" };
   }
 
   const { data: application } = await supabase
@@ -613,7 +624,7 @@ export async function resolveNeedsYouDeadline(formData: FormData) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!application) {
-    redirectWith(NEEDS_YOU, { error: "not_found" });
+    return { ok: false, error: "not_found" };
   }
 
   const { error } = await supabase
@@ -622,7 +633,7 @@ export async function resolveNeedsYouDeadline(formData: FormData) {
     .eq("id", applicationId)
     .eq("user_id", user.id);
   if (error) {
-    redirectWith(NEEDS_YOU, { error: "save" });
+    return { ok: false, error: "save" };
   }
 
   if (application.opportunity_id) {
@@ -640,7 +651,7 @@ export async function resolveNeedsYouDeadline(formData: FormData) {
   });
 
   revalidateNeedsYou(applicationId);
-  redirectWith(NEEDS_YOU, { notice: "saved" });
+  return { ok: true, notice: "saved" };
 }
 
 /**

@@ -699,20 +699,19 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
   };
 }
 
-const loadNeedsYouQueueCached = cache(async (mode: "full-yes" | "full-no" | "counts"): Promise<NeedsYouQueue> => {
-  if (mode === "counts") return loadNeedsYouQueueImpl(false, true);
-  return loadNeedsYouQueueImpl(mode === "full-yes", false);
+const loadNeedsYouQueueCached = cache(async (polish: boolean): Promise<NeedsYouQueue> => {
+  return loadNeedsYouQueueImpl(polish, false);
 });
 
 export function loadNeedsYouQueue(options?: { polish?: boolean }): Promise<NeedsYouQueue> {
-  return loadNeedsYouQueueCached(options?.polish === false ? "full-no" : "full-yes");
+  return loadNeedsYouQueueCached(options?.polish !== false);
 }
 
-/** Lightweight counts for nav badge + applications table (skips label polish and eligibility AI). */
+/** Nav badge + applications table — same queue as /app/needs-you (no label polish). */
 export const loadNeedsYouFieldCounts = cache(async (): Promise<{
   applicationCount: number;
   totalFields: number;
   fieldCountByApplicationId: Record<string, number>;
 }> => {
-  return countsFromNeedsYouQueue(await loadNeedsYouQueueCached("counts"));
+  return countsFromNeedsYouQueue(await loadNeedsYouQueue({ polish: false }));
 });

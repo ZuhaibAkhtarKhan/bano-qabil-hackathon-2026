@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
 import { applicationStatusLabel, normalizeApplicationStatus } from "@/lib/application-workflow";
-import { toApplicationsTrackerRow, withNeedsYouFieldCount } from "@/lib/dashboard-display";
+import { toApplicationsTrackerRow } from "@/lib/dashboard-display";
 import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 import { loadApplicationsWorkspace } from "@/server/workspace/queries";
 
@@ -76,10 +76,7 @@ export default async function ApplicationsPage({
     });
 
   const trackerRows = filtered.map((row) =>
-    withNeedsYouFieldCount(
-      toApplicationsTrackerRow(row),
-      needsYouCounts.fieldCountByApplicationId[row.id] ?? 0,
-    ),
+    toApplicationsTrackerRow(row, needsYouCounts.fieldCountByApplicationId[row.id] ?? 0),
   );
 
   return (

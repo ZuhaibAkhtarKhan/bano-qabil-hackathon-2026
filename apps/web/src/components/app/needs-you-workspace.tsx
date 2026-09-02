@@ -1,9 +1,14 @@
+"use client";
+
 import { minDeadlineLocalInput } from "@1apply/domain";
 import Link from "next/link";
+import { useState } from "react";
 
 import { NeedsYouDeleteApplication } from "@/components/app/needs-you-delete-application";
 import { NeedsYouEligibilityConfirm } from "@/components/app/needs-you-eligibility-confirm";
 import { NeedsYouQuestionForm } from "@/components/app/needs-you-question-form";
+import { NeedsYouQueueProvider, useNeedsYouQueue } from "@/components/app/needs-you-queue-provider";
+import { useNeedsYouSave } from "@/components/app/needs-you-save-hook";
 import { needsYouKindLabel, type NeedsYouItem } from "@/lib/needs-you";
 import { resolveNeedsYouDeadline, resolveNeedsYouDocument } from "@/server/needs-you/actions";
 import type {
@@ -18,9 +23,16 @@ import { Field, Input, Select } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
 
 function DeadlineForm({ item }: { item: NeedsYouItem }) {
+  const [deadline, setDeadline] = useState("");
+  const [timezone, setTimezone] = useState(
+    typeof item.payload.timezone === "string" ? item.payload.timezone : "",
+  );
+  const { isPending, feedbackNotice, handleSubmit } = useNeedsYouSave({ itemId: item.id });
+
   return (
-    <form action={resolveNeedsYouDeadline} className="grid gap-3">
+    <form className="grid gap-3" onSubmit={(event) => handleSubmit(event, resolveNeedsYouDeadline)}>
       <input type="hidden" name="applicationId" value={item.applicationId} />
+      {feedbackNotice}
       <Field label="Deadline" htmlFor={`${item.id}-deadline`} hint="Date and time the application closes">
         <Input
           id={`${item.id}-deadline`}
@@ -28,6 +40,9 @@ function DeadlineForm({ item }: { item: NeedsYouItem }) {
           type="datetime-local"
           min={minDeadlineLocalInput(typeof item.payload.timezone === "string" ? item.payload.timezone : null)}
           required
+          value={deadline}
+          disabled={isPending}
+          onChange={(event) => setDeadline(event.target.value)}
         />
       </Field>
       <Field
@@ -38,11 +53,15 @@ function DeadlineForm({ item }: { item: NeedsYouItem }) {
         <Input
           id={`${item.id}-tz`}
           name="timezone"
-          defaultValue={item.payload.timezone ?? ""}
+          value={timezone}
+          disabled={isPending}
+          onChange={(event) => setTimezone(event.target.value)}
           placeholder="Asia/Karachi"
         />
       </Field>
-      <SubmitButton pendingText="Saving deadline…">Save deadline</SubmitButton>
+      <SubmitButton pending={isPending} pendingText="Saving deadline…">
+        Save deadline
+      </SubmitButton>
     </form>
   );
 }
@@ -54,6 +73,23 @@ function DocumentForm({
   item: NeedsYouItem;
   documents: NeedsYouDocumentOption[];
 }) {
+  const [documentId, setDocumentId] = useState(() => {
+    const isImage = item.inputType === "image" || item.payload.uploadKind === "image";
+    const status = item.payload.documentStatus ?? "attach";
+    const vaultDocs = isImage
+      ? documents.filter((doc) => /image|photo|png|jpe?g|webp|headshot|portrait/i.test(`${doc.label} ${doc.type}`))
+      : /resume|cv/i.test(item.title) || status === "not_best_fit"
+        ? documents.filter((doc) => /resume/i.test(doc.type) || /resume|cv/i.test(doc.label))
+        : documents;
+    const shownDocs = vaultDocs.length > 0 ? vaultDocs : documents;
+    const recommendedId = item.payload.recommendedDocumentId ?? "";
+    const defaultDoc =
+      recommendedId && shownDocs.some((doc) => doc.id === recommendedId)
+        ? recommendedId
+        : shownDocs.find((doc) => doc.currentVersionId)?.id ?? "";
+    return defaultDoc;
+  });
+  const { isPending, feedbackNotice, handleSubmit } = useNeedsYouSave({ itemId: item.id });
   const isImage = item.inputType === "image" || item.payload.uploadKind === "image";
   const status = item.payload.documentStatus ?? "attach";
   const accept = isImage
@@ -66,14 +102,14 @@ function DocumentForm({
       : documents;
   const shownDocs = vaultDocs.length > 0 ? vaultDocs : documents;
   const recommendedId = item.payload.recommendedDocumentId ?? "";
-  const defaultDoc =
-    recommendedId && shownDocs.some((doc) => doc.id === recommendedId)
-      ? recommendedId
-      : shownDocs.find((doc) => doc.currentVersionId)?.id ?? "";
 
   if (status === "unavailable" && shownDocs.length === 0) {
     return (
-      <form action={resolveNeedsYouDocument} className="grid gap-3" encType="multipart/form-data">
+      <form
+        className="grid gap-3"
+        encType="multipart/form-data"
+        onSubmit={(event) => handleSubmit(event, resolveNeedsYouDocument)}
+      >
         <input type="hidden" name="applicationId" value={item.applicationId} />
         <input type="hidden" name="requiredLabel" value={item.payload.requiredLabel ?? item.title} />
         <input type="hidden" name="uploadKind" value={isImage ? "image" : "document"} />
@@ -83,6 +119,7 @@ function DocumentForm({
         {item.payload.eligibilityId ? (
           <input type="hidden" name="eligibilityId" value={item.payload.eligibilityId} />
         ) : null}
+        {feedbackNotice}
         <p className="rounded-xl border border-dashed border-line bg-[#f7f8f4] px-3.5 py-3 text-sm text-ink-muted">
           Nothing matching this requirement is in Application Memory yet.
         </p>
@@ -91,15 +128,21 @@ function DocumentForm({
           htmlFor={`${item.id}-file`}
           hint="Stored in Application Memory, then attached to this application."
         >
-          <Input id={`${item.id}-file`} name="file" type="file" accept={accept} required />
+          <Input id={`${item.id}-file`} name="file" type="file" accept={accept} required disabled={isPending} />
         </Field>
-        <SubmitButton pendingText="Uploading…">{isImage ? "Upload image" : "Upload document"}</SubmitButton>
+        <SubmitButton pending={isPending} pendingText="Uploading…">
+          {isImage ? "Upload image" : "Upload document"}
+        </SubmitButton>
       </form>
     );
   }
 
   return (
-    <form action={resolveNeedsYouDocument} className="grid gap-3" encType="multipart/form-data">
+    <form
+      className="grid gap-3"
+      encType="multipart/form-data"
+      onSubmit={(event) => handleSubmit(event, resolveNeedsYouDocument)}
+    >
       <input type="hidden" name="applicationId" value={item.applicationId} />
       <input type="hidden" name="requiredLabel" value={item.payload.requiredLabel ?? item.title} />
       <input type="hidden" name="uploadKind" value={isImage ? "image" : "document"} />
@@ -109,6 +152,7 @@ function DocumentForm({
       {item.payload.eligibilityId ? (
         <input type="hidden" name="eligibilityId" value={item.payload.eligibilityId} />
       ) : null}
+      {feedbackNotice}
       {status === "not_best_fit" && item.payload.recommendedDocumentLabel ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950">
           <p className="font-medium">
@@ -125,7 +169,13 @@ function DocumentForm({
         label={isImage ? "Attach an image from Application Memory" : "Attach from Application Memory"}
         htmlFor={`${item.id}-doc`}
       >
-        <Select id={`${item.id}-doc`} name="documentId" defaultValue={defaultDoc}>
+        <Select
+          id={`${item.id}-doc`}
+          name="documentId"
+          value={documentId}
+          disabled={isPending}
+          onChange={(event) => setDocumentId(event.target.value)}
+        >
           <option value="">{isImage ? "Select an image…" : "Select a document…"}</option>
           {shownDocs.map((doc) => (
             <option key={doc.id} value={doc.id} disabled={!doc.currentVersionId}>
@@ -150,9 +200,10 @@ function DocumentForm({
             : "Stored in Application Memory, then attached to this application."
         }
       >
-        <Input id={`${item.id}-file`} name="file" type="file" accept={accept} />
+        <Input id={`${item.id}-file`} name="file" type="file" accept={accept} disabled={isPending} />
       </Field>
       <SubmitButton
+        pending={isPending}
         pendingText={
           status === "not_best_fit" ? "Approving…" : isImage ? "Attaching image…" : "Attaching…"
         }
@@ -259,6 +310,7 @@ function ItemCard({
           <NeedsYouEligibilityConfirm
             applicationId={item.applicationId}
             eligibilityId={item.payload.eligibilityId}
+            itemId={item.id}
           />
         ) : (
           <p className="text-sm text-ink-muted">
@@ -269,7 +321,7 @@ function ItemCard({
       </div>
 
       {item.payload.allowDeleteApplication ? (
-        <NeedsYouDeleteApplication applicationId={item.applicationId} />
+        <NeedsYouDeleteApplication applicationId={item.applicationId} itemId={item.id} />
       ) : null}
     </article>
   );
@@ -374,6 +426,15 @@ function ApplicationNeedsRow({
 }
 
 export function NeedsYouWorkspace({ data }: { data: NeedsYouQueue }) {
+  return (
+    <NeedsYouQueueProvider initialData={data}>
+      <NeedsYouWorkspaceInner />
+    </NeedsYouQueueProvider>
+  );
+}
+
+function NeedsYouWorkspaceInner() {
+  const { queue: data } = useNeedsYouQueue();
   const groups = data.groups.length > 0 ? data.groups : [];
 
   if (data.items.length === 0) {

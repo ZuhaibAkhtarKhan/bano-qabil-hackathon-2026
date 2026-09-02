@@ -1,19 +1,61 @@
 import { normalizeApplicationStatus } from "@/lib/application-workflow";
 import { APPLICATION_LIFECYCLE_ACTIONS } from "@/lib/application-lifecycle";
 
-export function applicationTableMeta(status: string, nextAction: string | null) {
-  const normalized = normalizeApplicationStatus(status as never) ?? "saved";
-  const action = (nextAction ?? "").trim();
-  const needsYou =
-    normalized === "review_required" ||
+export type ApplicationTableMetaOptions = {
+  /** When set, stale lifecycle copy cannot show Need you if this is 0. */
+  needsYouCount?: number;
+  submittedAt?: string | null;
+};
+
+function isSubmittedStatus(
+  normalized: ReturnType<typeof normalizeApplicationStatus>,
+  action: string,
+  submittedAt?: string | null,
+) {
+  return (
+    normalized === "submitted" ||
+    action === APPLICATION_LIFECYCLE_ACTIONS.SUBMITTED ||
+    Boolean(submittedAt)
+  );
+}
+
+function lifecycleNeedsYouAction(action: string) {
+  return (
     action === APPLICATION_LIFECYCLE_ACTIONS.NEEDS_YOU ||
     (Boolean(action) &&
-      /unclear|missing fact|verify evidence|needs confirmation|action required|needs you/i.test(action) &&
-      !/review analyzed requirements/i.test(action));
+      /unclear|missing fact|verify evidence|needs confirmation|action required|needs you|missing fields application memory/i.test(
+        action,
+      ) &&
+      !/review analyzed requirements/i.test(action))
+  );
+}
+
+export function applicationTableMeta(
+  status: string,
+  nextAction: string | null,
+  options: ApplicationTableMetaOptions = {},
+) {
+  const normalized = normalizeApplicationStatus(status as never) ?? "saved";
+  const action = (nextAction ?? "").trim();
+  const queueNeedsYou = (options.needsYouCount ?? 0) > 0;
+
+  if (isSubmittedStatus(normalized, action, options.submittedAt)) {
+    return { filter: "all" as const, statusLabel: "Submitted", statusTone: "mint" as const };
+  }
+
+  const lifecycleNeedsYou = lifecycleNeedsYouAction(action);
+  const needsYou =
+    queueNeedsYou ||
+    (options.needsYouCount === undefined && (normalized === "review_required" || lifecycleNeedsYou));
 
   if (needsYou) {
     return { filter: "needs_you" as const, statusLabel: "Need you", statusTone: "coral" as const };
   }
+
+  if (normalized === "review_required") {
+    return { filter: "in_flight" as const, statusLabel: "In review", statusTone: "teal" as const };
+  }
+
   if (action === APPLICATION_LIFECYCLE_ACTIONS.FILLING) {
     return { filter: "in_flight" as const, statusLabel: "Filling", statusTone: "teal" as const };
   }
@@ -44,17 +86,19 @@ export function applicationTableMeta(status: string, nextAction: string | null) 
   if (normalized === "archived") {
     return { filter: "skipped" as const, statusLabel: "Archived", statusTone: "muted" as const };
   }
-  if (normalized === "submitted" || action === APPLICATION_LIFECYCLE_ACTIONS.SUBMITTED) {
-    return { filter: "all" as const, statusLabel: "Submitted", statusTone: "mint" as const };
-  }
   if (["under_review", "interview", "accepted"].includes(normalized)) {
     return {
       filter: "all" as const,
-      statusLabel: normalized === "under_review" ? "Under review" : normalized === "interview" ? "Interview" : "Accepted",
+      statusLabel:
+        normalized === "under_review" ? "Under review" : normalized === "interview" ? "Interview" : "Accepted",
       statusTone: "mint" as const,
     };
   }
-  return { filter: "in_flight" as const, statusLabel: String(normalized).replace(/_/g, " "), statusTone: "sand" as const };
+  return {
+    filter: "in_flight" as const,
+    statusLabel: String(normalized).replace(/_/g, " "),
+    statusTone: "sand" as const,
+  };
 }
 
 export function relativeTimeLabel(iso: string | null, fallbackIso: string) {
@@ -124,10 +168,14 @@ export type ApplicationsTrackerRowInput = {
 };
 
 /** Map an application list row into the shared tracker table shape (dashboard + /app/applications). */
-export function toApplicationsTrackerRow(row: ApplicationsTrackerRowInput) {
+export function toApplicationsTrackerRow(row: ApplicationsTrackerRowInput, needsYouCount = 0) {
   const opportunity = Array.isArray(row.opportunities) ? row.opportunities[0] ?? null : row.opportunities;
   const company = companyFromOpportunity(opportunity);
-  const meta = applicationTableMeta(row.status, row.next_action);
+  const count = Math.max(0, needsYouCount);
+  const meta = applicationTableMeta(row.status, row.next_action, {
+    needsYouCount: count,
+    submittedAt: row.submitted_at,
+  });
   const docs =
     row.resumeStatus && row.coverStatus
       ? { resume: row.resumeStatus, cover: row.coverStatus }
@@ -145,27 +193,21 @@ export function toApplicationsTrackerRow(row: ApplicationsTrackerRowInput) {
     statusLabel: meta.statusLabel,
     statusTone: meta.statusTone,
     filter: meta.filter,
-    appliedLabel: relativeTimeLabel(row.submitted_at, row.updated_at),
+    appliedLabel: row.submitted_at ? relativeTimeLabel(row.submitted_at, row.updated_at) : "Not submitted",
     initial: company.slice(0, 2).toUpperCase(),
     sourceLabel: sourceLabelFromOpportunity(opportunity),
-    needsYouCount: 0,
+    needsYouCount: count,
   };
 }
 
-/** Attach Need You field counts and classify the row for dashboard filters / board. */
-export function withNeedsYouFieldCount<T extends ReturnType<typeof toApplicationsTrackerRow>>(
-  row: T,
+/** Attach Need You field counts — prefer `toApplicationsTrackerRow(row, count)` for new code. */
+export function withNeedsYouFieldCount(
+  row: ReturnType<typeof toApplicationsTrackerRow>,
   needsYouCount: number,
-): T {
-  const count = Math.max(0, needsYouCount);
-  if (count <= 0) return { ...row, needsYouCount: 0 };
-  return {
-    ...row,
-    needsYouCount: count,
-    filter: "needs_you",
-    statusLabel: "Need you",
-    statusTone: "coral",
-  };
+  source?: ApplicationsTrackerRowInput,
+) {
+  if (!source) return { ...row, needsYouCount: Math.max(0, needsYouCount) };
+  return toApplicationsTrackerRow(source, needsYouCount);
 }
 
 export type DashboardDocStatus = "Not required" | "Missing" | "Ready";
@@ -205,4 +247,3 @@ export function dashboardDocumentStatuses(input: {
     cover: status(coverRequired, coverAttached),
   };
 }
-

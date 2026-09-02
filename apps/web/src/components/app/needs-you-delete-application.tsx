@@ -1,12 +1,23 @@
 "use client";
 
-import { deleteApplication } from "@/server/applications/actions";
+import { deleteApplicationAction } from "@/server/applications/actions";
+import { useNeedsYouSave } from "@/components/app/needs-you-save-hook";
 import { SubmitButton } from "@/components/ui/button";
 
-export function NeedsYouDeleteApplication({ applicationId }: { applicationId: string }) {
+export function NeedsYouDeleteApplication({
+  applicationId,
+  itemId,
+}: {
+  applicationId: string;
+  itemId: string;
+}) {
+  const { isPending, feedbackNotice, handleSubmit } = useNeedsYouSave({
+    itemId,
+    applicationId,
+  });
+
   return (
     <form
-      action={deleteApplication}
       className="mt-4 border-t border-line pt-4"
       onSubmit={(event) => {
         if (
@@ -15,12 +26,14 @@ export function NeedsYouDeleteApplication({ applicationId }: { applicationId: st
           )
         ) {
           event.preventDefault();
+          return;
         }
+        handleSubmit(event, deleteApplicationAction, "application");
       }}
     >
       <input type="hidden" name="applicationId" value={applicationId} />
-      <input type="hidden" name="next" value="/app/needs-you" />
-      <SubmitButton variant="secondary" pendingText="Removing…">
+      {feedbackNotice}
+      <SubmitButton variant="secondary" pending={isPending} pendingText="Removing…">
         Not eligible — delete application
       </SubmitButton>
       <p className="mt-2 text-xs text-ink-muted">

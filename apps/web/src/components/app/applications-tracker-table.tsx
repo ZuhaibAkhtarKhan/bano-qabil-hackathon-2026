@@ -45,7 +45,7 @@ export function ApplicationsTrackerTable({ rows }: { rows: ApplicationsTrackerRo
             <th className="w-[12%] px-4 py-3 font-medium">Cover letter</th>
             <th className="w-[10%] px-4 py-3 font-medium">Need you</th>
             <th className="w-[20%] px-4 py-3 font-medium">Status</th>
-            <th className="w-[18%] px-4 py-3 font-medium">Applied</th>
+            <th className="w-[18%] px-4 py-3 font-medium">Submitted</th>
           </tr>
         </thead>
         <tbody>
@@ -90,7 +90,11 @@ export function ApplicationsTrackerTable({ rows }: { rows: ApplicationsTrackerRo
                   <span className="truncate">{row.statusLabel}</span>
                 </span>
               </td>
-              <td className="px-4 py-3.5 text-xs text-ink-muted">{row.appliedLabel}</td>
+              <td className="px-4 py-3.5 text-xs">
+                <span className={row.statusLabel === "Submitted" ? "font-medium text-emerald-700" : "text-ink-muted"}>
+                  {row.appliedLabel}
+                </span>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -153,6 +157,7 @@ export const APPLICATIONS_TRACKER_BOARD_COLUMNS = [
 export type ApplicationsTrackerBoardColumnId = (typeof APPLICATIONS_TRACKER_BOARD_COLUMNS)[number]["id"];
 
 export function boardColumnForTrackerRow(row: ApplicationsTrackerRow): ApplicationsTrackerBoardColumnId {
+  if (row.statusLabel === "Submitted") return "submitted";
   if (row.needsYouCount > 0 || row.filter === "needs_you") return "needs_you";
   if (row.filter === "failed" || row.filter === "skipped") return "closed";
   if (row.filter === "in_flight") return "in_flight";

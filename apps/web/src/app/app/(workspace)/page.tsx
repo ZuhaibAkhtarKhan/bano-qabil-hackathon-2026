@@ -6,7 +6,6 @@ import {
   companyFromOpportunity,
   sourceLabelFromOpportunity,
   toApplicationsTrackerRow,
-  withNeedsYouFieldCount,
 } from "@/lib/dashboard-display";
 import { groupPackets } from "@/lib/dashboard";
 import { loadDashboard } from "@/server/workspace/queries";
@@ -44,7 +43,7 @@ export default async function DashboardPage() {
     kitMissing: kit.missing,
     opportunityCount: opportunities.length,
     applicationCount: applications.length,
-    needsYouCount: lanes.needsYou.length,
+    needsYouCount: needsYouCounts.applicationCount,
     prepareAndSendIfSilent,
   });
   const showKitCard =
@@ -74,10 +73,7 @@ export default async function DashboardPage() {
   });
 
   const tableRows: DashboardApplicationRow[] = applications.map((row) =>
-    withNeedsYouFieldCount(
-      toApplicationsTrackerRow(row),
-      needsYouCounts.fieldCountByApplicationId[row.id] ?? 0,
-    ),
+    toApplicationsTrackerRow(row, needsYouCounts.fieldCountByApplicationId[row.id] ?? 0),
   );
 
   return (
@@ -92,7 +88,7 @@ export default async function DashboardPage() {
           showCard: showKitCard,
         }}
         lanes={{
-          needsYou: lanes.needsYou.length,
+          needsYou: needsYouCounts.applicationCount,
           sendsAtDeadline: lanes.sendsAtDeadline.length,
           waitingHost: lanes.waitingHost.length,
           prepareAndSendIfSilent,

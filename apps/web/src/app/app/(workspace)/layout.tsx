@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { onboardingHref } from "@1apply/contracts";
@@ -9,7 +8,7 @@ import { MobileTopbar } from "@/components/app/mobile-topbar";
 import { RealtimeWorkspaceProvider } from "@/components/app/realtime-provider";
 import { WorkspaceTour } from "@/components/app/workspace-tour";
 import { getCurrentUserAndProfile, onboardingComplete } from "@/lib/profile";
-import { loadNeedsYouFieldCounts, loadNeedsYouQueue, countsFromNeedsYouQueue } from "@/server/needs-you/queries";
+import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 import { loadWorkspaceGuide } from "@/server/workspace/queries";
 
 export default async function WorkspaceLayout({ children }: { children: ReactNode }) {
@@ -22,10 +21,7 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
     redirect(onboardingHref(profile.onboarding_step));
   }
 
-  const pathname = (await headers()).get("x-pathname") ?? "";
-  const needsYouCounts = pathname.startsWith("/app/needs-you")
-    ? countsFromNeedsYouQueue(await loadNeedsYouQueue({ polish: false }))
-    : await loadNeedsYouFieldCounts();
+  const needsYouCounts = await loadNeedsYouFieldCounts();
   const guide = await loadWorkspaceGuide({ needsYouApplicationCount: needsYouCounts.applicationCount });
 
   return (
