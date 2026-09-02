@@ -28,6 +28,6 @@
     "open_in_tab": true
   },
   "permissions": ["activeTab", "storage", "scripting", "cookies", "tabs"],
-  "host_permissions": ["http://54.144.220.229/*", "http://localhost:3000/*"],
+  "host_permissions": ["http://3.108.122.44/*", "http://localhost:3000/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"]
 }

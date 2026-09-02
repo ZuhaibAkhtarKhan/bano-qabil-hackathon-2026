@@ -5,7 +5,7 @@ import * as esbuild from "esbuild";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(root, "dist");
-const appBaseUrl = process.env.EXTENSION_APP_BASE_URL ?? "http://54.144.220.229";
+const appBaseUrl = process.env.EXTENSION_APP_BASE_URL ?? "http://3.108.122.44";
 
 mkdirSync(dist, { recursive: true });
 

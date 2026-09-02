@@ -1,6 +1,6 @@
 export const APP_BASE_URL_STORAGE_KEY = "appBaseUrl";
 
-export const PRODUCTION_APP_BASE_URL = "http://54.144.220.229";
+export const PRODUCTION_APP_BASE_URL = "http://3.108.122.44";
 
 const LEGACY_LOCAL_DEFAULTS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
 

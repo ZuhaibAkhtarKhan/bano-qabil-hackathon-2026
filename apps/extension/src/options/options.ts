@@ -11,7 +11,7 @@ void resolveAppBaseUrl().then((url) => {
 document.getElementById("save-url")!.addEventListener("click", async () => {
   const next = urlInput.value.trim();
   if (!next) {
-    logEl.textContent = "Enter your 1-Apply URL (e.g. http://54.144.220.229).";
+    logEl.textContent = "Enter your 1-Apply URL (e.g. http://3.108.122.44).";
     return;
   }
   try {
