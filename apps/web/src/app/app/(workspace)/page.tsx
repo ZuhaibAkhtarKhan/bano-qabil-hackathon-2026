@@ -11,8 +11,6 @@ import { groupPackets } from "@/lib/dashboard";
 import { loadDashboard } from "@/server/workspace/queries";
 import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
 
-export const dynamic = "force-dynamic";
-
 const MATCH_TONES = ["sand", "mint", "violet", "coral"] as const;
 
 function fitScore(row: { fit_evaluations: { score: number } | { score: number }[] | null }) {

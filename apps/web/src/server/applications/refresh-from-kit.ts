@@ -459,8 +459,16 @@ export async function refreshOpenApplicationsFromKit(
   return { appsTouched, mappingsFilled, docsAttached };
 }
 
+const KIT_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+const lastKitRefreshByUser = new Map<string, number>();
+
 /** Fire-and-forget so kit saves stay snappy; errors are logged only. */
 export function scheduleRefreshOpenApplicationsFromKit(supabase: SupabaseClient, actor: Actor) {
+  const now = Date.now();
+  const last = lastKitRefreshByUser.get(actor.userId) ?? 0;
+  if (now - last < KIT_REFRESH_COOLDOWN_MS) return;
+  lastKitRefreshByUser.set(actor.userId, now);
+
   void refreshOpenApplicationsFromKit(supabase, actor).catch((error) => {
     logError("needs_you.kit_refresh_failed", {
       userId: actor.userId,

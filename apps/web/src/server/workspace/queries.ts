@@ -9,6 +9,8 @@ import {
   packetSummary,
   requiredDocumentCovered,
 } from "@1apply/domain";
+import { cache } from "react";
+import { after } from "next/server";
 
 import { logError } from "@/lib/log";
 import { requireWorkspace } from "@/server/auth/require-workspace";
@@ -194,7 +196,7 @@ export async function loadDashboard() {
   };
 }
 
-export async function loadWorkspaceGuide(options?: { needsYouApplicationCount?: number }) {
+export const loadWorkspaceGuide = cache(async (options?: { needsYouApplicationCount?: number }) => {
   const { profile, supabase } = await requireWorkspace();
   const prefs = parseWorkspacePreferences(profile.preferences);
   if (prefs.guideDismissed) {
@@ -228,7 +230,7 @@ export async function loadWorkspaceGuide(options?: { needsYouApplicationCount?: 
     steps,
     next: currentGuideStep(steps),
   };
-}
+});
 
 async function loadDashboardPackets(
   supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"],
@@ -394,15 +396,16 @@ export async function loadApplicationsWorkspace() {
 export async function loadApplicationWorkspace(applicationId: string) {
   const { user, supabase, actor } = await requireWorkspace();
 
-  // Auto-pick resume category / AI fallback before rendering submission checklist.
-  try {
-    await ensureApplicationResumeSelection(supabase, actor, applicationId, {
-      autoAttach: true,
-      notifyOnAiPick: true,
-    });
-  } catch {
-    // Non-blocking — workspace still loads if selection fails.
-  }
+  after(async () => {
+    try {
+      await ensureApplicationResumeSelection(supabase, actor, applicationId, {
+        autoAttach: true,
+        notifyOnAiPick: true,
+      });
+    } catch {
+      // Non-blocking — workspace still loads if selection fails.
+    }
+  });
 
   const { data: application } = await supabase
     .from("applications")
@@ -415,15 +418,8 @@ export async function loadApplicationWorkspace(applicationId: string) {
 
   if (!application) return null;
 
-  const { data: opportunity } = await supabase
-    .from("opportunities")
-    .select(
-      "id, title, organization, category, location, source, source_url, canonical_url, deadline_at, raw_excerpt, analysis_status",
-    )
-    .eq("id", application.opportunity_id)
-    .maybeSingle();
-
   const [
+    { data: opportunity },
     { data: requirements },
     { data: questions },
     { data: answers },
@@ -442,8 +438,16 @@ export async function loadApplicationWorkspace(applicationId: string) {
     { data: documents },
     { data: applicationEmailEvents },
     { data: applicationCalendarEvents },
+    previousAnswersBundle,
   ] = await Promise.all([
-        supabase.from("requirements").select("id, text, hard, kind").eq("opportunity_id", application.opportunity_id),
+    supabase
+      .from("opportunities")
+      .select(
+        "id, title, organization, category, location, source, source_url, canonical_url, deadline_at, raw_excerpt, analysis_status",
+      )
+      .eq("id", application.opportunity_id)
+      .maybeSingle(),
+    supabase.from("requirements").select("id, text, hard, kind").eq("opportunity_id", application.opportunity_id),
     supabase
       .from("opportunity_questions")
       .select("id, prompt, limit_value, limit_unit, required, sort_order")
@@ -531,6 +535,33 @@ export async function loadApplicationWorkspace(applicationId: string) {
       .select("id, title, starts_at, ends_at, location, meeting_url, timezone, confirmed, notes")
       .eq("application_id", applicationId)
       .order("starts_at", { ascending: true }),
+    supabase
+      .from("application_answers")
+      .select("id, application_id, question_id, approved_text")
+      .eq("user_id", user.id)
+      .eq("state", "approved")
+      .neq("application_id", applicationId)
+      .not("approved_text", "is", null)
+      .limit(40)
+      .then(async ({ data: previousAnswerRows }) => {
+        const previousQuestionIds = [
+          ...new Set((previousAnswerRows ?? []).map((row) => String(row.question_id))),
+        ];
+        const { data: previousPrompts } =
+          previousQuestionIds.length > 0
+            ? await supabase.from("opportunity_questions").select("id, prompt").in("id", previousQuestionIds)
+            : { data: [] as Array<{ id: string; prompt: string }> };
+        const previousPromptById = new Map(
+          (previousPrompts ?? []).map((row) => [String(row.id), String(row.prompt)]),
+        );
+        return (previousAnswerRows ?? []).map((row) => ({
+          id: String(row.id),
+          applicationId: String(row.application_id),
+          questionId: String(row.question_id),
+          prompt: previousPromptById.get(String(row.question_id)) ?? "",
+          text: String(row.approved_text ?? ""),
+        }));
+      }),
   ]);
 
   type AnswerRow = {
@@ -548,27 +579,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
     }
   }
 
-  const { data: previousAnswerRows } = await supabase
-    .from("application_answers")
-    .select("id, application_id, question_id, approved_text")
-    .eq("user_id", user.id)
-    .eq("state", "approved")
-    .neq("application_id", applicationId)
-    .not("approved_text", "is", null)
-    .limit(40);
-  const previousQuestionIds = [...new Set((previousAnswerRows ?? []).map((row) => String(row.question_id)))];
-  const { data: previousPrompts } =
-    previousQuestionIds.length > 0
-      ? await supabase.from("opportunity_questions").select("id, prompt").in("id", previousQuestionIds)
-      : { data: [] as Array<{ id: string; prompt: string }> };
-  const previousPromptById = new Map((previousPrompts ?? []).map((row) => [String(row.id), String(row.prompt)]));
-  const previousAnswers = (previousAnswerRows ?? []).map((row) => ({
-    id: String(row.id),
-    applicationId: String(row.application_id),
-    questionId: String(row.question_id),
-    prompt: previousPromptById.get(String(row.question_id)) ?? "",
-    text: String(row.approved_text ?? ""),
-  }));
+  const previousAnswers = previousAnswersBundle;
 
   return {
     application,

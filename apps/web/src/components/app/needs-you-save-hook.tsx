@@ -21,7 +21,7 @@ export function useNeedsYouSave(options: {
   onSuccess?: () => void;
 }) {
   const router = useRouter();
-  const { onItemResolved, onApplicationRemoved, refreshQueue } = useNeedsYouQueue();
+  const { onItemResolved, onApplicationRemoved } = useNeedsYouQueue();
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ tone: "mint" | "coral"; message: string } | null>(null);
 
@@ -48,10 +48,9 @@ export function useNeedsYouSave(options: {
         setFeedback({ tone: "mint", message: messageForResult(result) ?? "Saved." });
         options.onSuccess?.();
         router.refresh();
-        void refreshQueue();
       });
     },
-    [onApplicationRemoved, onItemResolved, options, refreshQueue, router],
+    [onApplicationRemoved, onItemResolved, options, router],
   );
 
   const handleSubmit = useCallback(

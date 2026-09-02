@@ -28,6 +28,7 @@ import { polishFormQuestionLabels } from "@/server/needs-you/polish-labels";
 import { buildEligibilityNeedsYouItems, type EligibilityJob } from "@/server/needs-you/eligibility-items";
 import { loadNeedsYouRawContext } from "@/server/needs-you/raw-context";
 import type { EligibilityGap } from "@/server/needs-you/resolve-eligibility-actions-ai";
+import { verifyEligibilityFromMemory } from "@/server/needs-you/verify-eligibility-from-memory";
 import { asOne } from "@/server/types";
 
 function oppMeta(row: {
@@ -163,6 +164,8 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
   const ctx = await loadNeedsYouRawContext();
   const {
     profile,
+    actor,
+    supabase,
     active,
     openApplicationIds,
     mappedDocs,
@@ -619,7 +622,8 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
       }));
 
       if (skipAi) {
-        for (const gap of gaps) {
+        const memoryCheck = await verifyEligibilityFromMemory(supabase, actor, applicationId, gaps);
+        for (const gap of memoryCheck.remaining) {
           const needsAck = gap.state !== "not_met";
           pushItem({
             ...base,
@@ -699,15 +703,20 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
   };
 }
 
-const loadNeedsYouQueueCached = cache(async (polish: boolean): Promise<NeedsYouQueue> => {
-  return loadNeedsYouQueueImpl(polish, false);
+const loadNeedsYouQueueCached = cache(async (polish: boolean, skipAi: boolean): Promise<NeedsYouQueue> => {
+  return loadNeedsYouQueueImpl(polish, skipAi);
 });
 
 export function loadNeedsYouQueue(options?: { polish?: boolean }): Promise<NeedsYouQueue> {
-  return loadNeedsYouQueueCached(options?.polish !== false);
+  return loadNeedsYouQueueCached(options?.polish !== false, false);
 }
 
-/** Nav badge + applications table — same queue as /app/needs-you (no label polish). */
+/** Fast nav badge — skips resolveEligibilityActionTargets AI; uses memory verify only. */
+export const loadNeedsYouBadgeCounts = cache(async () => {
+  return countsFromNeedsYouQueue(await loadNeedsYouQueueCached(false, true));
+});
+
+/** Dashboard + applications table — full queue (same items as /app/needs-you). */
 export const loadNeedsYouFieldCounts = cache(async (): Promise<{
   applicationCount: number;
   totalFields: number;

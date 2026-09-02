@@ -35,23 +35,15 @@ export function useRealtime() {
   return useContext(RealtimeContext);
 }
 
-const LIVE_TABLES = [
+/** Tables that should trigger a soft server refresh when visible workspace data may change. */
+const REFRESH_TABLES = [
   "applications",
-  "jobs",
-  "review_items",
   "application_answers",
-  "email_events",
-  "calendar_events",
-  "documents",
-  "document_versions",
-  "document_chunks",
   "field_mappings",
-  "profile_facts",
   "eligibility_results",
-  "opportunities",
-  "evidence_items",
-  "fit_evaluations",
   "application_documents",
+  "review_items",
+  "fit_evaluations",
   "notifications",
 ] as const;
 
@@ -97,7 +89,7 @@ export function RealtimeWorkspaceProvider({
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null;
       router.refresh();
-    }, 250);
+    }, 750);
   }, [router]);
 
   useEffect(() => {
@@ -168,11 +160,10 @@ export function RealtimeWorkspaceProvider({
           if (updatedRow.read_at) {
             setUnreadCount((prev) => Math.max(0, prev - 1));
           }
-          softRefresh();
         },
       );
 
-    for (const table of LIVE_TABLES) {
+    for (const table of REFRESH_TABLES) {
       for (const event of ["INSERT", "UPDATE", "DELETE"] as const) {
         channel = channel.on(
           "postgres_changes",
@@ -193,23 +184,13 @@ export function RealtimeWorkspaceProvider({
       setIsRealtimeConnected(status === "SUBSCRIBED");
     });
 
-    const onFocus = () => {
-      softRefresh();
-    };
     const onVisibility = () => {
       if (document.visibilityState === "visible") softRefresh();
     };
-    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
 
-    const fallbackRefresh = window.setInterval(() => {
-      if (!document.hidden) softRefresh();
-    }, 20_000);
-
     return () => {
-      window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
-      window.clearInterval(fallbackRefresh);
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       void supabase.removeChannel(channel);
     };

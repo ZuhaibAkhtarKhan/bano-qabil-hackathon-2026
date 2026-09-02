@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import { isDeadlineInPast, memoryFactKey, parseDeadlineLocalInput } from "@1apply/domain";
 
@@ -239,6 +240,28 @@ async function continueApplicationInBackground(input: {
       })
       .eq("id", input.applicationId);
   }
+}
+
+/** Run eligibility refresh + answer regen after the HTTP response (Need You saves stay snappy). */
+function scheduleContinueApplicationInBackground(input: {
+  supabase: Awaited<ReturnType<typeof requireWorkspace>>["supabase"];
+  actor: Awaited<ReturnType<typeof requireWorkspace>>["actor"];
+  userId: string;
+  applicationId: string;
+  questionIds?: string[];
+  satisfiedPrompts?: string[];
+  scope?: "memory" | "application";
+}) {
+  after(async () => {
+    try {
+      await continueApplicationInBackground(input);
+    } catch (err) {
+      logError("needs_you.continue_scheduled_failed", {
+        err,
+        applicationId: input.applicationId,
+      });
+    }
+  });
 }
 
 /**
@@ -533,7 +556,7 @@ export async function resolveNeedsYouDocument(formData: FormData): Promise<Needs
     }
   }
 
-  await continueApplicationInBackground({
+  scheduleContinueApplicationInBackground({
     supabase,
     actor,
     userId: user.id,
@@ -591,7 +614,7 @@ export async function confirmNeedsYouEligibility(formData: FormData): Promise<Ne
     .eq("id", applicationId)
     .eq("user_id", user.id);
 
-  await continueApplicationInBackground({
+  scheduleContinueApplicationInBackground({
     supabase,
     actor,
     userId: user.id,

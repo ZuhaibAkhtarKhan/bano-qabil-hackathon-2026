@@ -10,18 +10,18 @@ import { SubmitButton } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
+import { useNeedsYouBadge } from "@/components/app/needs-you-badge-provider";
 
 export function AppSidebar({
   email,
   displayName,
-  needsYouApplicationCount = 0,
 }: {
   email: string;
   displayName: string | null;
-  needsYouApplicationCount?: number;
 }) {
   const pathname = usePathname();
   const { unreadCount } = useRealtime();
+  const { applicationCount: needsYouApplicationCount } = useNeedsYouBadge();
 
   return (
     <aside className="flex h-full flex-col border-r border-line bg-white px-4 py-6">

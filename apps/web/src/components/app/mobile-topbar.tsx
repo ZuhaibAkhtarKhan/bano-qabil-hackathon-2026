@@ -13,17 +13,13 @@ import { Drawer } from "@/components/ui/overlays";
 import { cn } from "@/lib/cn";
 
 import { useRealtime } from "@/components/app/realtime-provider";
+import { useNeedsYouBadge } from "@/components/app/needs-you-badge-provider";
 
-export function MobileTopbar({
-  email,
-  needsYouApplicationCount = 0,
-}: {
-  email: string;
-  needsYouApplicationCount?: number;
-}) {
+export function MobileTopbar({ email }: { email: string }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const { unreadCount } = useRealtime();
+  const { applicationCount: needsYouApplicationCount } = useNeedsYouBadge();
 
   return (
     <div className="border-b border-line bg-white/90 backdrop-blur-md lg:hidden">

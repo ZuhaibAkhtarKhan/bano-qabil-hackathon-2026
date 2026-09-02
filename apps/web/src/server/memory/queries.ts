@@ -1,6 +1,8 @@
 import type { MemoryCategory } from "@1apply/contracts";
 import { categoryFromKind, memoryFactKey } from "@1apply/domain";
 
+import { after } from "next/server";
+
 import { logError } from "@/lib/log";
 import type {
   ApplicationListRow,
@@ -19,15 +21,16 @@ export async function loadMemoryWorkspace() {
   const { profile, supabase } = await requireWorkspace();
   const userId = profile.id;
 
-  // One-shot cleanup so the kit UI never shows near-duplicates from older fills.
-  try {
-    await dedupeExistingEvidence(supabase, userId);
-  } catch (error) {
-    logError("memory.dedupe_on_load_failed", {
-      userId,
-      message: error instanceof Error ? error.message : "unknown",
-    });
-  }
+  after(async () => {
+    try {
+      await dedupeExistingEvidence(supabase, userId);
+    } catch (error) {
+      logError("memory.dedupe_on_load_failed", {
+        userId,
+        message: error instanceof Error ? error.message : "unknown",
+      });
+    }
+  });
 
   const [
     profileResult,
