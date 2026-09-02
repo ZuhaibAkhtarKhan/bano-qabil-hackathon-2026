@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { createApiEnvelopeSchema, opportunityIngestRequestSchema, uuidSchema } from "@1apply/contracts";
 import { z } from "zod";
 import { NextResponse } from "next/server";
@@ -6,9 +7,9 @@ import { parsePublicHttpUrl, UnsafeUrlError } from "@/lib/security/public-url";
 import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
+import { ingestFormPageCapture } from "@/server/extension/ingest-form-page";
 import { ingestOpportunityPage } from "@/server/opportunities/ingest";
 import { recordAuditEvent } from "@/server/audit";
-import { revalidatePath } from "next/cache";
 
 const envelope = createApiEnvelopeSchema(
   z.object({
@@ -128,6 +129,18 @@ export async function POST(request: Request) {
       pageTitle,
       metadata: parsed.data.metadata ?? {},
     });
+
+    if (parsed.data.formPage?.fields?.length) {
+      await ingestFormPageCapture({
+        supabase,
+        actor,
+        userId: user.id,
+        applicationId: result.applicationId,
+        opportunityId: result.opportunityId,
+        formPage: parsed.data.formPage,
+        prefill: !result.duplicate,
+      });
+    }
 
     await recordAuditEvent(supabase, "opportunity.ingest", {
       opportunityId: result.opportunityId,

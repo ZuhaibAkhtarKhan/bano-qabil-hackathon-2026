@@ -88,6 +88,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       pageUrl: parsed.data.pageUrl,
       pageText: parsed.data.pageText,
       fields: parsed.data.fields,
+      formPage: parsed.data.formPage,
     });
 
     const statusParsed = applicationStatusSchema.safeParse(result.status);

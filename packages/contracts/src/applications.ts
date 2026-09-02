@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { FormPageCaptureSchema } from "./form-fill-json";
+
 import { uuidSchema } from "./common";
 import { applicationStatusSchema } from "./enums";
 
@@ -133,10 +135,15 @@ export const fillSessionEndReasonSchema = z.enum([
 
 export const fillSessionCapturedFieldSchema = z.object({
   fieldKey: z.string().min(1).max(180),
+  fieldId: z.string().max(80).optional(),
   label: z.string().max(180).default(""),
   value: z.string().max(4000),
   required: z.boolean().optional().default(false),
   fieldType: z.string().max(40).optional(),
+  options: z.array(z.string()).max(40).optional(),
+  maxLength: z.number().int().positive().optional(),
+  nearbyText: z.string().max(500).optional(),
+  placeholder: z.string().max(180).optional(),
 });
 
 export const fillSessionEndRequestSchema = z.object({
@@ -146,6 +153,8 @@ export const fillSessionEndRequestSchema = z.object({
   pageUrl: z.string().url().optional(),
   pageText: z.string().max(50_000).optional(),
   fields: z.array(fillSessionCapturedFieldSchema).max(120).default([]),
+  /** Full page inventory JSON when tab closes mid-fill. */
+  formPage: FormPageCaptureSchema.optional(),
 });
 
 export const fillSessionEndResponseSchema = z.object({

@@ -41,6 +41,11 @@ export const BatchFieldResultSchema = z.object({
   value: z.string().optional(),
   evidenceIds: z.array(z.string()).optional(),
   documentVersionId: uuidSchema.optional(),
+  resolution: z
+    .enum(["filled", "need_you", "missing_memory", "upload_document", "eligibility", "host_filled", "blocked"])
+    .optional(),
+  reason: z.string().max(500).optional(),
+  applyMode: z.enum(["auto", "chip", "ai_assistant", "skip"]).optional(),
 });
 
 export const BatchFillResponseSchema = z.object({

@@ -220,15 +220,28 @@ export async function persistIntelligence(
 ) {
   const { userId, applicationId, eligibility, fit, resumes } = input;
 
+  const normalizeRequirementText = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 200);
+
   const { data: priorRows } = await supabase
     .from("eligibility_results")
     .select(
-      "id, requirement_id, user_confirmed_at, auto_confirmed, explanation, ack_only, memory_checked_at",
+      "id, requirement_id, requirement_text, user_confirmed_at, auto_confirmed, explanation, ack_only, memory_checked_at",
     )
     .eq("application_id", applicationId);
 
   const priorByRequirement = new Map(
     (priorRows ?? []).map((row) => [String(row.requirement_id), row] as const),
+  );
+  const priorConfirmedByText = new Map(
+    (priorRows ?? [])
+      .filter((row) => row.user_confirmed_at)
+      .map((row) => [normalizeRequirementText(String(row.requirement_text ?? "")), row] as const),
   );
 
   await supabase.from("eligibility_results").delete().eq("application_id", applicationId);
@@ -236,7 +249,11 @@ export async function persistIntelligence(
   if (eligibilityRows.length > 0) {
     await supabase.from("eligibility_results").insert(
       eligibilityRows.map((item) => {
-        const prior = priorByRequirement.get(item.requirementId);
+        let prior = priorByRequirement.get(item.requirementId);
+        if (!prior?.user_confirmed_at) {
+          const byText = priorConfirmedByText.get(normalizeRequirementText(item.requirementText));
+          if (byText) prior = byText;
+        }
         if (prior?.user_confirmed_at) {
           return {
             ...(prior.id ? { id: prior.id } : {}),
@@ -276,6 +293,25 @@ export async function persistIntelligence(
   }
 
   await supabase.from("fit_evaluations").delete().eq("application_id", applicationId);
+
+  const confirmedRequirementTexts = new Set(
+    (priorRows ?? [])
+      .filter((row) => row.user_confirmed_at)
+      .flatMap((row) => {
+        const text = String((row as { requirement_text?: string }).requirement_text ?? "");
+        return text ? [normalizeRequirementText(text)] : [];
+      }),
+  );
+  const filteredMissing = fit.missing.filter((gap) => {
+    const norm = normalizeRequirementText(gap);
+    if (!norm) return true;
+    for (const confirmed of confirmedRequirementTexts) {
+      if (!confirmed) continue;
+      if (norm.includes(confirmed) || confirmed.includes(norm)) return false;
+    }
+    return true;
+  });
+
   await supabase.from("fit_evaluations").insert({
     user_id: userId,
     application_id: applicationId,
@@ -285,7 +321,7 @@ export async function persistIntelligence(
     education_match: fit.educationMatch,
     project_relevance: fit.projectRelevance,
     eligibility: fit.eligibility,
-    missing: fit.missing,
+    missing: filteredMissing,
     rationale: fit.rationale,
     strengths: fit.strengths,
     factors: fit.factors,

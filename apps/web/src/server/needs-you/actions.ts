@@ -633,13 +633,6 @@ export async function confirmNeedsYouEligibility(formData: FormData): Promise<Ne
     .eq("id", applicationId)
     .eq("user_id", user.id);
 
-  scheduleContinueApplicationInBackground({
-    supabase,
-    actor,
-    userId: user.id,
-    applicationId,
-  });
-
   revalidateNeedsYou(applicationId);
   return { ok: true, notice: "eligibility_confirmed" };
 }

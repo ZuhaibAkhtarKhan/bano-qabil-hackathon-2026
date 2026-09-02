@@ -126,8 +126,29 @@ function isEligibilityExplanation(text: string): boolean {
     /\bis on file\b/i.test(text) ||
     /\bdoes not clearly settle\b/i.test(text) ||
     /\bnot satisfied\b/i.test(text) ||
-    /\beligibility\b/i.test(text)
+    /\beligibility\b/i.test(text) ||
+    /\bverified from application memory\b/i.test(text) ||
+    /\bapplicant confirmed\b/i.test(text)
   );
+}
+
+function normalizeEligibilityOverlapText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+function overlapsEligibilityTopic(gap: string, topics: Set<string>): boolean {
+  const norm = normalizeEligibilityOverlapText(gap);
+  if (!norm) return false;
+  for (const topic of topics) {
+    if (!topic) continue;
+    if (norm.includes(topic) || topic.includes(norm)) return true;
+  }
+  return false;
 }
 
 function groupNeedsYouItems(
@@ -590,10 +611,18 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
 
     const fit = (fitRows ?? []).find((row) => String(row.application_id) === applicationId);
     const missing = Array.isArray(fit?.missing) ? (fit?.missing as string[]) : [];
+    const eligibilityTopics = new Set(
+      (eligibilityRows ?? [])
+        .filter((row) => String(row.application_id) === applicationId)
+        .flatMap((row) => {
+          const parts = [String(row.requirement_text ?? ""), String(row.explanation ?? "")];
+          return parts.map((part) => normalizeEligibilityOverlapText(part)).filter(Boolean);
+        }),
+    );
     for (const gap of missing.slice(0, 8)) {
       if (isNeedsYouSystemNoise(gap)) continue;
-      // Eligibility blockers are handled below via eligibility_results + LLM targets.
       if (isEligibilityExplanation(gap)) continue;
+      if (overlapsEligibilityTopic(gap, eligibilityTopics)) continue;
       pushItem({
         ...base,
         id: `fit:${applicationId}:${gap}`,

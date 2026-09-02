@@ -185,23 +185,66 @@ export async function persistOpportunityAnalysis(input: {
     await input.supabase.from("applications").update({ deadline_at: deadlineAt }).eq("id", input.applicationId);
   }
 
-  await input.supabase.from("requirements").delete().eq("opportunity_id", input.opportunityId);
   await input.supabase.from("opportunity_questions").delete().eq("opportunity_id", input.opportunityId);
   await input.supabase.from("opportunity_documents").delete().eq("opportunity_id", input.opportunityId);
   await input.supabase.from("application_questions").delete().eq("application_id", input.applicationId);
 
   if (requirementRows.length > 0) {
-    await input.supabase.from("requirements").insert(
-      requirementRows.map((item) => ({
-        user_id: input.userId,
-        opportunity_id: input.opportunityId,
-        text: item.text.slice(0, 500),
+    const normalizeRequirementText = (text: string) =>
+      text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const { data: existingRequirements } = await input.supabase
+      .from("requirements")
+      .select("id, text")
+      .eq("opportunity_id", input.opportunityId);
+
+    const existingByText = new Map(
+      (existingRequirements ?? []).map(
+        (row) => [normalizeRequirementText(String(row.text ?? "")), String(row.id)] as const,
+      ),
+    );
+    const retainedIds = new Set<string>();
+    const inserts: Array<Record<string, unknown>> = [];
+
+    for (const item of requirementRows) {
+      const text = item.text.slice(0, 500);
+      const norm = normalizeRequirementText(text);
+      const existingId = existingByText.get(norm);
+      const row = {
         hard: item.hard,
         kind: item.kind,
         confidence: input.source === "manual" ? 1 : 0.6,
         source_span: item.sourceSpan ?? input.source,
-      })),
-    );
+        text,
+      };
+      if (existingId) {
+        retainedIds.add(existingId);
+        await input.supabase.from("requirements").update(row).eq("id", existingId);
+      } else {
+        inserts.push({
+          user_id: input.userId,
+          opportunity_id: input.opportunityId,
+          ...row,
+        });
+      }
+    }
+
+    if (inserts.length > 0) {
+      await input.supabase.from("requirements").insert(inserts);
+    }
+
+    const orphanIds = (existingRequirements ?? [])
+      .map((row) => String(row.id))
+      .filter((id) => !retainedIds.has(id));
+    if (orphanIds.length > 0) {
+      await input.supabase.from("requirements").delete().in("id", orphanIds);
+    }
+  } else {
+    await input.supabase.from("requirements").delete().eq("opportunity_id", input.opportunityId);
   }
 
   if (input.extracted.questions.length > 0) {

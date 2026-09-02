@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { memoryFactKey, detectSubmissionSignals } from "@1apply/domain";
-import type { FillSessionCapturedField, FillSessionEndReason } from "@1apply/contracts";
+import type { FillSessionCapturedField, FillSessionEndReason, FormPageCapture } from "@1apply/contracts";
 
 import type { Actor } from "@/auth/actor";
 import { runOwnedJob } from "@/infra/jobs/runner";
@@ -14,6 +14,7 @@ import { refreshOpenApplicationsFromKit } from "@/server/applications/refresh-fr
 import { logError } from "@/lib/log";
 import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";
+import { ingestFormPageCapture } from "@/server/extension/ingest-form-page";
 import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate";
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { emitDomainEvent } from "@/server/notifications/service";
@@ -424,6 +425,7 @@ export async function endFillSession(input: {
   pageUrl?: string;
   pageText?: string;
   fields: FillSessionCapturedField[];
+  formPage?: FormPageCapture;
 }) {
   const { supabase, actor, applicationId } = input;
 
@@ -462,6 +464,19 @@ export async function endFillSession(input: {
   }
 
   const savedFieldCount = await storeCapturedFieldsInMemory(supabase, actor.userId, input.fields);
+
+  if (input.formPage?.fields?.length && application.opportunity_id) {
+    await ingestFormPageCapture({
+      supabase,
+      actor,
+      userId: actor.userId,
+      applicationId,
+      opportunityId: String(application.opportunity_id),
+      formPage: input.formPage,
+      prefill: input.reason === "tab_closed" || input.reason === "origin_left",
+    });
+  }
+
   await upsertFieldMappings(
     supabase,
     actor.userId,

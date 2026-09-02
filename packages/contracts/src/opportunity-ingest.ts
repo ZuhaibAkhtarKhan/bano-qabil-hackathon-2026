@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { FormPageCaptureSchema } from "./form-fill-json";
 import { opportunityCategorySchema, opportunitySourceSchema } from "./enums";
 
 export const opportunityIngestRequestSchema = z.object({
@@ -12,6 +13,8 @@ export const opportunityIngestRequestSchema = z.object({
       pageText: z.string().max(20_000).optional(),
     })
     .optional(),
+  /** First-page form inventory JSON from extension (optional). */
+  formPage: FormPageCaptureSchema.optional(),
 });
 
 export const opportunityDiscoveryRequestSchema = z.object({

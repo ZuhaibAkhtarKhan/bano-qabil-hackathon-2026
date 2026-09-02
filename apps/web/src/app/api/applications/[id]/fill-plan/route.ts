@@ -1,19 +1,10 @@
 import { createApiEnvelopeSchema, uuidSchema } from "@1apply/contracts";
-import { fieldSignals, mapFields, type DetectedField, type FieldType, FIELD_TYPES } from "@1apply/form-engine";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
-import { loadMemoryCatalog } from "@/server/extension/memory-catalog";
-import { enrichAiAnswerableMappings } from "@/server/extension/enrich-ai-answers";
-import { enrichDocumentAttachments } from "@/server/extension/enrich-documents";
-import { enrichJudgmentYesNoMappings } from "@/server/extension/enrich-judgment-yes-no";
-import { enrichYesNoEligibilityMappings } from "@/server/extension/enrich-yes-no";
-import { recordAuditEvent } from "@/server/audit";
-import { markFillStarted } from "@/server/applications/fill-lifecycle";
-import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
-import { persistableFormChoiceOptions } from "@/lib/needs-you-field-kinds";
+import { fillLegacyFormPageFromJson, parseDetectedFields } from "@/server/extension/form-fill-from-json";
 
 const fieldSchema = z.object({
   key: z.string(),
@@ -157,46 +148,32 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     );
   }
 
-  const origin = new URL(parsed.data.origin).origin;
-  const fields: DetectedField[] = parsed.data.fields.map((field) => {
-    const type = (FIELD_TYPES as readonly string[]).includes(field.type) ? (field.type as FieldType) : "text";
-    const next = { ...field, type };
-    return {
-      ...next,
-      signals: field.signals || fieldSignals(next),
-    };
-  });
-  const catalog = await loadMemoryCatalog(session.supabase, session.actor, parsedId.data);
-  const mapped = mapFields(fields, catalog);
-  const withDocs = await enrichDocumentAttachments(session.supabase, session.user.id, mapped);
-  const withYesNo = await enrichYesNoEligibilityMappings(session.supabase, session.actor, withDocs);
-  const withJudgment = await enrichJudgmentYesNoMappings(session.supabase, session.actor, parsedId.data, withYesNo);
-  const mappings = await enrichAiAnswerableMappings(session.supabase, session.actor, parsedId.data, withJudgment);
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-  const hazards = {
-    captcha: Boolean(parsed.data.hazards.captcha),
-    captchaVendor: parsed.data.hazards.captchaVendor ?? null,
-    captchaMessage: parsed.data.hazards.captchaMessage ?? null,
-    accountCreation: Boolean(parsed.data.hazards.accountCreation),
-    accountMessage: parsed.data.hazards.accountMessage ?? null,
-    unsupported: Boolean(parsed.data.hazards.unsupported),
-    unsupportedReason: parsed.data.hazards.unsupportedReason ?? null,
-    hasSubmitControl: parsed.data.hazards.hasSubmitControl ?? null,
-  };
+  try {
+    const result = await fillLegacyFormPageFromJson({
+      supabase: session.supabase,
+      actor: session.actor,
+      applicationId: parsedId.data,
+      origin: parsed.data.origin,
+      fields: parseDetectedFields(parsed.data.fields),
+      hazards: parsed.data.hazards,
+    });
 
-  const { data: fillSession, error } = await session.supabase
-    .from("fill_sessions")
-    .insert({
-      user_id: session.user.id,
-      application_id: parsedId.data,
-      origin,
-      expires_at: expiresAt,
-      hazards,
-    })
-    .select("id")
-    .single();
-
-  if (error || !fillSession) {
+    return withExtensionCors(
+      request,
+      NextResponse.json(
+        envelope.parse({
+          data: {
+            fillSessionId: result.fillSessionId,
+            expiresAt: result.expiresAt,
+            hazards: result.hazards,
+            mappings: result.mappings,
+          },
+          error: null,
+          requestId,
+        }),
+      ),
+    );
+  } catch {
     return withExtensionCors(
       request,
       NextResponse.json(
@@ -205,80 +182,4 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ),
     );
   }
-
-  if (mappings.length > 0) {
-    const requiredByKey = new Map(parsed.data.fields.map((field) => [field.key, Boolean(field.required)]));
-    await session.supabase.from("field_mappings").insert(
-      mappings.map((item) => {
-        const hostField = parsed.data.fields.find((field) => field.key === item.fieldKey);
-        const hostOptions = Array.isArray(hostField?.options)
-          ? hostField.options.map((option) => String(option).trim()).filter(Boolean)
-          : [];
-        const mappingOptionValues = item.options.map((option) => option.value).filter(Boolean);
-        const choiceValues = persistableFormChoiceOptions({
-          fieldType: item.fieldType,
-          hostOptions,
-          mappingOptionValues,
-        });
-        const uploadKind =
-          item.fieldType === "file"
-            ? /image|photo|headshot|portrait|profile\s*pic|jpeg|jpg|png|webp/i.test(
-                `${item.label} ${item.memoryPath} ${item.reason}`,
-              )
-              ? "image"
-              : "document"
-            : null;
-        return {
-          user_id: session.user.id,
-          application_id: parsedId.data,
-          fill_session_id: fillSession.id,
-          field_key: item.fieldKey.slice(0, 180),
-          label: item.label.slice(0, 180),
-          value: item.proposedValue.slice(0, 4000),
-          source: item.source.slice(0, 120),
-          confidence: item.confidence,
-          excluded_by_default: item.excludedByDefault,
-          sensitive: item.sensitive,
-          field_type: item.fieldType,
-          options: choiceValues,
-          meta: {
-            required: requiredByKey.get(item.fieldKey) ?? false,
-            ...(uploadKind ? { uploadKind } : {}),
-            ...(item.attachment
-              ? {
-                  documentId: item.attachment.documentId,
-                  versionId: item.attachment.versionId,
-                  filename: item.attachment.filename,
-                }
-              : {}),
-          },
-        };
-      }),
-    );
-  }
-
-  await recordAuditEvent(session.supabase, "fill.plan_created", {
-    applicationId: parsedId.data,
-    fillSessionId: fillSession.id,
-    fieldCount: mappings.length,
-  });
-
-  await markFillStarted(session.supabase, session.actor, parsedId.data);
-  scheduleRefreshOpenApplicationsFromKit(session.supabase, session.actor);
-
-  return withExtensionCors(
-    request,
-    NextResponse.json(
-      envelope.parse({
-        data: {
-          fillSessionId: fillSession.id,
-          expiresAt,
-          hazards,
-          mappings,
-        },
-        error: null,
-        requestId,
-      }),
-    ),
-  );
 }

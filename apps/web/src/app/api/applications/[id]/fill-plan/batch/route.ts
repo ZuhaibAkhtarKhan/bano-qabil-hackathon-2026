@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 
 import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
-import { batchFillRequestBodySchema, runBatchFillPlan } from "@/server/extension/batch-fill";
+import { batchFillRequestBodySchema } from "@/server/extension/batch-fill";
+import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
+import { FormPageCaptureSchema } from "@1apply/contracts";
 
 const envelope = createApiEnvelopeSchema(
   BatchFillResponseSchema.extend({
@@ -96,13 +98,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     );
   }
 
-  const result = await runBatchFillPlan({
+  const result = await fillFormPageFromJson({
     supabase: session.supabase,
     actor: session.actor,
     applicationId: parsedId.data,
-    pageIndex: parsed.data.pageIndex,
-    fields: parsed.data.fields,
-    origin: parsed.data.origin,
+    page: FormPageCaptureSchema.parse({
+      pageIndex: parsed.data.pageIndex,
+      origin: parsed.data.origin,
+      fields: parsed.data.fields,
+    }),
   });
 
   return withExtensionCors(

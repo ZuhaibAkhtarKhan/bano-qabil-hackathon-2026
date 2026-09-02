@@ -153,6 +153,23 @@ export {
 } from "./opportunity-ingest";
 
 export {
+  FormFieldCaptureSchema,
+  FormFieldResolutionKindSchema,
+  FormFieldResolutionSchema,
+  FormFillPlanRequestSchema,
+  FormFillPlanResponseSchema,
+  FormPageCaptureSchema,
+  FormPageHazardsSchema,
+  type FormFieldCapture,
+  type FormFieldResolution,
+  type FormFieldResolutionKind,
+  type FormFillPlanRequest,
+  type FormFillPlanResponse,
+  type FormPageCapture,
+  type FormPageHazards,
+} from "./form-fill-json";
+
+export {
   applicationEventSchema,
   applicationStatusHistorySchema,
   embeddingRecordSchema,

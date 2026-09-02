@@ -261,8 +261,21 @@ function needsYouPayloadRichness(item: Pick<NeedsYouItem, "payload">): number {
   );
 }
 
+/** Stable identity for eligibility cards — avoids duplicate cards with different wording. */
+export function needsYouItemDedupeKey(item: Pick<NeedsYouItem, "applicationId" | "kind" | "title" | "payload">): string {
+  if (item.payload.requirementId) {
+    return `${item.applicationId}:req:${item.payload.requirementId}`;
+  }
+  const reqId = item.payload.eligibilityId;
+  if (item.kind === "eligibility" && reqId) {
+    return `${item.applicationId}:eligibility:${reqId}`;
+  }
+  const titleKey = normalizeNeedsYouDedupeKey(item.title);
+  return `${item.applicationId}:${titleKey}`;
+}
+
 /**
- * One card per application + normalized question title.
+ * One card per application + normalized question title (or requirement id for eligibility).
  * Merges cross-kind duplicates (answer vs field_mapping, document vs file mapping, …).
  */
 export function dedupeNeedsYouItems(items: NeedsYouItem[]): NeedsYouItem[] {
@@ -271,8 +284,8 @@ export function dedupeNeedsYouItems(items: NeedsYouItem[]): NeedsYouItem[] {
   for (const item of items) {
     if (!isNeedsYouApplicantQuestion(item.kind)) continue;
     const titleKey = normalizeNeedsYouDedupeKey(item.title);
-    if (!titleKey) continue;
-    const key = `${item.applicationId}:${titleKey}`;
+    if (!titleKey && !item.payload.eligibilityId && !item.payload.requirementId) continue;
+    const key = needsYouItemDedupeKey(item);
     const existing = bestByKey.get(key);
     if (!existing) {
       bestByKey.set(key, item);
