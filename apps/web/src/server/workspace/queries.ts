@@ -66,7 +66,13 @@ export async function loadDashboard() {
     supabase.from("documents").select("id, type, label").eq("user_id", profile.id),
   ]);
 
-  void syncDeadlineReminders(supabase, actor).catch(() => null);
+  // Must not run during RSC render — syncHostAutomation awaits Playwright and
+  // markFillStarted calls revalidatePath("/app"), which Next.js rejects mid-render.
+  after(() => {
+    void syncDeadlineReminders(supabase, actor).catch((err) => {
+      logError("dashboard.sync_deadline_reminders_failed", { err });
+    });
+  });
 
   // Match the extension applications API shape first — nested fit_evaluations has
   // broken this query for some rows and returned an empty list.

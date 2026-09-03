@@ -1,4 +1,3 @@
-import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { memoryFactKey, detectSubmissionSignals } from "@1apply/domain";
@@ -12,6 +11,7 @@ import {
 import { detectProfileMemoryField, isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
 import { refreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { logError } from "@/lib/log";
+import { safeRevalidatePath } from "@/lib/safe-revalidate";
 import { generateAnswer } from "@/server/answers/generate";
 import { recordAuditEvent } from "@/server/audit";
 import { ingestFormPageCapture } from "@/server/extension/ingest-form-page";
@@ -22,11 +22,11 @@ import { recordApplicationEvent } from "@/services/platform";
 import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 
 function revalidateLifecycle(applicationId: string) {
-  revalidatePath("/app");
-  revalidatePath("/app/applications");
-  revalidatePath("/app/needs-you");
-  revalidatePath("/app/notifications");
-  revalidatePath(`/app/applications/${applicationId}`);
+  safeRevalidatePath("/app");
+  safeRevalidatePath("/app/applications");
+  safeRevalidatePath("/app/needs-you");
+  safeRevalidatePath("/app/notifications");
+  safeRevalidatePath(`/app/applications/${applicationId}`);
 }
 
 async function notifyLifecycle(
