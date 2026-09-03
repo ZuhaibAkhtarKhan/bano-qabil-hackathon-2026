@@ -435,6 +435,13 @@ export async function refreshOpenApplicationsFromKit(
       appsTouched += 1;
       mappingsFilled += filledHere;
     }
+
+    const { collapseDuplicateFieldMappings } = await import("./field-mappings-upsert");
+    await collapseDuplicateFieldMappings({
+      supabase,
+      userId: actor.userId,
+      applicationId,
+    });
   }
 
   for (const app of appsToEvaluate.slice(0, 12)) {

@@ -7,6 +7,7 @@ import {
 import { cache } from "react";
 
 import { sourceLabelFromOpportunity } from "@/lib/dashboard-display";
+import { fieldMappingFillScore } from "@/lib/field-mappings";
 import {
   detectProfileMemoryField,
   isNeedsYouSystemNoise,
@@ -417,9 +418,29 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
       });
     }
 
-    for (const mapping of (fieldMappings ?? []).filter(
-      (row) => String(row.application_id) === applicationId,
-    )) {
+    const appMappings = (fieldMappings ?? [])
+      .filter((row) => String(row.application_id) === applicationId)
+      .slice()
+      .sort(
+        (a, b) =>
+          fieldMappingFillScore({
+            field_key: String(a.field_key ?? ""),
+            value: a.value as string | null,
+            source: a.source as string | null,
+            confidence: a.confidence as number | null,
+            excluded_by_default: a.excluded_by_default as boolean | null,
+          }) -
+          fieldMappingFillScore({
+            field_key: String(b.field_key ?? ""),
+            value: b.value as string | null,
+            source: b.source as string | null,
+            confidence: b.confidence as number | null,
+            excluded_by_default: b.excluded_by_default as boolean | null,
+          }),
+      )
+      .reverse();
+
+    for (const mapping of appMappings) {
       const fieldKey = String(mapping.field_key);
       const dedupe = `${applicationId}:${fieldKey}`;
       if (seenMappingKeys.has(dedupe)) continue;

@@ -848,3 +848,74 @@ export async function deleteApplication(formData: FormData) {
   redirectWith(next, { notice: "application_deleted" });
 }
 
+/** Edit a filled autofill / Need You / memory mapping before host submit. */
+export async function updateApplicationFieldMapping(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "").trim();
+  const mappingId = String(formData.get("mappingId") ?? "").trim();
+  const value = String(formData.get("value") ?? "").trim();
+
+  if (!applicationId || !mappingId) {
+    redirectWith(applicationPath(applicationId || ""), { error: "required" });
+  }
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id, status")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!application) redirectWith("/app/applications", { error: "not_found" });
+  if (["submitted", "rejected", "withdrawn", "archived", "offer"].includes(String(application.status))) {
+    redirectWith(applicationPath(applicationId), { error: "save" });
+  }
+
+  const { data: mapping } = await supabase
+    .from("field_mappings")
+    .select("id, field_key, label")
+    .eq("id", mappingId)
+    .eq("application_id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!mapping) redirectWith(applicationPath(applicationId), { error: "not_found" });
+
+  await supabase
+    .from("field_mappings")
+    .update({
+      value: value.slice(0, 4000),
+      source: "Application tab edit",
+      confidence: value ? 1 : 0.2,
+      excluded_by_default: !value,
+      label: String(mapping.label ?? "Field").slice(0, 180),
+    })
+    .eq("id", mappingId)
+    .eq("user_id", user.id);
+
+  const { data: siblings } = await supabase
+    .from("field_mappings")
+    .select("id")
+    .eq("application_id", applicationId)
+    .eq("user_id", user.id)
+    .eq("field_key", String(mapping.field_key))
+    .neq("id", mappingId);
+  const siblingIds = (siblings ?? []).map((row) => String(row.id));
+  if (siblingIds.length) {
+    await supabase.from("field_mappings").delete().eq("user_id", user.id).in("id", siblingIds);
+  }
+
+  await recordApplicationEvent(supabase, actor, applicationId, "field_mapping.updated", {
+    mappingId,
+    fieldKey: mapping.field_key,
+  });
+
+  const { tryNoDeadlineHostSubmitIfComplete } = await import(
+    "@/server/applications/host-automation-schedule"
+  );
+  await tryNoDeadlineHostSubmitIfComplete({ supabase, actor, applicationId });
+
+  revalidateApplication(applicationId);
+  redirectWith(`${applicationPath(applicationId)}#autofill`, { notice: "saved" });
+}
+

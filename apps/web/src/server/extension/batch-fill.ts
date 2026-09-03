@@ -853,7 +853,25 @@ async function persistBatchMappings(
   });
 
   if (rows.length > 0) {
-    await supabase.from("field_mappings").insert(rows);
+    const { upsertApplicationFieldMappings } = await import("@/server/applications/field-mappings-upsert");
+    await upsertApplicationFieldMappings({
+      supabase,
+      userId: actor.userId,
+      applicationId,
+      rows: rows.map((row) => ({
+        field_key: String(row.field_key),
+        label: String(row.label),
+        value: String(row.value ?? ""),
+        source: String(row.source ?? "batch_fill"),
+        confidence: Number(row.confidence ?? 0.2),
+        excluded_by_default: Boolean(row.excluded_by_default),
+        sensitive: Boolean(row.sensitive),
+        field_type: row.field_type ?? null,
+        options: row.options,
+        meta: (row.meta as Record<string, unknown>) ?? {},
+        fill_session_id: (row.fill_session_id as string | null) ?? fillSession.id,
+      })),
+    });
   }
 
   return { fillSessionId: fillSession.id as string, expiresAt };
@@ -949,6 +967,45 @@ export async function runBatchFillPlan(input: {
 
   merged = sanitizeNativeFieldValues(fields, ensureEveryField(fields, merged));
   merged = annotateFieldResolutions(fields, merged, withAi);
+
+  // Prefer values already saved on this application (Need You / memory / kit) over fresh empty plans.
+  const { data: storedMappings } = await input.supabase
+    .from("field_mappings")
+    .select("field_key, label, value, source, confidence, excluded_by_default")
+    .eq("application_id", input.applicationId)
+    .eq("user_id", input.actor.userId);
+  const { dedupeFieldMappingsByKey, mappingHasUsableFill } = await import("@/lib/field-mappings");
+  const bestStored = dedupeFieldMappingsByKey(storedMappings ?? []).filter((row) =>
+    mappingHasUsableFill(row, 0.5),
+  );
+  if (bestStored.length) {
+    const byKey = new Map(bestStored.map((row) => [String(row.field_key), row]));
+    const byLabel = new Map(
+      bestStored.map((row) => [String(row.label ?? "").trim().toLowerCase(), row] as const),
+    );
+    const fromStored: BatchFieldResult[] = fields.flatMap((field) => {
+      const hostKey = input.hostFieldKeyById?.[field.fieldId] ?? field.fieldId;
+      const match =
+        byKey.get(hostKey) ??
+        byKey.get(field.fieldId) ??
+        byLabel.get(field.label.trim().toLowerCase());
+      const value = String(match?.value ?? "").trim();
+      if (!value) return [];
+      return [
+        {
+          fieldId: field.fieldId,
+          status: "filled" as const,
+          value,
+          reason: `Saved application value (${match?.source ?? "mapping"})`,
+        },
+      ];
+    });
+    if (fromStored.length) {
+      // Stored filled values win even over other filled plans (Need You edits beat stale kit).
+      const over = new Map(fromStored.map((item) => [item.fieldId, item]));
+      merged = merged.map((item) => over.get(item.fieldId) ?? item);
+    }
+  }
 
   const grounded = groundBatchFillFields({
     fields: merged,

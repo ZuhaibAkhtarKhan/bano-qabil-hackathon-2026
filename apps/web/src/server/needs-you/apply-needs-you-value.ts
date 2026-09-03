@@ -30,6 +30,13 @@ export async function applyValueToApplication(input: {
   }
 
   if (input.mappingId) {
+    const { data: target } = await input.supabase
+      .from("field_mappings")
+      .select("id, field_key")
+      .eq("id", input.mappingId)
+      .eq("user_id", input.userId)
+      .maybeSingle();
+
     await input.supabase
       .from("field_mappings")
       .update({
@@ -40,6 +47,25 @@ export async function applyValueToApplication(input: {
       })
       .eq("id", input.mappingId)
       .eq("user_id", input.userId);
+
+    // Collapse sibling rows with the same host field_key (empty page_capture leftovers).
+    if (target?.field_key) {
+      const { data: siblings } = await input.supabase
+        .from("field_mappings")
+        .select("id")
+        .eq("application_id", input.applicationId)
+        .eq("user_id", input.userId)
+        .eq("field_key", String(target.field_key))
+        .neq("id", input.mappingId);
+      const siblingIds = (siblings ?? []).map((row) => String(row.id));
+      if (siblingIds.length) {
+        await input.supabase
+          .from("field_mappings")
+          .delete()
+          .eq("user_id", input.userId)
+          .in("id", siblingIds);
+      }
+    }
   } else if (!input.questionId) {
     const fieldKey = `needs_you:${input.label.trim().toLowerCase().slice(0, 80).replace(/\s+/g, "_")}`;
     const { data: existing } = await input.supabase

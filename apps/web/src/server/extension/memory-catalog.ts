@@ -255,10 +255,23 @@ export async function loadMemoryCatalog(
   }
 
   const looksLikeVersionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  for (const row of savedFields ?? []) {
+  const { dedupeFieldMappingsByKey, mappingHasUsableFill } = await import("@/lib/field-mappings");
+  const savedRows = (savedFields ?? []).map((row, index) => ({
+    id: `saved-${index}`,
+    field_key: String(row.label ?? `field_${index}`),
+    label: row.label as string | null,
+    value: row.value as string | null,
+    source: "Need You",
+    confidence: row.excluded_by_default ? 0.2 : 0.95,
+    excluded_by_default: row.excluded_by_default as boolean | null,
+    field_type: row.field_type as string | null,
+  }));
+  for (const row of dedupeFieldMappingsByKey(savedRows)) {
     const value = String(row.value ?? "").trim();
     const label = String(row.label ?? "").trim();
-    if (!value || !label || row.field_type === "file" || looksLikeVersionId.test(value)) continue;
+    const fieldType = String((row as { field_type?: string | null }).field_type ?? "");
+    if (!value || !label || fieldType === "file" || looksLikeVersionId.test(value)) continue;
+    if (!mappingHasUsableFill(row, 0.5) && Boolean(row.excluded_by_default)) continue;
     add(`Need You → ${label.slice(0, 48)}`, value, [label.toLowerCase().slice(0, 80), "need you"], "Need You");
   }
 

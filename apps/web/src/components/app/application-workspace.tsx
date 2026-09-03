@@ -23,7 +23,7 @@ import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
 import { SubmitButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress, Timeline } from "@/components/ui/data";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
   allowedTransitions,
@@ -37,6 +37,7 @@ import {
   deleteApplication,
   markSubmitted,
   resolveReviewItem,
+  updateApplicationFieldMapping,
   updateApplicationPersona,
   updateApplicationSchedule,
   updateApplicationStatus,
@@ -143,9 +144,14 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           item.document_version_id === recommendedResume.document_version_id,
       )
     : true;
-  const mappingReviewCount = data.fieldMappings.filter(
-    (item) => Number(item.confidence ?? 0) < 0.75 || Boolean(item.excluded_by_default),
-  ).length;
+  const mappingReviewCount = data.fieldMappings.filter((item) => {
+    const value = String(item.value ?? "").trim();
+    const confidence = Number(item.confidence ?? 0);
+    const excluded = Boolean(item.excluded_by_default);
+    // Empty page_capture inventory stubs must not drag readiness / block autosubmit UX.
+    if (!value && String(item.source ?? "") === "page_capture") return false;
+    return !value || confidence < 0.75 || excluded;
+  }).length;
   const completeness = computeApplicationCompleteness({
     requiredQuestions: questions.filter((item) => item.required).length,
     approvedAnswers,
@@ -486,7 +492,10 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="font-display text-2xl">Autofill</h2>
-              <p className="mt-2 text-sm text-ink-muted">Field mappings, confidence, and preview stay visible before any controlled browser fill.</p>
+              <p className="mt-2 text-sm text-ink-muted">
+                Edit filled values from Need You or Application Memory before auto-submit. Host submit uses these
+                values; empty inventory stubs are ignored when a filled answer exists.
+              </p>
             </div>
             <StatusPill tone={mappingReviewCount > 0 ? "sand" : "mint"}>
               {data.fieldMappings.length} mapped fields
@@ -494,25 +503,58 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           </div>
           {data.fieldMappings.length === 0 ? (
             <p className="mt-4 text-sm text-ink-muted">
-              No field mappings yet. Open the Chrome extension on the host form and use Fill from memory. Suggestions
-              write into fields automatically; chips appear when alternates exist. 1-Apply never clicks submit.
+              No field mappings yet. Add the form URL or open Need You — the server prefills from your kit and
+              inventories the live form.
             </p>
           ) : (
-            <ul className="mt-6 grid gap-3">
-              {data.fieldMappings.slice(0, 8).map((item) => (
-                <li key={item.id} className="rounded-xl border border-line p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+            <ul className="mt-6 grid gap-4">
+              {data.fieldMappings.slice(0, 20).map((item) => {
+                const canEdit = !submitted;
+                const multiline =
+                  String(item.value ?? "").length > 80 ||
+                  /comment|essay|statement|describe|why|cover/i.test(String(item.label ?? ""));
+                return (
+                  <li key={item.id} className="rounded-xl border border-line p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
                       <p className="font-medium">{item.label}</p>
-                      <p className="mt-1 text-sm text-ink-muted">{item.value || "Empty value"}</p>
-                      <p className="mt-1 text-xs text-ink-muted">Source: {item.source} · Key: {item.field_key}</p>
+                      <StatusPill tone={Number(item.confidence) >= 0.75 && item.value ? "mint" : "sand"}>
+                        {Math.round(Number(item.confidence) * 100)}%
+                      </StatusPill>
                     </div>
-                    <StatusPill tone={Number(item.confidence) >= 0.75 ? "mint" : "sand"}>
-                      {Math.round(Number(item.confidence) * 100)}% confidence
-                    </StatusPill>
-                  </div>
-              </li>
-              ))}
+                    <p className="mt-1 text-xs text-ink-muted">
+                      Source: {item.source}
+                      {submitted ? " · locked after submit" : " · editable before submit"}
+                    </p>
+                    {canEdit ? (
+                      <form action={updateApplicationFieldMapping} className="mt-3 grid gap-2">
+                        <input type="hidden" name="applicationId" value={application.id} />
+                        <input type="hidden" name="mappingId" value={item.id} />
+                        <Field label="Value" htmlFor={`mapping-${item.id}`}>
+                          {multiline ? (
+                            <Textarea
+                              id={`mapping-${item.id}`}
+                              name="value"
+                              defaultValue={String(item.value ?? "")}
+                              rows={4}
+                            />
+                          ) : (
+                            <Input
+                              id={`mapping-${item.id}`}
+                              name="value"
+                              defaultValue={String(item.value ?? "")}
+                            />
+                          )}
+                        </Field>
+                        <div>
+                          <SubmitButton variant="secondary">Save field</SubmitButton>
+                        </div>
+                      </form>
+                    ) : (
+                      <p className="mt-2 text-sm text-ink-muted">{item.value || "Empty value"}</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>

@@ -13,6 +13,7 @@ import { cache } from "react";
 import { after } from "next/server";
 
 import { logError } from "@/lib/log";
+import { dedupeFieldMappingsByKey } from "@/lib/field-mappings";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { mapEvidence } from "@/server/memory/map-evidence";
@@ -405,6 +406,18 @@ export async function loadApplicationWorkspace(applicationId: string) {
     } catch {
       // Non-blocking — workspace still loads if selection fails.
     }
+    try {
+      const { collapseDuplicateFieldMappings } = await import(
+        "@/server/applications/field-mappings-upsert"
+      );
+      await collapseDuplicateFieldMappings({
+        supabase,
+        userId: user.id,
+        applicationId,
+      });
+    } catch {
+      // Non-blocking cleanup of duplicate autofill keys.
+    }
   });
 
   const { data: application } = await supabase
@@ -600,7 +613,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
     attached: attached ?? [],
     snapshots: snapshots ?? [],
     reviewItems: reviewItems ?? [],
-    fieldMappings: fieldMappings ?? [],
+    fieldMappings: dedupeFieldMappingsByKey(fieldMappings ?? []),
     fillSessions: fillSessions ?? [],
     statusHistory: statusHistory ?? [],
     events: events ?? [],

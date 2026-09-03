@@ -50,17 +50,6 @@ export async function persistFormPageCapture(
     .eq("id", opportunityId)
     .eq("user_id", userId);
 
-  const fieldKeys = fields.map((field) => String(field.fieldId).slice(0, 180));
-  if (fieldKeys.length) {
-    await supabase
-      .from("field_mappings")
-      .delete()
-      .eq("application_id", applicationId)
-      .eq("user_id", userId)
-      .eq("source", "page_capture")
-      .in("field_key", fieldKeys);
-  }
-
   const rows = fields.map((field) => {
     const choiceValues = persistableFormChoiceOptions({
       fieldType: field.type === "contenteditable" ? "textarea" : field.type,
@@ -68,9 +57,6 @@ export async function persistFormPageCapture(
       mappingOptionValues: field.options ?? [],
     });
     return {
-      user_id: userId,
-      application_id: applicationId,
-      fill_session_id: null,
       field_key: String(field.fieldId).slice(0, 180),
       label: field.label.slice(0, 180),
       value: String(field.currentValue ?? "").slice(0, 4000),
@@ -90,11 +76,18 @@ export async function persistFormPageCapture(
         maxLength: field.maxLength ?? null,
         name: field.name ?? null,
       },
+      fill_session_id: null,
     };
   });
 
   if (rows.length) {
-    await supabase.from("field_mappings").insert(rows);
+    const { upsertApplicationFieldMappings } = await import("@/server/applications/field-mappings-upsert");
+    await upsertApplicationFieldMappings({
+      supabase,
+      userId,
+      applicationId,
+      rows,
+    });
   }
 
   return rows.length;
