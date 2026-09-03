@@ -357,7 +357,7 @@ describe("auto-submit policy", () => {
     expect(decision.action).toBe("proceed");
   });
 
-  it("queues host submit in the pre-deadline window once review notice was sent", () => {
+  it("queues host submit in the pre-deadline window without requiring review notice or full packet", () => {
     const beforeWindow = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
       {
@@ -380,34 +380,33 @@ describe("auto-submit policy", () => {
       {
         ...makeReminderInput({
           deadlineAt: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-          identityPresent: true,
-          packetNoticeSent: true,
-          allQuestionsHavePacketText: true,
+          identityPresent: false,
+          packetNoticeSent: false,
+          allQuestionsHavePacketText: false,
         }),
         allAnswersApproved: false,
-        documentsAttached: true,
+        documentsAttached: false,
         hasUnsupportedClaims: false,
       },
     );
     expect(inWindow.action).toBe("proceed");
     expect(inWindow.reason).toMatch(/pre-deadline window|host form fill and submit/i);
 
-    const missingNotice = evaluateAutoSubmit(
+    const oneMinuteDeadline = evaluateAutoSubmit(
       SILENCE_AUTO_SUBMIT_POLICY,
       {
         ...makeReminderInput({
-          deadlineAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-          identityPresent: true,
+          deadlineAt: new Date(Date.now() + 60 * 1000).toISOString(),
+          identityPresent: false,
           packetNoticeSent: false,
-          allQuestionsHavePacketText: true,
+          allQuestionsHavePacketText: false,
         }),
         allAnswersApproved: false,
-        documentsAttached: true,
+        documentsAttached: false,
         hasUnsupportedClaims: false,
       },
     );
-    expect(missingNotice.action).toBe("block");
-    expect(missingNotice.reason).toMatch(/Pre-deadline packet notice/);
+    expect(oneMinuteDeadline.action).toBe("proceed");
   });
 
   it("schedules the 2-hour pre-deadline review email when silence-send is enabled", () => {

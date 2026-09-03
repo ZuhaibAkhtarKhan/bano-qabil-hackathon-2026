@@ -308,12 +308,14 @@ export const SILENCE_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   enabled: true,
   allowAutoGenerate: true,
   requireAllAnswersApproved: false,
+  // Host submit uses Memory + Need You as-is; application-tab readiness is not a gate.
   silenceTreatsSuggestionsAsPacket: true,
   freezeOnlyAtOrAfterDeadline: false,
   submitToHost: true,
   submitLeadHours: HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS,
-  requireIdentity: true,
-  requirePriorPacketNotice: true,
+  requireIdentity: false,
+  // Short deadlines (e.g. set 1 minute before) skip the review-email window.
+  requirePriorPacketNotice: false,
   requireDocumentsAttached: false,
   requireFitScoreAbove: null,
 };
@@ -359,17 +361,24 @@ export function evaluateAutoSubmit(
   }
 
   if (policy.requireAllAnswersApproved && !input.allAnswersApproved) {
-    const silenceReady = policy.silenceTreatsSuggestionsAsPacket && input.allQuestionsHavePacketText;
-    if (!silenceReady) {
-      return {
-        action: "block",
-        reason: `${input.totalQuestions - input.answeredQuestions} question(s) do not have approved answers.`,
-        humanActionRequired: [],
-      };
+    // Host submit proceeds with Memory + Need You even when application-tab answers are incomplete.
+    if (!policy.submitToHost) {
+      const silenceReady = policy.silenceTreatsSuggestionsAsPacket && input.allQuestionsHavePacketText;
+      if (!silenceReady) {
+        return {
+          action: "block",
+          reason: `${input.totalQuestions - input.answeredQuestions} question(s) do not have approved answers.`,
+          humanActionRequired: [],
+        };
+      }
     }
   }
 
-  if (policy.silenceTreatsSuggestionsAsPacket && input.allQuestionsHavePacketText === false) {
+  if (
+    !policy.submitToHost &&
+    policy.silenceTreatsSuggestionsAsPacket &&
+    input.allQuestionsHavePacketText === false
+  ) {
     return { action: "block", reason: "The packet is missing suggested or edited answers.", humanActionRequired: [] };
   }
 

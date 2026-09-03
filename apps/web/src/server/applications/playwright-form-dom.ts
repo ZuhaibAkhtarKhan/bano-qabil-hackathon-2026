@@ -113,10 +113,16 @@ function looksLikeFileField(item: Element, label: string): boolean {
 
 function classifyButton(el: Element): "next" | "submit" | "other" {
   const text = controlSignal(el);
-  if (/\b(next|continue|proceed|save\s*(&|and)?\s*continue)\b/i.test(text)) return "next";
-  if (/\b(submit|send|finish)\b/i.test(text) && !/\b(next|continue)\b/i.test(text)) return "submit";
+  const nextRe =
+    /\b(next|continue|proceed|forward|go\s*next|next\s*page|next\s*step|keep\s*going|save\s*(&|and)?\s*continue|weiter|siguiente|suivant|avanti|dalej|volgende|próximo|proximo|nästa|neste)\b/i;
+  const submitRe =
+    /\b(submit|send|finish|done|apply|complete|confirm|register|enroll|save\s*(&|and)?\s*submit|final\s*submit|send\s*(response|application|form)|submit\s*(response|application|form|answers)|absenden|enviar|envoyer|invia|wyślij|einreichen|abschicken|senden)\b/i;
+  if (nextRe.test(text)) return "next";
+  if (submitRe.test(text) && !nextRe.test(text)) return "submit";
   const type = (el as HTMLInputElement).type?.toLowerCase?.() ?? "";
-  if (type === "submit" && /\bsubmit\b/i.test(text)) return "submit";
+  if (type === "submit") {
+    if (submitRe.test(text) || !text.trim()) return "submit";
+  }
   return "other";
 }
 
@@ -368,21 +374,24 @@ export function clickFormControl(kind: "next" | "submit"): { clicked: boolean; r
   ) as HTMLElement[];
   const matches = buttons.filter((btn) => classifyButton(btn) === kind && visible(btn));
   let preferred =
-    matches.find((btn) =>
-      kind === "next"
-        ? /\b(next|continue)\b/i.test(controlSignal(btn))
-        : /\bsubmit\b/i.test(controlSignal(btn)),
-    ) ?? matches[matches.length - 1];
+    matches.find((btn) => {
+      const signal = controlSignal(btn);
+      return kind === "next"
+        ? /\b(next|continue|proceed|forward|go\s*next|next\s*page|next\s*step|weiter|siguiente|suivant)\b/i.test(signal)
+        : /\b(submit|send|finish|done|apply|complete|confirm|absenden|enviar|envoyer)\b/i.test(signal);
+    }) ?? matches[matches.length - 1];
 
   if (!preferred && kind === "submit") {
     const googleSubmit = document.querySelector(
-      '.freebirdFormviewerViewNavigationSubmitButton, [jsname="M2UYVd"], [data-action-id="submit"]',
+      '.freebirdFormviewerViewNavigationSubmitButton, [jsname="M2UYVd"], [data-action-id="submit"], [aria-label*="Submit" i], [aria-label*="Send" i]',
     ) as HTMLElement | null;
     if (googleSubmit && visible(googleSubmit)) preferred = googleSubmit;
   }
 
   if (!preferred && kind === "next") {
-    const googleNext = document.querySelector('[jsname="OCpkoe"], .freebirdFormviewerViewNavigationNextButton') as HTMLElement | null;
+    const googleNext = document.querySelector(
+      '[jsname="OCpkoe"], .freebirdFormviewerViewNavigationNextButton, [aria-label*="Next" i], [aria-label*="Continue" i]',
+    ) as HTMLElement | null;
     if (googleNext && visible(googleNext)) preferred = googleNext;
   }
 
@@ -403,8 +412,57 @@ export function clickSubmitControl(): { clicked: boolean; reason?: string } {
 export function detectSubmissionConfirmation(): boolean {
   const text = (document.body?.innerText ?? "").toLowerCase();
   return (
-    /response recorded|thank you|submission received|your response has been recorded|recorded your response|تم إرسال/i.test(
+    /response recorded|thank you|submission received|your response has been recorded|recorded your response|تم إرسال|successfully submitted|application received|we have received/i.test(
       text,
     ) || /formresponse/i.test(location.href)
   );
+}
+
+/**
+ * Playwright only serializes the function passed to page.evaluate — not module siblings.
+ * Bundle helpers into one browser scope so capture/fill/next/submit actually work.
+ */
+export function formDomBrowserBundle(): string {
+  const fns = [
+    fnv1aHex,
+    stableFieldId,
+    controlSignal,
+    normalizeTokens,
+    labelsMatch,
+    toHtmlDateValue,
+    valueForNativeInput,
+    looksLikeFileField,
+    classifyButton,
+    visible,
+    captureFormPage,
+    findByBatchId,
+    setNativeValue,
+    applyField,
+    applyFillPlan,
+    clickFormControl,
+    clickNextControl,
+    clickSubmitControl,
+    detectSubmissionConfirmation,
+  ];
+  return fns.map((fn) => Function.prototype.toString.call(fn)).join("\n");
+}
+
+export type FormDomAction = "capture" | "apply" | "next" | "submit" | "confirm";
+
+export function runFormDomAction(
+  action: FormDomAction,
+  arg?: FillPlanEntry[],
+): CapturedFormPage | { filled: number; skipped: number } | { clicked: boolean; reason?: string } | boolean {
+  switch (action) {
+    case "capture":
+      return captureFormPage();
+    case "apply":
+      return applyFillPlan(arg ?? []);
+    case "next":
+      return clickNextControl();
+    case "submit":
+      return clickSubmitControl();
+    case "confirm":
+      return detectSubmissionConfirmation();
+  }
 }

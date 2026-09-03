@@ -342,16 +342,17 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
 
         <Card className="p-6">
           <h2 className="font-display text-2xl">Submission readiness</h2>
-        <p className="mt-2 text-sm text-ink-muted">
-            Deterministic completeness from required documents, approved answers, review items, Fit gaps, and autofill review.
+          <p className="mt-2 text-sm text-ink-muted">
+            Optional checklist for this application. Auto-submit before the deadline uses Memory + Need You as
+            filled — it does not wait for this score to reach 100%.
           </p>
           <div className="mt-6">
-            <Progress value={completeness.percent} label={`${completeness.complete} / ${completeness.total} required complete`} />
+            <Progress value={completeness.percent} label={`${completeness.complete} / ${completeness.total} tracked items`} />
             <p className="mt-3 font-mono text-3xl">{completeness.percent}%</p>
           </div>
           {completeness.remaining.length > 0 ? (
             <div className="mt-5 rounded-xl border border-line bg-canvas p-4">
-              <p className="font-medium">Remaining</p>
+              <p className="font-medium">You can still improve</p>
               <ul className="mt-3 grid gap-2 text-sm text-ink-muted">
                 {completeness.remaining.slice(0, 8).map((item) => (
                   <li key={item}>• {item}</li>
@@ -360,7 +361,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
           </div>
           ) : (
             <p className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              All required items are complete. You can freeze a submission snapshot when you are ready.
+              Tracked items look complete. Host auto-submit still runs from Memory + Need You before the deadline.
             </p>
           )}
         </Card>

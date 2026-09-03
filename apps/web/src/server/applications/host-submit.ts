@@ -544,13 +544,28 @@ export async function completeHostSubmitJob(input: {
       })
       .eq("id", jobId);
 
-    await freezeApplicationPacket({
+    const freeze = await freezeApplicationPacket({
       supabase,
       actor,
       applicationId,
       source: "silence",
       hostSubmitClicked: true,
     });
+
+    // Always mark the application submitted once the host Submit control was clicked,
+    // even if snapshot freeze is a no-op (already frozen / race).
+    if (!freeze.ok) {
+      await supabase
+        .from("applications")
+        .update({
+          status: "submitted",
+          submitted_at: now,
+          next_action: "Submitted to the host before the deadline.",
+        })
+        .eq("id", applicationId)
+        .eq("user_id", actor.userId)
+        .neq("status", "submitted");
+    }
 
     await recordApplicationEvent(supabase, actor, applicationId, "application.host_submitted", {
       jobId,

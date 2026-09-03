@@ -7,19 +7,34 @@ import { logError } from "@/lib/log";
 import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
 
 import {
-  applyFillPlan,
-  captureFormPage,
-  clickNextControl,
-  clickSubmitControl,
-  detectSubmissionConfirmation,
+  formDomBrowserBundle,
   type CapturedFormPage,
   type FillPlanEntry,
+  type FormDomAction,
 } from "./playwright-form-dom";
 import { applyHostFileUploads } from "./playwright-host-files";
 import { loadDocumentVersionUpload, type DocumentVersionUpload } from "@/server/documents/download-version";
 
 const MAX_STEPS = 14;
 const STEP_WAIT_MS = 1800;
+const FORM_DOM_BUNDLE = formDomBrowserBundle();
+
+async function evaluateFormDom<T>(
+  page: Page,
+  action: FormDomAction,
+  arg?: FillPlanEntry[],
+): Promise<T> {
+  return page.evaluate(
+    ({ bootstrap, action: nextAction, arg: nextArg }) => {
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+      const run = new Function(
+        `${bootstrap}\nreturn (function(action, arg) {\n  if (action === "capture") return captureFormPage();\n  if (action === "apply") return applyFillPlan(arg || []);\n  if (action === "next") return clickNextControl();\n  if (action === "submit") return clickSubmitControl();\n  if (action === "confirm") return detectSubmissionConfirmation();\n  throw new Error("unknown_form_dom_action");\n});`,
+      ) as () => (action: FormDomAction, arg?: FillPlanEntry[]) => T;
+      return run()(nextAction as FormDomAction, nextArg as FillPlanEntry[] | undefined);
+    },
+    { bootstrap: FORM_DOM_BUNDLE, action, arg },
+  );
+}
 
 export type ServerHostSubmitResult =
   | { ok: true; submitted: boolean; hostSubmitClicked: boolean; filledFields: number }
@@ -86,7 +101,7 @@ async function runPlaywrightHostSession(input: {
     let lastNavigationReason = "no-navigation";
 
     for (let step = 0; step < MAX_STEPS; step += 1) {
-      const capture = (await page.evaluate(captureFormPage)) as CapturedFormPage;
+      const capture = (await evaluateFormDom<CapturedFormPage>(page, "capture"));
 
       if (capture.hazards.captcha) {
         return { ok: false, blockedReason: "CAPTCHA on this page — complete it manually in the browser." };
@@ -128,7 +143,11 @@ async function runPlaywrightHostSession(input: {
           type: capture.fields.find((item) => item.fieldId === field.fieldId)?.type,
         }));
 
-        const applyResult = (await page.evaluate(applyFillPlan, entries)) as { filled: number; skipped: number };
+        const applyResult = (await evaluateFormDom<{ filled: number; skipped: number }>(
+          page,
+          "apply",
+          entries,
+        ));
         totalFilled += applyResult.filled;
 
         const versionIds = [
@@ -158,24 +177,29 @@ async function runPlaywrightHostSession(input: {
         await page.waitForTimeout(600);
       }
 
-      const advance = (await page.evaluate(clickNextControl)) as { clicked: boolean; reason?: string };
+      const advance = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "next");
       lastNavigationReason = advance.reason ?? (advance.clicked ? "next-clicked" : "no-next");
       if (advance.clicked) {
         const previousUrl = page.url();
+        const previousText = capture.pageText.slice(0, 200);
         await waitForPageReady(page);
-        if (page.url() === previousUrl) {
-          await page.waitForTimeout(800);
+        const stillSamePage =
+          page.url() === previousUrl &&
+          ((await evaluateFormDom<CapturedFormPage>(page, "capture")).pageText.slice(0, 200) === previousText);
+        if (!stillSamePage) {
+          continue;
         }
-        continue;
+        // Next didn't advance (often required-field validation) — fall through to Submit.
+        lastNavigationReason = "next-stuck";
       }
 
       if (input.clickFinalSubmit) {
-        const submit = (await page.evaluate(clickSubmitControl)) as { clicked: boolean; reason?: string };
+        const submit = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "submit");
         lastNavigationReason = submit.reason ?? (submit.clicked ? "submit-clicked" : "no-submit");
         if (submit.clicked) {
           hostSubmitClicked = true;
           await page.waitForTimeout(STEP_WAIT_MS);
-          const confirmed = (await page.evaluate(detectSubmissionConfirmation)) as boolean;
+          const confirmed = await evaluateFormDom<boolean>(page, "confirm");
           await context.close();
           return {
             ok: true,
