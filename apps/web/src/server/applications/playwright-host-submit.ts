@@ -27,10 +27,18 @@ async function evaluateFormDom<T>(
   return page.evaluate(
     ({ bootstrap, action: nextAction, arg: nextArg }) => {
       // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-      const run = new Function(
-        `${bootstrap}\nreturn (function(action, arg) {\n  if (action === "capture") return captureFormPage();\n  if (action === "apply") return applyFillPlan(arg || []);\n  if (action === "next") return clickNextControl();\n  if (action === "submit") return clickSubmitControl();\n  if (action === "confirm") return detectSubmissionConfirmation();\n  throw new Error("unknown_form_dom_action");\n});`,
-      ) as () => (action: FormDomAction, arg?: FillPlanEntry[]) => T;
-      return run()(nextAction as FormDomAction, nextArg as FillPlanEntry[] | undefined);
+      const runner = new Function(
+        `${bootstrap}\n` +
+          "return function __1applyFormDom(action, arg) {\n" +
+          '  if (action === "capture") return captureFormPage();\n' +
+          '  if (action === "apply") return applyFillPlan(arg || []);\n' +
+          '  if (action === "next") return clickNextControl();\n' +
+          '  if (action === "submit") return clickSubmitControl();\n' +
+          '  if (action === "confirm") return detectSubmissionConfirmation();\n' +
+          '  throw new Error("unknown_form_dom_action");\n' +
+          "};",
+      ) as () => (next: FormDomAction, payload?: FillPlanEntry[]) => T;
+      return runner()(nextAction as FormDomAction, nextArg as FillPlanEntry[] | undefined);
     },
     { bootstrap: FORM_DOM_BUNDLE, action, arg },
   );

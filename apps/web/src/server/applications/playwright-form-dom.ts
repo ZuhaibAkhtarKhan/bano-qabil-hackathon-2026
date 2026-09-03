@@ -421,7 +421,33 @@ export function detectSubmissionConfirmation(): boolean {
 /**
  * Playwright only serializes the function passed to page.evaluate — not module siblings.
  * Bundle helpers into one browser scope so capture/fill/next/submit actually work.
+ *
+ * Important: production minify strips function names, so `toString()` becomes
+ * `function(){...}` which is illegal as a statement. Always assign as an expression:
+ * `var name = (function(){...});`
  */
+const FORM_DOM_FN_NAMES = [
+  "fnv1aHex",
+  "stableFieldId",
+  "controlSignal",
+  "normalizeTokens",
+  "labelsMatch",
+  "toHtmlDateValue",
+  "valueForNativeInput",
+  "looksLikeFileField",
+  "classifyButton",
+  "visible",
+  "captureFormPage",
+  "findByBatchId",
+  "setNativeValue",
+  "applyField",
+  "applyFillPlan",
+  "clickFormControl",
+  "clickNextControl",
+  "clickSubmitControl",
+  "detectSubmissionConfirmation",
+] as const;
+
 export function formDomBrowserBundle(): string {
   const fns = [
     fnv1aHex,
@@ -444,7 +470,13 @@ export function formDomBrowserBundle(): string {
     clickSubmitControl,
     detectSubmissionConfirmation,
   ];
-  return fns.map((fn) => Function.prototype.toString.call(fn)).join("\n");
+  return fns
+    .map((fn, index) => {
+      const name = FORM_DOM_FN_NAMES[index];
+      const source = Function.prototype.toString.call(fn);
+      return `var ${name} = (${source});`;
+    })
+    .join("\n");
 }
 
 export type FormDomAction = "capture" | "apply" | "next" | "submit" | "confirm";
