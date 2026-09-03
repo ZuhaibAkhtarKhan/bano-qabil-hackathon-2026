@@ -163,7 +163,8 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
     fieldMappingsPending: mappingReviewCount,
   });
   const submissionGuard = evaluateSubmissionGuard(buildSubmissionGuardInput(data));
-  const submitted = normalizedStatus === "submitted" || snapshots.length > 0;
+  const packetFrozen = snapshots.length > 0;
+  const submitted = normalizedStatus === "submitted";
   const loop = assessOperatingLoop({
     hasOpportunity: Boolean(opportunity),
     opportunityAnalyzed: opportunity?.analysis_status === "ready" || (data.eligibility?.length ?? 0) > 0,
@@ -564,7 +565,8 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
         <Card className="p-6">
           <h2 className="font-display text-2xl">Submission</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            Freeze an immutable snapshot of opportunity, selected versions, final answers, and referenced evidence. This does not submit to the host.
+            Freeze an immutable snapshot of opportunity, selected versions, final answers, and referenced evidence.
+            This does not submit to the host and does not mark the application Submitted.
           </p>
           <DeadlineDisplay
             deadlineAt={application.deadline_at}
@@ -574,8 +576,8 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
         <div className="mt-6 flex flex-wrap gap-3">
           <form action={markSubmitted}>
             <input type="hidden" name="applicationId" value={application.id} />
-              <SubmitButton disabled={submitted || !submissionGuard.safe}>
-                {submitted ? "Snapshot already frozen" : "Freeze submission snapshot"}
+              <SubmitButton disabled={packetFrozen || !submissionGuard.safe}>
+                {packetFrozen ? "Snapshot already frozen" : "Freeze submission snapshot"}
             </SubmitButton>
           </form>
           <form action={updateApplicationStatus} className="flex flex-wrap items-end gap-2">

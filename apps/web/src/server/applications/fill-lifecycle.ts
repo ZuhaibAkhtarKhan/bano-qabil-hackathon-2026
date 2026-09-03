@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { memoryFactKey, detectSubmissionSignals } from "@1apply/domain";
+import { memoryFactKey } from "@1apply/domain";
 import type { FillSessionCapturedField, FillSessionEndReason, FormPageCapture } from "@1apply/contracts";
 
 import type { Actor } from "@/auth/actor";
@@ -19,7 +19,6 @@ import { evaluateApplicationIntelligence } from "@/server/intelligence/evaluate"
 import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
-import { fetchPublicPageText } from "@/server/ingest/fetch-page";
 
 function revalidateLifecycle(applicationId: string) {
   safeRevalidatePath("/app");
@@ -337,84 +336,6 @@ async function continueAfterFillStop(
   }
 }
 
-export async function markSubmittedFromHostSignal(input: {
-  supabase: SupabaseClient;
-  actor: Actor;
-  applicationId: string;
-  signalSnippet: string | null;
-  matchedPattern: string | null;
-}) {
-  const { supabase, actor, applicationId } = input;
-  const { data: application } = await supabase
-    .from("applications")
-    .select("id, status, opportunity_id")
-    .eq("id", applicationId)
-    .eq("user_id", actor.userId)
-    .maybeSingle();
-
-  if (!application) return { submitted: false as const };
-  if (application.status === "submitted") {
-    return { submitted: true as const, already: true as const };
-  }
-
-  const submittedAt = new Date().toISOString();
-  await supabase
-    .from("applications")
-    .update({
-      status: "submitted",
-      submitted_at: submittedAt,
-      next_action: APPLICATION_LIFECYCLE_ACTIONS.SUBMITTED,
-    })
-    .eq("id", applicationId)
-    .eq("user_id", actor.userId);
-
-  await supabase.from("application_status_history").insert({
-    user_id: actor.userId,
-    application_id: applicationId,
-    from_status: application.status,
-    to_status: "submitted",
-  });
-
-  // Lightweight freeze — host already accepted; full snapshot optional later.
-  await supabase.from("submission_snapshots").insert({
-    user_id: actor.userId,
-    application_id: applicationId,
-    submitted_at: submittedAt,
-    answer_manifest: [],
-    document_manifest: [],
-    opportunity_snapshot: {
-      detectedVia: "host_signal",
-      matchedPattern: input.matchedPattern,
-      snippet: input.signalSnippet,
-    },
-    evidence_manifest: [],
-    field_manifest: [],
-    application_status: "submitted",
-    idempotency_key: `host-signal:${applicationId}:${submittedAt.slice(0, 16)}`,
-    guard_result: { mode: "host_signal", ok: true },
-  });
-
-  await recordAuditEvent(supabase, "application.submitted_host_signal", {
-    applicationId,
-    matchedPattern: input.matchedPattern,
-  });
-  await recordApplicationEvent(supabase, actor, applicationId, "application.submitted", {
-    source: "host_signal",
-    matchedPattern: input.matchedPattern,
-  });
-  await notifyLifecycle(
-    supabase,
-    actor,
-    applicationId,
-    "Application submitted",
-    "Host page signals show this application was already recorded. Tracking it as submitted.",
-    "application.status_changed",
-  );
-
-  revalidateLifecycle(applicationId);
-  return { submitted: true as const, already: false as const };
-}
-
 export async function endFillSession(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -438,29 +359,6 @@ export async function endFillSession(input: {
 
   if (!application) {
     throw new Error("NOT_FOUND");
-  }
-
-  const pageSignal = detectSubmissionSignals(input.pageText);
-  const treatAsSubmitted = input.reason === "submitted_detected" || pageSignal.submitted;
-
-  if (treatAsSubmitted) {
-    const result = await markSubmittedFromHostSignal({
-      supabase,
-      actor,
-      applicationId,
-      signalSnippet: pageSignal.snippet,
-      matchedPattern: pageSignal.matchedPattern ?? "submitted_detected",
-    });
-    return {
-      applicationId,
-      status: "submitted" as const,
-      nextAction: APPLICATION_LIFECYCLE_ACTIONS.SUBMITTED,
-      savedFieldCount: 0,
-      needsYouCount: 0,
-      submitted: true,
-      submissionSignal: pageSignal.matchedPattern ?? "submitted_detected",
-      alreadySubmitted: Boolean(result.already),
-    };
   }
 
   const savedFieldCount = await storeCapturedFieldsInMemory(supabase, actor.userId, input.fields);
@@ -551,6 +449,18 @@ export async function endFillSession(input: {
       .eq("user_id", actor.userId);
   }
 
+  if (needsYouCount === 0 && application.status !== "submitted") {
+    const { tryNoDeadlineHostSubmitIfComplete } = await import(
+      "@/server/applications/host-automation-schedule"
+    );
+    await tryNoDeadlineHostSubmitIfComplete({ supabase, actor, applicationId }).catch((error) => {
+      logError("fill_lifecycle.host_submit_after_fill_failed", {
+        applicationId,
+        message: error instanceof Error ? error.message : "unknown",
+      });
+    });
+  }
+
   const { data: refreshed } = await supabase
     .from("applications")
     .select("status, next_action")
@@ -571,43 +481,19 @@ export async function endFillSession(input: {
   };
 }
 
-/** Background probe: fetch host page and mark submitted when copy says so. */
+/** Job-posting copy is not proof of submit. Status stays unchanged until Playwright confirms. */
 export async function probeApplicationSubmission(input: {
   supabase: SupabaseClient;
   actor: Actor;
   applicationId: string;
   sourceUrl: string | null;
 }) {
-  if (!input.sourceUrl) return { submitted: false as const };
-
+  void input.sourceUrl;
   const { data: application } = await input.supabase
     .from("applications")
     .select("id, status")
     .eq("id", input.applicationId)
     .eq("user_id", input.actor.userId)
     .maybeSingle();
-  if (!application || application.status === "submitted") {
-    return { submitted: application?.status === "submitted" };
-  }
-
-  try {
-    const fetched = await fetchPublicPageText(input.sourceUrl);
-    const signal = detectSubmissionSignals(fetched.text);
-    if (!signal.submitted) return { submitted: false as const };
-
-    await markSubmittedFromHostSignal({
-      supabase: input.supabase,
-      actor: input.actor,
-      applicationId: input.applicationId,
-      signalSnippet: signal.snippet,
-      matchedPattern: signal.matchedPattern,
-    });
-    return { submitted: true as const, matchedPattern: signal.matchedPattern };
-  } catch (err) {
-    logError("fill_lifecycle.probe_failed", {
-      err,
-      applicationId: input.applicationId,
-    });
-    return { submitted: false as const };
-  }
+  return { submitted: application?.status === "submitted" };
 }

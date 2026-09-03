@@ -21,10 +21,11 @@
  *         → Need You queue reads empty/low-confidence mappings + gaps
  *         → Realtime on applications row refreshes dashboard Status
  *
- *   Background submission probe (automation sweep / fill-session probe)
- *     → fetch opportunity URL text OR extension pageText on end
- *     → detectSubmissionSignals
- *     → markSubmittedFromHostSignal (submitted + SUBMITTED)
+ *   Host submit (EC2 Playwright)
+ *     → click Submit + host confirmation (formResponse / thank-you)
+ *     → status submitted + SUBMITTED
+ *
+ *   Freeze snapshot / page-text probe must NOT set submitted.
  *
  * If you change a next_action constant here, update:
  *   - lib/dashboard-display.ts (Status column filters/labels)

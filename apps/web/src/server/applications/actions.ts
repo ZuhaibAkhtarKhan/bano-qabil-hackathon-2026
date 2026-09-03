@@ -677,15 +677,15 @@ export async function markSubmitted(formData: FormData) {
   await supabase
     .from("applications")
     .update({
-      status: "submitted",
-      submitted_at: snapshot.submittedAt,
-      next_action: "Track the host process. 1-Apply did not send this application.",
+      next_action: "Packet frozen. 1-Apply has not submitted the host form.",
     })
-    .eq("id", applicationId);
+    .eq("id", applicationId)
+    .neq("status", "submitted");
 
   await recordApplicationEvent(supabase, actor, applicationId, "application.submitted_snapshot", {
     answers: snapshot.answerManifest.length,
     documents: snapshot.documentManifest.length,
+    hostSubmitClicked: false,
   });
 
   await notify(
@@ -693,12 +693,12 @@ export async function markSubmitted(formData: FormData) {
     actor,
     applicationId,
     "Submission snapshot frozen",
-    `Approved answers and attached document versions were recorded. Guard passed ${guard.checks.filter((c) => c.passed).length}/${guard.checks.length} checks. You still submit to the host yourself.`,
-    "submission.completed",
+    `Approved answers and attached document versions were recorded. Guard passed ${guard.checks.filter((c) => c.passed).length}/${guard.checks.length} checks. The host form was not submitted.`,
+    "intelligence.updated",
   );
 
   revalidateApplication(applicationId);
-  redirectWith(applicationPath(applicationId), { notice: "submitted" }, "review");
+  redirectWith(applicationPath(applicationId), { notice: "saved" }, "review");
 }
 
 export async function updateApplicationStatus(formData: FormData) {
@@ -727,7 +727,7 @@ export async function updateApplicationStatus(formData: FormData) {
       status: parsed.data,
       next_action:
         parsed.data === "submitted"
-          ? "Track the host process. 1-Apply did not send this application."
+          ? "Marked submitted by you. Confirm the host actually received the form."
           : `Continue from ${parsed.data}`,
     })
     .eq("id", applicationId);
