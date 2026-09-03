@@ -104,7 +104,7 @@ function labelFor(el: Element, root: ParentNode): string {
   // Common ATS / custom form wrappers: question lives in a sibling or parent title node.
   // Only search tight wrappers — never the whole <form>/body (that returns unrelated labels).
   const host = el.closest(
-    "[data-question], [data-field-label], .form-group, .form-field, .field, .question, .application-question, .freebirdFormviewerComponentsQuestionBaseRoot, fieldset, [role='group']",
+    "[data-question], [data-field-label], .form-group, .form-field, .form-line, .form-input-wide, .field, .question, .application-question, .freebirdFormviewerComponentsQuestionBaseRoot, fieldset, [role='group']",
   );
   if (host && !["form", "body", "html", "main", "section"].includes(host.tagName.toLowerCase())) {
     for (const selector of [
@@ -576,7 +576,10 @@ export function inventoryFromDocument(root: ParentNode): DetectedField[] {
     if (isNoiseFormField(draft)) continue;
 
     stamp(el, key);
-    stampCard(el.closest('[role="listitem"]'), key);
+    stampCard(
+      el.closest('[role="listitem"], .form-line, .form-input-wide, li.form-line, .form-section'),
+      key,
+    );
     if ((inputType === "radio" || inputType === "checkbox") && key.startsWith("listitem:")) {
       const item = el.closest('[role="listitem"]');
       for (const sibling of Array.from(item?.querySelectorAll(`input[type="${inputType}"]`) ?? [])) {

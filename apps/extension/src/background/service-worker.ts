@@ -163,7 +163,25 @@ type BatchFieldResult = {
   value?: string;
   evidenceIds?: string[];
   documentVersionId?: string;
+  applyMode?: "auto" | "chip" | "ai_assistant" | "skip";
+  reason?: string;
 };
+
+async function trackExtensionFormTab(input: {
+  applicationId: string;
+  origin: string;
+  tabId: number;
+  fillSessionId?: string;
+}): Promise<void> {
+  await saveFillSession({
+    applicationId: input.applicationId,
+    origin: input.origin,
+    tabId: input.tabId,
+    enabled: true,
+    updatedAt: Date.now(),
+    fillSessionId: input.fillSessionId,
+  });
+}
 
 async function loadBatchFiles(results: BatchFieldResult[]): Promise<Map<string, AttachedFile>> {
   const files = new Map<string, AttachedFile>();
@@ -543,6 +561,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         excerpt: meta.excerpt,
         pageText: meta.pageText || meta.excerpt,
         formPage,
+      }).then(async (result) => {
+        if (formPage?.fields?.length) {
+          await trackExtensionFormTab({
+            applicationId: result.applicationId,
+            origin,
+            tabId: tab.id,
+          });
+        }
+        return result;
       });
     }
 
@@ -577,6 +604,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applicationId,
         pageIndex,
         resumeFill: true,
+      });
+      await trackExtensionFormTab({
+        applicationId,
+        origin,
+        tabId: tab.id,
+        fillSessionId: result.fillSessionId,
       });
       await syncManualFillCapture({
         tabId: tab.id,
@@ -632,4 +665,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   task.then(sendResponse).catch((error: Error) => sendResponse({ error: error.message }));
   return true;
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void clearFillSession(tabId, "tab_closed");
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url == null) return;
+  void (async () => {
+    const session = await loadFillSession();
+    if (!session || session.tabId !== tabId) return;
+    try {
+      const nextOrigin = new URL(changeInfo.url).origin;
+      if (nextOrigin !== session.origin) {
+        await clearFillSession(tabId, "origin_left");
+      }
+    } catch {
+      await clearFillSession(tabId, "origin_left");
+    }
+  })();
 });

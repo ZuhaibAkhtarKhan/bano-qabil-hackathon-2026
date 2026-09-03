@@ -118,6 +118,19 @@ export function groundBatchFillFields(input: {
       };
     }
 
+    const value = (field.value ?? "").trim();
+    // Profile / kit / stored mapping fills are verified user data — not LLM drafts.
+    // Only narrative AI drafts require evidence grounding.
+    if (value && cited.length === 0 && field.applyMode !== "ai_assistant") {
+      return {
+        fieldId: field.fieldId,
+        status: "filled",
+        value,
+        ...(field.reason ? { reason: field.reason } : {}),
+        ...(field.applyMode ? { applyMode: field.applyMode } : {}),
+      };
+    }
+
     const draft = finalizeGroundedDraft({
       text: field.value ?? "",
       citedIds: cited,
@@ -125,7 +138,9 @@ export function groundBatchFillFields(input: {
     });
 
     if (!draft.text) {
-      return needYouField(field.fieldId);
+      return needYouField(field.fieldId, {
+        ...(field.applyMode === "ai_assistant" ? { applyMode: "ai_assistant" as const } : {}),
+      });
     }
 
     return {

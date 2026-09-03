@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "1-Apply",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "description": "Save opportunities to 1-Apply and manually fill the current page from memory. Host auto-submit runs on the server.",
   "icons": {
     "16": "icons/icon-16.png",

@@ -291,6 +291,8 @@ export function createBatchFillPlan(input: {
       value?: string;
       evidenceIds?: string[];
       documentVersionId?: string;
+      applyMode?: "auto" | "chip" | "ai_assistant" | "skip";
+      reason?: string;
     }>;
     fillSessionId: string | null;
   }>(`/api/applications/${input.applicationId}/fill-plan/batch`, {

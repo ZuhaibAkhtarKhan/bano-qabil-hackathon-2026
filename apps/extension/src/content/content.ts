@@ -360,7 +360,21 @@ if (!root.__1APPLY_LISTENERS) {
   function findCard(fieldKey: string): HTMLElement | null {
     const tagged = findTagged(fieldKey);
     if (!tagged) return null;
-    return (tagged.closest(`[${APPLY_HOST_ATTR}]`) as HTMLElement | null) || (tagged.closest('[role="listitem"]') as HTMLElement | null) || (tagged as HTMLElement);
+    return (
+      (tagged.closest(`[${APPLY_HOST_ATTR}]`) as HTMLElement | null) ||
+      (tagged.closest('[role="listitem"]') as HTMLElement | null) ||
+      (tagged.closest(".form-line, .form-input-wide, li.form-line, .form-section") as HTMLElement | null) ||
+      (tagged as HTMLElement)
+    );
+  }
+
+  function questionTextForField(fieldKey: string, el: HTMLElement): string {
+    const card = findCard(fieldKey) || el;
+    const fromHeading = card.querySelector('[role="heading"]')?.textContent?.trim();
+    if (fromHeading) return fromHeading;
+    const fromLabel = card.querySelector(".form-label, .form-sub-label, label, legend")?.textContent?.trim();
+    if (fromLabel) return fromLabel;
+    return (el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? fieldKey).trim();
   }
 
   function findControl(fieldKey: string): HTMLElement | null {
@@ -1468,6 +1482,8 @@ if (!root.__1APPLY_LISTENERS) {
             value?: string;
             documentVersionId?: string;
             type?: string;
+            applyMode?: "auto" | "chip" | "ai_assistant" | "skip";
+            reason?: string;
           }>) {
             const el = findControlByBatchId(result.fieldId);
             const fieldKey = el?.getAttribute(APPLY_FIELD_ATTR) || result.fieldId;
@@ -1483,7 +1499,8 @@ if (!root.__1APPLY_LISTENERS) {
               resultType === "checkbox" ||
               resultType === "select" ||
               resultType === "file" ||
-              resultType === "textarea"
+              resultType === "textarea" ||
+              resultType === "contenteditable"
                 ? resultType
                 : el instanceof HTMLSelectElement || card.querySelector('[role="listbox"]')
                   ? "select"
@@ -1511,11 +1528,16 @@ if (!root.__1APPLY_LISTENERS) {
 
             if (result.status !== "filled") {
               highlightKeys.push(fieldKey);
-              if (inferredType === "text" || inferredType === "textarea") {
-                const question =
-                  findCard(fieldKey)?.querySelector('[role="heading"]')?.textContent?.trim() ||
-                  (el.getAttribute("aria-label") ?? "") ||
-                  fieldKey;
+              const question = questionTextForField(fieldKey, el);
+              const wantsAi =
+                result.applyMode === "ai_assistant" ||
+                ((inferredType === "text" || inferredType === "textarea" || inferredType === "contenteditable") &&
+                  result.applyMode !== "chip" &&
+                  (inferredType === "textarea" ||
+                    inferredType === "contenteditable" ||
+                    question.length >= 18 ||
+                    /\?|describe|explain|essay|why |how |tell us|write |share |discuss /i.test(question)));
+              if (wantsAi) {
                 mountAiAssistant(el, fieldKey, question, inferredType, applicationId, []);
               }
               results.push({ fieldId: result.fieldId, filled: false, skippedReason: "need_you" });

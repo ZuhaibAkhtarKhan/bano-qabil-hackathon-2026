@@ -444,7 +444,6 @@ export function mappingsToBatchResults(
     }
 
     if (!mapping || mapping.sensitive || mapping.approvalState === "blocked") {
-      console.log("[batch-fill-gate] no-mapping/sensitive/blocked", { fieldId: field.fieldId, label: field.label, hasMapping: Boolean(mapping) });
       return { fieldId: field.fieldId, status: "need_you" as const };
     }
 
@@ -460,7 +459,6 @@ export function mappingsToBatchResults(
       value = "";
     }
     if (!value) {
-      console.log("[batch-fill-gate] empty-value", { fieldId: field.fieldId, label: field.label, memoryPath: mapping.memoryPath, proposedValue: mapping.proposedValue, mappedValue });
       return { fieldId: field.fieldId, status: "need_you" as const };
     }
 
@@ -494,7 +492,6 @@ export function mappingsToBatchResults(
     const trustedKitPath =
       /^(Profile →|Education →|Skills →|Contact →|Evidence →)/i.test(mapping.memoryPath) ||
       mapping.source === "Application Memory";
-    console.log("[batch-fill-gate] trust-check", { fieldId: field.fieldId, label: field.label, memoryPath: mapping.memoryPath, trustedKitPath, confidence: mapping.confidence, kitPathId, inAllowed: catalog.allowedEvidenceIds.includes(kitPathId), citedLen: cited.length });
     if (trustedKitPath && mapping.confidence >= 0.55) {
       const kitCite = catalog.allowedEvidenceIds.includes(kitPathId) ? [kitPathId] : [];
       return { fieldId: field.fieldId, status: "filled" as const, value, evidenceIds: kitCite };

@@ -528,6 +528,19 @@ export async function endFillSession(input: {
     await continueAfterFillStop(supabase, actor, applicationId, application.opportunity_id);
   }
 
+  // User closed the host form tab without submitting — server fill/submit may proceed now.
+  if (input.reason === "tab_closed" || input.reason === "origin_left") {
+    const { syncHostAutomationForApplication } = await import("./host-automation-schedule");
+    await syncHostAutomationForApplication({
+      supabase,
+      actor,
+      applicationId,
+      queuePrefill: true,
+    }).catch((err) => {
+      logError("fill_lifecycle.host_automation_after_tab_close_failed", { err, applicationId });
+    });
+  }
+
   // Rematch kit into any remaining gaps before final status / count.
   await refreshOpenApplicationsFromKit(supabase, actor).catch((error) => {
     logError("fill_lifecycle.kit_refresh_after_stop_failed", {

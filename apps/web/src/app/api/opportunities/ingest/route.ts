@@ -149,11 +149,14 @@ export async function POST(request: Request) {
       source: parsed.data.source,
     });
 
-    await syncHostAutomationForApplication({
-      supabase,
-      actor,
-      applicationId: result.applicationId,
-    });
+    // Extension saves keep the form tab open for manual fill — defer server automation until tab close.
+    if (parsed.data.source !== "extension") {
+      await syncHostAutomationForApplication({
+        supabase,
+        actor,
+        applicationId: result.applicationId,
+      });
+    }
 
     revalidatePath("/app");
     revalidatePath("/app/applications");

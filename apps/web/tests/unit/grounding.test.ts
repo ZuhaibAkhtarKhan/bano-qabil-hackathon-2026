@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { finalizeGroundedDraft, freezeSubmissionManifest, lengthWarnings } from "@1apply/domain";
+import { finalizeGroundedDraft, freezeSubmissionManifest, groundBatchFillFields, lengthWarnings } from "@1apply/domain";
 
 const allowed = ["11111111-1111-4111-8111-111111111111"];
 
@@ -25,6 +25,41 @@ describe("finalizeGroundedDraft", () => {
     expect(draft.evidenceIds).toEqual(allowed);
     expect(draft.warnings).toContain("UNKNOWN_EVIDENCE_STRIPPED");
     expect(draft.text).toContain("retrieval pipeline");
+  });
+});
+
+describe("groundBatchFillFields", () => {
+  it("keeps profile memory fills without evidence citations", () => {
+    const grounded = groundBatchFillFields({
+      fields: [
+        {
+          fieldId: "f_name",
+          status: "filled",
+          value: "Zuhaib Akhtar",
+          applyMode: "auto",
+        },
+      ],
+      allowedEvidenceIds: [],
+      allowedDocumentVersionIds: [],
+    });
+    expect(grounded[0]?.status).toBe("filled");
+    expect(grounded[0]?.value).toBe("Zuhaib Akhtar");
+  });
+
+  it("downgrades AI assistant fields with no grounding to need_you", () => {
+    const grounded = groundBatchFillFields({
+      fields: [
+        {
+          fieldId: "f_essay",
+          status: "filled",
+          value: "I am passionate about software engineering.",
+          applyMode: "ai_assistant",
+        },
+      ],
+      allowedEvidenceIds: [],
+      allowedDocumentVersionIds: [],
+    });
+    expect(grounded[0]?.status).toBe("need_you");
   });
 });
 
