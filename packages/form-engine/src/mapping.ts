@@ -122,8 +122,11 @@ const RULES: Rule[] = [
       "home address",
       "mailing address",
       "your address",
+      "street address",
+      "current location",
+      "city state",
     ],
-    minConfidence: 0.6,
+    minConfidence: 0.65,
   },
   {
     path: "Documents → Resume",
@@ -891,7 +894,9 @@ export function mapField(field: DetectedField, catalog: MemoryValue[]): FieldMap
   const fuzzy = rankCatalogAgainstField(field, catalog);
 
   const ambiguousName = /\bname\b/.test(signals) && !/(full|first|last|given|family|user|university|school|company)/.test(signals);
-  if (!best && ambiguousName) {
+  // "Full Name" and a plain "Name" label are unambiguous — they mean the display name.
+  const isFullName = /\bfull\s*name\b/i.test(signals) || /^name$/i.test((field.label ?? "").trim());
+  if (!best && ambiguousName && !isFullName) {
     const options = toOptions([
       ...memoriesForPath("Profile → Full name", ["name", "full name"], catalog),
       ...memoriesForPath("Profile → First name", ["first name"], catalog),
