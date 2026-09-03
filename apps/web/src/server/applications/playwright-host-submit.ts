@@ -7,7 +7,7 @@ import { logError } from "@/lib/log";
 import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
 
 import {
-  formDomBrowserBundle,
+  executeFormDomInPage,
   type CapturedFormPage,
   type FillPlanEntry,
   type FormDomAction,
@@ -17,31 +17,14 @@ import { loadDocumentVersionUpload, type DocumentVersionUpload } from "@/server/
 
 const MAX_STEPS = 14;
 const STEP_WAIT_MS = 1800;
-const FORM_DOM_BUNDLE = formDomBrowserBundle();
 
 async function evaluateFormDom<T>(
   page: Page,
   action: FormDomAction,
   arg?: FillPlanEntry[],
 ): Promise<T> {
-  return page.evaluate(
-    ({ bootstrap, action: nextAction, arg: nextArg }) => {
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-      const runner = new Function(
-        `${bootstrap}\n` +
-          "return function __1applyFormDom(action, arg) {\n" +
-          '  if (action === "capture") return captureFormPage();\n' +
-          '  if (action === "apply") return applyFillPlan(arg || []);\n' +
-          '  if (action === "next") return clickNextControl();\n' +
-          '  if (action === "submit") return clickSubmitControl();\n' +
-          '  if (action === "confirm") return detectSubmissionConfirmation();\n' +
-          '  throw new Error("unknown_form_dom_action");\n' +
-          "};",
-      ) as () => (next: FormDomAction, payload?: FillPlanEntry[]) => T;
-      return runner()(nextAction as FormDomAction, nextArg as FillPlanEntry[] | undefined);
-    },
-    { bootstrap: FORM_DOM_BUNDLE, action, arg },
-  );
+  // Pass the self-contained function directly — never toString/new Function helpers.
+  return page.evaluate(executeFormDomInPage, { action, arg }) as Promise<T>;
 }
 
 export type ServerHostSubmitResult =
