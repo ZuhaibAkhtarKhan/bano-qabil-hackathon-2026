@@ -21,6 +21,9 @@ export type DashboardMatch = {
   match: number | null;
   tone: "sand" | "mint" | "violet" | "coral";
   sourceLabel: string | null;
+  /** Application lifecycle status for CTA (e.g. submitted → tag, not Apply). */
+  status: string;
+  statusLabel: string;
 };
 
 export type DashboardApplicationRow = ApplicationsTrackerRow & {
@@ -374,6 +377,8 @@ function JobMatchCard({
   const target = job.match ?? 0;
   const cardProgress = Math.min(1, Math.max(0, (revealProgress - stagger) / Math.max(0.001, 1 - stagger)));
   const display = target * cardProgress;
+  const isSubmitted =
+    job.status === "submitted" || job.statusLabel.toLowerCase() === "submitted";
 
   return (
     <article className={cn("flex min-h-[10.5rem] flex-col rounded-2xl border p-4", CARD_TONES[job.tone])}>
@@ -394,12 +399,22 @@ function JobMatchCard({
           </span>
           <span className="truncate text-xs font-medium text-ink-muted">{job.company.split(" ")[0]}</span>
         </div>
-        <Link
-          href={job.href}
-          className="shrink-0 rounded-full bg-[#1a3329] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#142820]"
-        >
-          Apply
-        </Link>
+        {isSubmitted ? (
+          <Link
+            href={job.href}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" aria-hidden="true" />
+            Submitted
+          </Link>
+        ) : (
+          <Link
+            href={job.href}
+            className="shrink-0 rounded-full bg-[#1a3329] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#142820]"
+          >
+            Apply
+          </Link>
+        )}
       </div>
     </article>
   );

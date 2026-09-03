@@ -12,8 +12,17 @@ export async function freezeApplicationPacket(input: {
   applicationId: string;
   source: "user" | "silence";
   hostSubmitClicked?: boolean;
+  /** When false, skip the submission.completed notice (caller emits its own). */
+  emitNotification?: boolean;
 }): Promise<{ ok: true; snapshotId: string } | { ok: false; reason: string }> {
-  const { supabase, actor, applicationId, source, hostSubmitClicked = false } = input;
+  const {
+    supabase,
+    actor,
+    applicationId,
+    source,
+    hostSubmitClicked = false,
+    emitNotification = true,
+  } = input;
 
   const { data: application } = await supabase
     .from("applications")
@@ -145,22 +154,24 @@ export async function freezeApplicationPacket(input: {
     source,
   });
 
-  await emitDomainEvent(supabase, {
-    name: "submission.completed",
-    userId: actor.userId,
-    applicationId,
-    subjectId: `${applicationId}:packet:${source}`,
-    title: hostSubmitClicked
-      ? "Form submitted to host"
-      : source === "silence"
-        ? "Packet frozen at deadline"
-        : "Submission snapshot frozen",
-    body: hostSubmitClicked
-      ? "1-Apply filled and clicked Submit on the host form."
-      : source === "silence"
-        ? "The current packet was frozen because you did not edit before the deadline."
-        : "Approved answers and attached document versions were recorded. You still submit to the host yourself.",
-  });
+  if (emitNotification) {
+    await emitDomainEvent(supabase, {
+      name: "submission.completed",
+      userId: actor.userId,
+      applicationId,
+      subjectId: `${applicationId}:packet:${source}`,
+      title: hostSubmitClicked
+        ? "Form submitted to host"
+        : source === "silence"
+          ? "Packet frozen at deadline"
+          : "Submission snapshot frozen",
+      body: hostSubmitClicked
+        ? "1-Apply filled and clicked Submit on the host form."
+        : source === "silence"
+          ? "The current packet was frozen because you did not edit before the deadline."
+          : "Approved answers and attached document versions were recorded. You still submit to the host yourself.",
+    });
+  }
 
   return { ok: true, snapshotId: String(snapshotRow.id) };
 }

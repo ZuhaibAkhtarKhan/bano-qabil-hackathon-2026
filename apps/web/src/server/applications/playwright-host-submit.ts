@@ -16,7 +16,6 @@ import { applyHostFileUploads } from "./playwright-host-files";
 import { loadDocumentVersionUpload, type DocumentVersionUpload } from "@/server/documents/download-version";
 
 const MAX_STEPS = 14;
-const STEP_WAIT_MS = 1800;
 
 async function evaluateFormDom<T>(
   page: Page,
@@ -29,12 +28,48 @@ async function evaluateFormDom<T>(
 
 export type ServerHostSubmitResult =
   | { ok: true; submitted: boolean; hostSubmitClicked: boolean; filledFields: number }
-  | { ok: false; blockedReason: string; error?: string }
-  | { ok: false; error: string; blockedReason?: string };
+  | { ok: false; blockedReason: string; error?: string; hostSubmitClicked?: boolean }
+  | { ok: false; error: string; blockedReason?: string; hostSubmitClicked?: boolean };
 
 async function waitForPageReady(page: Page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 45_000 }).catch(() => undefined);
   await page.waitForTimeout(1200);
+}
+
+async function waitForHostConfirmation(page: Page): Promise<boolean> {
+  const deadline = Date.now() + 12_000;
+  while (Date.now() < deadline) {
+    await page.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => undefined);
+    if (await evaluateFormDom<boolean>(page, "confirm")) return true;
+    // Google Forms often lands on formResponse URL after a real submit.
+    const href = page.url().toLowerCase();
+    if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
+    await page.waitForTimeout(700);
+  }
+  return evaluateFormDom<boolean>(page, "confirm");
+}
+
+/** Prefer Playwright pointer click — Google Forms often ignores a bare DOM .click(). */
+async function clickHostSubmitWithPlaywright(page: Page): Promise<boolean> {
+  const candidates = [
+    page.locator('div[role="button"][jsname="M2UYVd"]').first(),
+    page.locator(".freebirdFormviewerViewNavigationSubmitButton").first(),
+    page.locator('[data-action-id="submit"]').first(),
+    page.getByRole("button", { name: /^(submit|send)$/i }).first(),
+    page.locator('button[type="submit"]').first(),
+  ];
+  for (const locator of candidates) {
+    try {
+      if ((await locator.count()) === 0) continue;
+      if (!(await locator.isVisible())) continue;
+      await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+      await locator.click({ timeout: 4_000 });
+      return true;
+    } catch {
+      // try next candidate
+    }
+  }
+  return false;
 }
 
 export async function runPlaywrightHostSubmit(input: {
@@ -185,18 +220,42 @@ async function runPlaywrightHostSession(input: {
       }
 
       if (input.clickFinalSubmit) {
-        const submit = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "submit");
-        lastNavigationReason = submit.reason ?? (submit.clicked ? "submit-clicked" : "no-submit");
-        if (submit.clicked) {
+        // Prefer Playwright pointer click for Google Forms; fall back to in-page .click().
+        let submitClicked = await clickHostSubmitWithPlaywright(page);
+        if (!submitClicked) {
+          const submit = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "submit");
+          submitClicked = submit.clicked;
+          lastNavigationReason = submit.reason ?? (submit.clicked ? "submit-clicked" : "no-submit");
+        } else {
+          lastNavigationReason = "submit-clicked-playwright";
+        }
+
+        if (submitClicked) {
           hostSubmitClicked = true;
-          await page.waitForTimeout(STEP_WAIT_MS);
-          const confirmed = await evaluateFormDom<boolean>(page, "confirm");
+          let confirmed = await waitForHostConfirmation(page);
+          if (!confirmed && !(await evaluateFormDom<boolean>(page, "validation"))) {
+            // One retry — first click sometimes only focuses the control.
+            const retried = await clickHostSubmitWithPlaywright(page);
+            if (retried) confirmed = await waitForHostConfirmation(page);
+          }
+          if (confirmed) {
+            await context.close();
+            return {
+              ok: true,
+              submitted: true,
+              hostSubmitClicked: true,
+              filledFields: totalFilled,
+            };
+          }
+
+          const validationBlocked = await evaluateFormDom<boolean>(page, "validation");
           await context.close();
           return {
-            ok: true,
-            submitted: confirmed,
+            ok: false,
+            error: validationBlocked
+              ? "Submit was clicked but required fields are still empty on the host form."
+              : "Submit was clicked but the host did not confirm the response. Open the form and submit manually.",
             hostSubmitClicked: true,
-            filledFields: totalFilled,
           };
         }
       } else if (capture.hazards.hasSubmitControl) {
@@ -217,7 +276,12 @@ async function runPlaywrightHostSession(input: {
     }
 
     if (hostSubmitClicked) {
-      return { ok: true, submitted: false, hostSubmitClicked: true, filledFields: totalFilled };
+      // Click without confirmation is not success — returned as ok:false above when possible.
+      return {
+        ok: false,
+        error: "Submit was clicked but the host did not confirm the response.",
+        hostSubmitClicked: true,
+      };
     }
 
     if (!input.clickFinalSubmit && totalFilled > 0) {

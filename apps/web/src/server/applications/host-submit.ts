@@ -516,7 +516,8 @@ export async function completeHostSubmitJob(input: {
   error?: string | null;
   blockedReason?: string | null;
 }): Promise<{ ok: boolean }> {
-  const { supabase, actor, jobId, submitted, hostSubmitClicked, error, blockedReason } = input;
+  const { supabase, actor, jobId, submitted, hostSubmitClicked, blockedReason } = input;
+  let error = input.error ?? null;
 
   const { data: job } = await supabase
     .from("host_submit_jobs")
@@ -555,14 +556,14 @@ export async function completeHostSubmitJob(input: {
     return { ok: true };
   }
 
-  if (hostSubmitClicked) {
+  if (hostSubmitClicked && submitted) {
     await supabase
       .from("host_submit_jobs")
       .update({
         status: "submitted",
         host_submit_clicked: true,
         completed_at: now,
-        last_error: submitted ? null : "Submit clicked; host confirmation not detected.",
+        last_error: null,
       })
       .eq("id", jobId);
 
@@ -586,6 +587,7 @@ export async function completeHostSubmitJob(input: {
       applicationId,
       source: "silence",
       hostSubmitClicked: true,
+      emitNotification: false,
     });
 
     const nextAction = postDeadline
@@ -614,7 +616,7 @@ export async function completeHostSubmitJob(input: {
     await recordApplicationEvent(supabase, actor, applicationId, "application.host_submitted", {
       jobId,
       hostSubmitClicked: true,
-      hostConfirmationDetected: submitted,
+      hostConfirmationDetected: true,
       postDeadline,
     });
 
@@ -625,15 +627,16 @@ export async function completeHostSubmitJob(input: {
       subjectId: `${applicationId}:host_submit${postDeadline ? ":post_deadline" : ""}`,
       title: postDeadline ? "Form submitted after the deadline" : "Form submitted to host",
       body: postDeadline
-        ? submitted
-          ? "The form was still open after the deadline. 1-Apply submitted it on the final retry."
-          : "1-Apply clicked Submit after the deadline. Open the host form to confirm if needed."
-        : submitted
-          ? "1-Apply filled and clicked Submit on the host form before the deadline."
-          : "1-Apply clicked Submit on the host form. Open the form to confirm if needed.",
-      payload: { postDeadline },
+        ? "The form was still open after the deadline. 1-Apply submitted it on the final retry."
+        : "1-Apply filled and clicked Submit on the host form. The host confirmed the response.",
+      payload: { postDeadline, hostConfirmationDetected: true },
     });
     return { ok: true };
+  }
+
+  if (hostSubmitClicked && !submitted) {
+    // Click without confirmation must not mark the application submitted.
+    error = error ?? "Submit was clicked but the host did not confirm the response.";
   }
 
   await supabase

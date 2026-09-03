@@ -277,12 +277,12 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         clickFinalSubmit: true,
       });
 
-      if (result.ok && result.hostSubmitClicked) {
+      if (result.ok && result.submitted && result.hostSubmitClicked) {
         await completeHostSubmitJob({
           supabase,
           actor,
           jobId: job.id,
-          submitted: result.submitted,
+          submitted: true,
           hostSubmitClicked: true,
         });
         submitted += 1;
@@ -303,7 +303,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
       }
 
       const errorMessage = result.ok
-        ? "Submit clicked but confirmation not detected."
+        ? "Submit clicked but host confirmation was not detected — response may not have been recorded."
         : (result.error ?? "submit_failed");
 
       await requeueOrFail({
@@ -319,7 +319,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
             actor,
             jobId: job.id,
             submitted: false,
-            hostSubmitClicked: result.ok ? result.hostSubmitClicked : false,
+            hostSubmitClicked: false,
             error: errorMessage,
           });
         },

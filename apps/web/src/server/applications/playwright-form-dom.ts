@@ -37,7 +37,7 @@ export type FillPlanEntry = {
   documentVersionId?: string;
 };
 
-export type FormDomAction = "capture" | "apply" | "next" | "submit" | "confirm";
+export type FormDomAction = "capture" | "apply" | "next" | "submit" | "confirm" | "validation";
 
 export type FormDomEvaluateInput = {
   action: FormDomAction;
@@ -486,6 +486,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
       ),
     ) as HTMLElement[];
     const matches = buttons.filter((btn) => classifyButton(btn) === kind && visible(btn));
+    // Prefer explicit Submit/Send wording; avoid loose "done"/"complete" matches first.
     let preferred =
       matches.find((btn) => {
         const signal = controlSignal(btn);
@@ -493,12 +494,19 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
           ? /\b(next|continue|proceed|forward|go\s*next|next\s*page|next\s*step|weiter|siguiente|suivant)\b/i.test(
               signal,
             )
-          : /\b(submit|send|finish|done|apply|complete|confirm|absenden|enviar|envoyer)\b/i.test(signal);
-      }) ?? matches[matches.length - 1];
+          : /\b(submit|send response|submit response|send form|absenden|enviar|envoyer)\b/i.test(signal);
+      }) ??
+      matches.find((btn) => {
+        const signal = controlSignal(btn);
+        return kind === "submit"
+          ? /\b(submit|send|finish|apply)\b/i.test(signal)
+          : true;
+      }) ??
+      matches[matches.length - 1];
 
     if (!preferred && kind === "submit") {
       const googleSubmit = document.querySelector(
-        '.freebirdFormviewerViewNavigationSubmitButton, [jsname="M2UYVd"], [data-action-id="submit"], [aria-label*="Submit" i], [aria-label*="Send" i]',
+        '.freebirdFormviewerViewNavigationSubmitButton, [jsname="M2UYVd"], [data-action-id="submit"]',
       ) as HTMLElement | null;
       if (googleSubmit && visible(googleSubmit)) preferred = googleSubmit;
     }
@@ -526,10 +534,21 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
   function detectSubmissionConfirmation(): boolean {
     const text = (document.body?.innerText ?? "").toLowerCase();
-    return (
-      /response recorded|thank you|submission received|your response has been recorded|recorded your response|تم إرسال|successfully submitted|application received|we have received/i.test(
-        text,
-      ) || /formresponse/i.test(location.href)
+    const href = location.href.toLowerCase();
+    // Google Forms confirmation heading / message
+    if (/your response has been recorded|response has been recorded|response recorded|تم تسجيل إجابتك/i.test(text)) {
+      return true;
+    }
+    if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
+    return /thank you for (your )?(response|submission)|submission received|successfully submitted|application received|we have received your|تم إرسال/i.test(
+      text,
+    );
+  }
+
+  function detectRequiredFieldErrors(): boolean {
+    const text = (document.body?.innerText ?? "").toLowerCase();
+    return /this is a required question|required question|please fill out this field|please enter a|must be filled|is required\b/i.test(
+      text,
     );
   }
 
@@ -538,5 +557,6 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
   if (action === "next") return clickNextControl();
   if (action === "submit") return clickSubmitControl();
   if (action === "confirm") return detectSubmissionConfirmation();
+  if (action === "validation") return detectRequiredFieldErrors();
   throw new Error("unknown_form_dom_action");
 }

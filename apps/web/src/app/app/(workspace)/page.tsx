@@ -6,7 +6,9 @@ import {
   companyFromOpportunity,
   sourceLabelFromOpportunity,
   toApplicationsTrackerRow,
+  applicationTableMeta,
 } from "@/lib/dashboard-display";
+import { normalizeApplicationStatus } from "@/lib/application-workflow";
 import { groupPackets } from "@/lib/dashboard";
 import { loadDashboard } from "@/server/workspace/queries";
 import { loadNeedsYouFieldCounts } from "@/server/needs-you/queries";
@@ -59,6 +61,11 @@ export default async function DashboardPage() {
   ).map(({ row, score }, index) => {
     const opportunity = asOne(row.opportunities);
     const company = companyFromOpportunity(opportunity);
+    const status = normalizeApplicationStatus(row.status as never) ?? String(row.status ?? "saved");
+    const meta = applicationTableMeta(row.status, row.next_action, {
+      submittedAt: row.submitted_at,
+      needsYouCount: needsYouCounts.fieldCountByApplicationId[row.id] ?? 0,
+    });
     return {
       id: row.id,
       href: `/app/applications/${row.id}`,
@@ -67,6 +74,8 @@ export default async function DashboardPage() {
       match: score,
       tone: MATCH_TONES[index % MATCH_TONES.length]!,
       sourceLabel: sourceLabelFromOpportunity(opportunity),
+      status,
+      statusLabel: meta.statusLabel,
     } satisfies DashboardMatch;
   });
 
