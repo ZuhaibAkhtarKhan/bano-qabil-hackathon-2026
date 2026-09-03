@@ -935,3 +935,46 @@ export async function updateApplicationFieldMapping(formData: FormData) {
   redirectWith(`${applicationPath(applicationId)}#autofill`, { notice: "saved" });
 }
 
+/** Queue an immediate host-submit job for this application — usable any time, including post-deadline. */
+export async function resubmitApplication(formData: FormData) {
+  const { user, supabase, actor } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "");
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("id, status, source_url")
+    .eq("id", applicationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!application) {
+    redirectWith("/app/applications", { error: "not_found" });
+  }
+  if (!application.source_url) {
+    redirectWith(applicationPath(applicationId), { error: "no_source_url" }, "submission");
+  }
+
+  // Queue an immediate submit job (dueAt = now).
+  const { queueHostSubmitJob } = await import("@/server/applications/host-submit");
+  const result = await queueHostSubmitJob({
+    supabase,
+    actor,
+    applicationId,
+    dueAt: new Date(),
+  });
+  if (!result.ok) {
+    redirectWith(applicationPath(applicationId), { error: "save" }, "submission");
+  }
+
+  await recordApplicationEvent(supabase, actor, applicationId, "application.resubmit_queued", {
+    jobId: result.jobId,
+  });
+
+  const { kickHostSubmitWorkerIfEnabled } = await import(
+    "@/server/applications/host-submit-worker-kick"
+  );
+  await kickHostSubmitWorkerIfEnabled();
+
+  revalidateApplication(applicationId);
+  redirectWith(applicationPath(applicationId), { notice: "resubmit_queued" }, "submission");
+}
+

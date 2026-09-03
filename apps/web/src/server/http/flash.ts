@@ -36,6 +36,7 @@ export const FLASH = {
   attached: "Document version attached to this application.",
   submitted: "Submission snapshot frozen. 1-Apply did not send this to the host.",
   already_submitted: "This application already has a frozen snapshot.",
+  resubmit_queued: "Resubmit queued. The server will fill and submit the host form now — check back in a minute.",
   status_updated: "Application status updated.",
   deleted: "Removed from Application Memory.",
   application_deleted: "Application and its saved posting were removed.",
@@ -63,6 +64,7 @@ export const ERRORS = {
   snapshot: "Could not freeze a snapshot.",
   confirm_failed: "Could not confirm eligibility. Try again.",
   deadline_past: "Choose a deadline in the future.",
+  no_source_url: "No host URL is stored for this application. Add the original posting URL to enable auto-submit.",
 } as const;
 
 export type FlashCode = keyof typeof FLASH;

@@ -36,6 +36,7 @@ import {
   attachDocument,
   deleteApplication,
   markSubmitted,
+  resubmitApplication,
   resolveReviewItem,
   updateApplicationFieldMapping,
   updateApplicationPersona,
@@ -578,6 +579,14 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 {submitted ? "Snapshot already frozen" : "Freeze submission snapshot"}
             </SubmitButton>
           </form>
+          {application.source_url ? (
+            <form action={resubmitApplication}>
+              <input type="hidden" name="applicationId" value={application.id} />
+              <SubmitButton variant="secondary" title="Queue an immediate server auto-submit to the host form. Works even after the deadline.">
+                Resubmit to host
+              </SubmitButton>
+            </form>
+          ) : null}
           <form action={updateApplicationStatus} className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="applicationId" value={application.id} />
             <Field label="Status" htmlFor={`status-${application.id}`}>
