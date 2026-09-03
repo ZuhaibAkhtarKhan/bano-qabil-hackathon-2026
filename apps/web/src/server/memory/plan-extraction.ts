@@ -47,7 +47,7 @@ export type PlannedEvidence = {
   factKey: string;
   identityKey: string;
   extractionStatus: "extracted";
-  verificationStatus: "verified";
+  verificationStatus: "unverified";
 };
 
 export type PlannedScalarFact = {
@@ -55,7 +55,7 @@ export type PlannedScalarFact = {
   factKey: string;
   value: string;
   extractionStatus: "extracted";
-  verificationStatus: "verified";
+  verificationStatus: "unverified";
 };
 
 export function isSubstantiveExtractedEvidence(item: {
@@ -169,7 +169,7 @@ export function planDocumentExtraction(
         }),
         identityKey,
         extractionStatus: "extracted" as const,
-        verificationStatus: "verified" as const,
+        verificationStatus: "unverified" as const,
       };
     });
 
@@ -182,7 +182,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "display_name", title: "identity" }),
       value: extracted.displayName.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "verified",
+      verificationStatus: "unverified",
     });
   }
   if (extracted.headline?.trim()) {
@@ -191,7 +191,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "headline", title: "identity" }),
       value: extracted.headline.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "verified",
+      verificationStatus: "unverified",
     });
   }
   if (extracted.phone?.trim()) {
@@ -200,7 +200,7 @@ export function planDocumentExtraction(
       factKey: memoryFactKey({ category: "personal", field: "phone", title: "identity" }),
       value: extracted.phone.trim(),
       extractionStatus: "extracted",
-      verificationStatus: "verified",
+      verificationStatus: "unverified",
     });
   }
 
@@ -216,7 +216,7 @@ export function planDocumentExtraction(
       }),
       value: item.endDate,
       extractionStatus: "extracted",
-      verificationStatus: "verified",
+      verificationStatus: "unverified",
     });
   }
 

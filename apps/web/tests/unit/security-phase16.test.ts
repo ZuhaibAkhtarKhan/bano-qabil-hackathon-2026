@@ -29,8 +29,9 @@ describe("health endpoint", () => {
     const response = await healthGet();
     const json = (await response.json()) as { data: { ok: true; openai?: boolean; supabase?: boolean } };
     expect(json.data.ok).toBe(true);
-    expect(json.data.openai).toBeUndefined();
-    expect(json.data.supabase).toBeUndefined();
+    expect(json.data).not.toHaveProperty("openai");
+    expect(json.data).not.toHaveProperty("supabaseUrl");
+    expect(json.data).not.toHaveProperty("supabaseAnonKey");
   });
 });
 

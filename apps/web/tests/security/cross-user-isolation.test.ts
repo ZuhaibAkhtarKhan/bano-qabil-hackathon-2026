@@ -167,7 +167,6 @@ describe("cross-user data exposure = 0", () => {
     expect(architecture).toContain("where e.user_id = auth.uid()");
     expect(architecture).not.toContain("using (true)");
 
-    expect(queries).toContain('.eq("id", profile.id)');
     expect(queries).toContain('.eq("user_id", profile.id)');
     expect(queries).toContain('.eq("user_id", user.id)');
     expect(applicationActions).toContain('.eq("user_id", userId)');

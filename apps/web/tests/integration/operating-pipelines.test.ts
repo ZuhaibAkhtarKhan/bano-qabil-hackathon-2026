@@ -86,7 +86,7 @@ describe("Document → Extraction → Evidence → Memory", () => {
             field: "end_year",
           }),
           value: "2027",
-          verificationStatus: "verified",
+          verificationStatus: "unverified",
         },
       ],
     );
