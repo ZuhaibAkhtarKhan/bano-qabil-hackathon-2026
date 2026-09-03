@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { uuidSchema } from "./common";
 
-export const BatchFieldTypeSchema = z.enum([
+export const BATCH_FIELD_TYPES = [
   "text",
   "textarea",
   "select",
@@ -13,11 +13,25 @@ export const BatchFieldTypeSchema = z.enum([
   "date",
   "number",
   "url",
-]);
+] as const;
+
+export const BatchFieldTypeSchema = z.enum(BATCH_FIELD_TYPES);
+
+/** Map HTML / host control types onto the batch fill enum (email/tel → text, etc.). */
+export function coerceBatchFieldType(value: unknown): (typeof BATCH_FIELD_TYPES)[number] {
+  const type = String(value ?? "text").toLowerCase().trim();
+  if ((BATCH_FIELD_TYPES as readonly string[]).includes(type)) {
+    return type as (typeof BATCH_FIELD_TYPES)[number];
+  }
+  if (type === "datetime-local" || type === "month" || type === "week" || type === "time") return "date";
+  if (type === "range") return "number";
+  if (type === "multi-select") return "select";
+  return "text";
+}
 
 export const BatchFieldInputSchema = z.object({
   fieldId: z.string(),
-  type: BatchFieldTypeSchema,
+  type: z.preprocess(coerceBatchFieldType, BatchFieldTypeSchema),
   label: z.string(),
   name: z.string().optional(),
   options: z.array(z.string()).optional(),

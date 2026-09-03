@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   APPLICATION_LIFECYCLE,
   assertDraftIsGrounded,
+  BatchFieldInputSchema,
   BatchFillRequestSchema,
   BatchFillResponseSchema,
+  coerceBatchFieldType,
   computeProfileCompleteness,
   consentInputSchema,
   consentUpdateFields,
+  FormPageCaptureSchema,
   groundedDraftSchema,
   jobLifecycleSchema,
   toJobLifecycle,
@@ -117,5 +120,20 @@ describe("batch fill-plan contracts", () => {
       fields: [{ fieldId: "f_start", type: "date", label: "Start date" }],
     });
     expect(request.fields[0]?.type).toBe("date");
+  });
+
+  it("coerces Google Forms email/tel HTML types to text instead of rejecting the page", () => {
+    expect(coerceBatchFieldType("email")).toBe("text");
+    expect(coerceBatchFieldType("tel")).toBe("text");
+    expect(BatchFieldInputSchema.parse({ fieldId: "f_email", type: "email", label: "Email" }).type).toBe("text");
+    const page = FormPageCaptureSchema.parse({
+      pageIndex: 0,
+      fields: [
+        { fieldId: "f_name", type: "text", label: "Name" },
+        { fieldId: "f_email", type: "email", label: "Email" },
+        { fieldId: "f_phone", type: "tel", label: "Phone" },
+      ],
+    });
+    expect(page.fields.map((field) => field.type)).toEqual(["text", "text", "text"]);
   });
 });

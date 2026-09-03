@@ -237,6 +237,14 @@ async function runPlaywrightHostSession(input: {
     };
   } catch (err) {
     logError("playwright.host_submit_failed", { err, applicationId: input.applicationId });
+    if (err && typeof err === "object" && "issues" in err && Array.isArray((err as { issues: unknown[] }).issues)) {
+      const issues = (err as { issues: Array<{ path?: (string | number)[]; message?: string; code?: string }> }).issues;
+      const summary = issues
+        .slice(0, 3)
+        .map((issue) => `${(issue.path ?? []).join(".") || "field"}: ${issue.message ?? issue.code ?? "invalid"}`)
+        .join("; ");
+      return { ok: false, error: `Form capture validation failed (${summary}).` };
+    }
     return {
       ok: false,
       error: err instanceof Error ? err.message : "playwright_host_submit_failed",

@@ -165,6 +165,24 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     return rect.width > 2 && rect.height > 2;
   }
 
+  /** Must match BatchFieldTypeSchema — never emit HTML input types like email/tel. */
+  function normalizeBatchFieldType(raw: string): string {
+    const type = (raw || "text").toLowerCase().trim();
+    if (type === "textarea") return "textarea";
+    if (type === "select" || type === "multi-select") return "select";
+    if (type === "radio") return "radio";
+    if (type === "checkbox") return "checkbox";
+    if (type === "file") return "file";
+    if (type === "contenteditable") return "contenteditable";
+    if (type === "date" || type === "datetime-local" || type === "month" || type === "week" || type === "time") {
+      return "date";
+    }
+    if (type === "number" || type === "range") return "number";
+    if (type === "url") return "url";
+    // email, tel, search, password, text, and anything else → text fill path
+    return "text";
+  }
+
   function isInvisibleOrBadgeCaptcha(el: Element): boolean {
     if (el.closest(".grecaptcha-badge, .h-captcha-badge")) return true;
     if (el.getAttribute("data-size") === "invisible") return true;
@@ -266,16 +284,12 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
         type = "file";
       } else if (item.querySelector("textarea")) {
         type = "textarea";
-      } else if (item.querySelector('input[type="email"]')) {
-        type = "email";
       } else if (looksLikeFileField(item, label)) {
         type = "file";
       } else {
         const native = item.querySelector("input") as HTMLInputElement | null;
-        if (native?.type === "date") type = "date";
-        else if (native?.type === "number") type = "number";
-        else if (native?.type === "url") type = "url";
-        else if (native?.type === "tel") type = "tel";
+        // email/tel/search map to text via normalizeBatchFieldType
+        type = normalizeBatchFieldType(native?.type || "text");
       }
 
       item.setAttribute(BATCH_ATTR, fieldId);
@@ -284,7 +298,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
       fields.push({
         fieldId,
         fieldKey,
-        type,
+        type: normalizeBatchFieldType(type),
         label,
         required: /required|\*/i.test(item.textContent ?? ""),
         options,
@@ -319,15 +333,16 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
           if (el.type === "radio") type = "radio";
           else if (el.type === "checkbox") type = "checkbox";
           else if (el.type === "file") type = "file";
-          else if (el.type === "date") type = "date";
-          else if (el.type === "number") type = "number";
-          else if (el.type === "url") type = "url";
-          else if (el.type === "tel") type = "tel";
-          else type = el.type || "text";
+          else type = normalizeBatchFieldType(el.type || "text");
         } else if (el.getAttribute("contenteditable") === "true" || el.getAttribute("role") === "textbox") {
           type = "textarea";
         }
-        fields.push({ fieldId, fieldKey, type, label: String(label).trim() });
+        fields.push({
+          fieldId,
+          fieldKey,
+          type: normalizeBatchFieldType(type),
+          label: String(label).trim(),
+        });
       }
     }
 

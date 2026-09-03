@@ -202,11 +202,13 @@ export {
 } from "./integrations";
 
 export {
+  BATCH_FIELD_TYPES,
   BatchFieldInputSchema,
   BatchFieldResultSchema,
   BatchFieldTypeSchema,
   BatchFillRequestSchema,
   BatchFillResponseSchema,
+  coerceBatchFieldType,
   type BatchFieldInput,
   type BatchFieldResult,
   type BatchFieldType,
