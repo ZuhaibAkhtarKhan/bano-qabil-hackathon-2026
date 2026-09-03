@@ -105,7 +105,7 @@ export function batchResultsToFormFillPlan(input: {
   }));
 }
 
-/** JSON in → memory + LLM → JSON out. Central entry for extension batch fill and save-time prefill. */
+/** JSON in → memory + LLM → JSON out. Shared fill engine for server Playwright and optional manual extension fill. */
 export async function fillFormPageFromJson(input: {
   supabase: SupabaseClient;
   actor: Actor;

@@ -259,6 +259,11 @@ async function runPlaywrightHostSession(input: {
 
 export function isServerHostSubmitEnabled(): boolean {
   const flag = process.env.ENABLE_SERVER_HOST_SUBMIT?.trim().toLowerCase();
-  if (flag === "0" || flag === "false" || flag === "off") return false;
+  if (flag === "0" || flag === "false" || flag === "off") {
+    logError("host_submit.server_disabled", {
+      hint: "ENABLE_SERVER_HOST_SUBMIT is off — host fill/submit will not run. Extension cannot replace it.",
+    });
+    return false;
+  }
   return true;
 }

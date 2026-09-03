@@ -164,7 +164,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       const highlighted = result.highlighted ?? 0;
       log(
         `Filled ${filled} on this page. Click Next yourself, then tap Fill again for the next step. ${
-          highlighted ? `${highlighted} still empty — highlighted for Need You.` : "Submit stays manual unless auto-submit is on in Settings."
+          highlighted ? `${highlighted} still empty — highlighted for Need You.` : "Submit on the host is handled by the server before the deadline — not by this extension."
         }`,
       );
       return;
@@ -230,7 +230,7 @@ document.getElementById("fill")!.addEventListener("click", async () => {
     log(
       `Filled ${filled.length} on this page. Click Next yourself, then tap Fill again. ${aiCount ? `${aiCount} AI assistant(s) — tap 1A on the page, Generate, Confirm. ` : ""}${
         chips && !aiCount ? `${chips} chip(s) for alternates. ` : ""
-      }${highlighted ? `${highlighted} still empty — highlighted.` : "Submit stays manual unless auto-submit is on in Settings."}`,
+      }${highlighted ? `${highlighted} still empty — highlighted.` : "Host Submit is done by the server before the deadline — not this extension."}`,
     );
   } catch (error) {
     log(error instanceof Error ? error.message : "Fill failed.");

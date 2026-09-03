@@ -84,7 +84,9 @@ export default async function SettingsPage({
             When you add a form URL, the server prefills it from your profile right away.
             About 2 hours before the deadline (or sooner if you set the deadline late), 1-Apply emails you
             so you can review answers, documents, and Need You items. Whether or not you edit, the form
-            auto-submits 1 hour before the deadline. With no deadline set, it auto-submits once every
+            auto-submits 1 hour before the deadline. If it is still not submitted after the deadline,
+            1-Apply tries once more and notifies you whether that final attempt succeeded or failed.
+            With no deadline set, it auto-submits once every
             form field is filled — including optional ones — in Need You. Your laptop can be off; only
             the EC2 server needs to stay up. CAPTCHA, signature, and payment still need you.
           </p>
@@ -111,8 +113,8 @@ export default async function SettingsPage({
             <a className="underline" href="/app/integrations">
               Integrations
             </a>
-            . Use the extension to save form URLs and manually fill the current page from memory.
-            Deadline automation (prefill, review email, auto-submit) runs headless on the server.
+            . Use the extension only for optional manual “Fill from memory” on the open tab.
+            Prefill, review email, and host auto-submit run entirely on the server (no extension required).
           </p>
           <ExtensionConnectCard appUrl={appUrl} />
         </Card>

@@ -67,13 +67,10 @@ export async function assessNoDeadlineHostSubmitReadiness(input: {
     supabase.from("fit_evaluations").select("missing").eq("application_id", applicationId).maybeSingle(),
   ]);
 
-  if (!mappings?.length) {
-    return { ready: false, reason: "no_form_inventory", openCount: 1 };
-  }
-
   let openCount = 0;
 
-  for (const mapping of mappings) {
+  // Server Playwright inventories the live form — do not require extension Save/capture first.
+  for (const mapping of mappings ?? []) {
     const value = String(mapping.value ?? "").trim();
     const confidence = Number(mapping.confidence ?? 0);
     if (!value || confidence < 0.75 || Boolean(mapping.excluded_by_default)) {
@@ -124,7 +121,7 @@ export async function assessNoDeadlineHostSubmitReadiness(input: {
     }
   }
 
-  for (const mapping of mappings) {
+  for (const mapping of mappings ?? []) {
     const fieldType = normalizeNeedsYouFieldType(
       typeof mapping.field_type === "string" ? mapping.field_type : null,
     );

@@ -1,62 +1,39 @@
-import { createApiEnvelopeSchema, uuidSchema } from "@1apply/contracts";
+import { createApiEnvelopeSchema } from "@1apply/contracts";
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import type { Actor } from "@/auth/actor";
 import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
-import {
-  completeHostSubmitJob,
-  markHostSubmitJobRunning,
-} from "@/server/applications/host-submit";
+import { kickHostSubmitWorkerIfEnabled } from "@/server/applications/host-submit-worker-kick";
 
-const bodySchema = z.object({
-  jobId: uuidSchema,
-  running: z.boolean().optional(),
-  submitted: z.boolean().optional(),
-  hostSubmitClicked: z.boolean().optional(),
-  error: z.string().nullable().optional(),
-  blockedReason: z.string().nullable().optional(),
-});
-
-const envelope = createApiEnvelopeSchema(z.object({ ok: z.boolean() }));
+const envelope = createApiEnvelopeSchema(
+  z.object({
+    ok: z.boolean(),
+    serverOwned: z.literal(true),
+  }),
+);
 
 export function OPTIONS(request: Request) {
   return extensionPreflight(request);
 }
 
+/**
+ * Legacy extension complete endpoint.
+ * Extension must not claim or complete host-submit jobs — server Playwright owns them.
+ */
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await requireApiSession(request);
-    const body = bodySchema.parse(await request.json());
-    const actor: Actor = {
-      userId: session.user.id,
-      email: session.profile.email,
-      profile: session.profile,
-    };
-
-    if (body.running) {
-      await markHostSubmitJobRunning(session.supabase, actor.userId, body.jobId);
-      return withExtensionCors(
-        request,
-        NextResponse.json(envelope.parse({ data: { ok: true }, error: null, requestId })),
-      );
-    }
-
-    const result = await completeHostSubmitJob({
-      supabase: session.supabase,
-      actor,
-      jobId: body.jobId,
-      submitted: Boolean(body.submitted),
-      hostSubmitClicked: Boolean(body.hostSubmitClicked),
-      error: body.error ?? null,
-      blockedReason: body.blockedReason ?? null,
+    await requireApiSession(request);
+    after(() => {
+      void kickHostSubmitWorkerIfEnabled();
     });
-
     return withExtensionCors(
       request,
-      NextResponse.json(envelope.parse({ data: result, error: null, requestId })),
+      NextResponse.json(
+        envelope.parse({ data: { ok: true, serverOwned: true }, error: null, requestId }),
+      ),
     );
   } catch (error) {
     if (error instanceof ApiAuthError) {

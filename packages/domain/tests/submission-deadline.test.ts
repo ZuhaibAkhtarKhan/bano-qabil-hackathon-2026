@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeDeadlineInfo,
+  computeHostSubmitDueAt,
+  computePostDeadlineHostSubmitDueAt,
+  isPostDeadlineHostSubmitKey,
+  postDeadlineHostSubmitIdempotencyKey,
   DEFAULT_AUTO_SUBMIT_POLICY,
   SILENCE_AUTO_SUBMIT_POLICY,
   evaluateAutoSubmit,
@@ -407,6 +411,20 @@ describe("auto-submit policy", () => {
       },
     );
     expect(oneMinuteDeadline.action).toBe("proceed");
+  });
+
+  it("schedules host submit before the deadline and a one-shot post-deadline retry", () => {
+    const now = new Date("2026-09-03T10:00:00.000Z");
+    const deadline = "2026-09-03T14:00:00.000Z";
+    expect(computeHostSubmitDueAt(deadline, now).toISOString()).toBe("2026-09-03T13:00:00.000Z");
+    expect(computePostDeadlineHostSubmitDueAt(deadline, now).toISOString()).toBe(deadline);
+
+    const pastDeadline = "2026-09-03T09:00:00.000Z";
+    expect(computePostDeadlineHostSubmitDueAt(pastDeadline, now).getTime()).toBe(now.getTime());
+
+    const key = postDeadlineHostSubmitIdempotencyKey("app-1", deadline);
+    expect(isPostDeadlineHostSubmitKey(key)).toBe(true);
+    expect(isPostDeadlineHostSubmitKey("app-1:host_submit:" + deadline)).toBe(false);
   });
 
   it("schedules the 2-hour pre-deadline review email when silence-send is enabled", () => {

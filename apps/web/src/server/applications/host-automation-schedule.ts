@@ -10,6 +10,7 @@ import {
   scheduleHostSubmitWhenFullyComplete,
 } from "./host-submit";
 import { kickHostSubmitWorkerIfEnabled } from "./host-submit-worker-kick";
+import { isServerHostSubmitEnabled } from "./playwright-host-submit";
 import { maybeSendPreDeadlineReviewForApplication } from "./pre-deadline-review-email";
 
 /** Queue immediate server prefill + schedule submit before deadline when automation is on. */
@@ -21,6 +22,14 @@ export async function syncHostAutomationForApplication(input: {
 }): Promise<void> {
   const prefs = parseWorkspacePreferences(input.actor.profile.preferences);
   if (!prefs.prepareAndSendIfSilent) return;
+
+  if (!isServerHostSubmitEnabled()) {
+    logError("host_automation.server_submit_disabled", {
+      applicationId: input.applicationId,
+      hint: "ENABLE_SERVER_HOST_SUBMIT must be true — host fill/submit is server-only.",
+    });
+    return;
+  }
 
   if (input.queuePrefill !== false) {
     const prefill = await queueHostPrefillJob({
@@ -50,8 +59,7 @@ export async function syncHostAutomationForApplication(input: {
     if (
       !complete.ok &&
       complete.reason !== "not_ready" &&
-      complete.reason !== "open_needs_you" &&
-      complete.reason !== "no_form_inventory"
+      complete.reason !== "open_needs_you"
     ) {
       logError("host_automation.no_deadline_submit_failed", {
         applicationId: input.applicationId,

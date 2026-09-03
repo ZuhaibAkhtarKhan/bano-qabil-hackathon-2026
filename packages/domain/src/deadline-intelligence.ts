@@ -265,11 +265,29 @@ export const PRE_DEADLINE_REVIEW_NOTICE_HOURS = 2;
 /** Auto-submit runs this many hours before the deadline (after the review email window opens). */
 export const HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS = 1;
 
+/** How long after the deadline we still attempt a final one-shot host submit. */
+export const HOST_POST_DEADLINE_RETRY_WINDOW_HOURS = 24;
+
 export function computeHostSubmitDueAt(deadlineAt: string, now: Date = new Date()): Date {
   const deadline = new Date(deadlineAt);
   if (Number.isNaN(deadline.getTime())) return now;
   const oneHourBefore = new Date(deadline.getTime() - HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS * 60 * 60 * 1000);
   return oneHourBefore.getTime() > now.getTime() ? oneHourBefore : now;
+}
+
+/** One final attempt at/after the deadline if the form is still not submitted. */
+export function computePostDeadlineHostSubmitDueAt(deadlineAt: string, now: Date = new Date()): Date {
+  const deadline = new Date(deadlineAt);
+  if (Number.isNaN(deadline.getTime())) return now;
+  return deadline.getTime() > now.getTime() ? deadline : now;
+}
+
+export function postDeadlineHostSubmitIdempotencyKey(applicationId: string, deadlineAt: string): string {
+  return `${applicationId}:host_submit:post_deadline:${deadlineAt}`;
+}
+
+export function isPostDeadlineHostSubmitKey(idempotencyKey: string | null | undefined): boolean {
+  return Boolean(idempotencyKey && idempotencyKey.includes(":host_submit:post_deadline:"));
 }
 
 /** True when silence-send is on and the deadline is within the final review window (default 2h). */

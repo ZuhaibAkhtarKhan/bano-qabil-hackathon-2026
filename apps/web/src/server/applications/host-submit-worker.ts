@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Actor } from "@/auth/actor";
 import type { ProfileRow } from "@/lib/profile";
 import { logError, logInfo } from "@/lib/log";
+import { isPostDeadlineHostSubmitKey } from "@1apply/domain";
 
 import {
   completeHostPrefillJob,
@@ -66,7 +67,7 @@ export async function listClaimableHostJobs(
   const baseQuery = () =>
     supabase
       .from("host_submit_jobs")
-      .select("id, user_id, application_id, source_url, due_at, status, attempt_count, job_kind")
+      .select("id, user_id, application_id, source_url, due_at, status, attempt_count, job_kind, idempotency_key")
       .eq("status", "pending")
       .lte("due_at", nowIso)
       .lt("attempt_count", MAX_ATTEMPTS);
@@ -95,6 +96,7 @@ export async function listClaimableHostJobs(
     status: String(row.status),
     attempt_count: Number(row.attempt_count ?? 0),
     job_kind: (row.job_kind as HostSubmitJobKind) ?? "submit",
+    idempotency_key: row.idempotency_key ? String(row.idempotency_key) : undefined,
   }));
 }
 
@@ -128,7 +130,14 @@ async function requeueOrFail(input: {
   jobId: string;
   error: string;
   onFinalFail: () => Promise<void>;
+  /** Post-deadline jobs get exactly one attempt — never requeue. */
+  oneShot?: boolean;
 }) {
+  if (input.oneShot) {
+    await input.onFinalFail();
+    return;
+  }
+
   const { data: current } = await input.supabase
     .from("host_submit_jobs")
     .select("attempt_count")
@@ -180,6 +189,30 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
     if (!actor) {
       failed += 1;
       continue;
+    }
+
+    const postDeadline = isPostDeadlineHostSubmitKey(job.idempotency_key);
+
+    if (job.job_kind === "submit") {
+      const { data: application } = await supabase
+        .from("applications")
+        .select("status")
+        .eq("id", job.application_id)
+        .maybeSingle();
+      if (
+        application &&
+        ["submitted", "rejected", "withdrawn", "archived", "offer"].includes(String(application.status))
+      ) {
+        await supabase
+          .from("host_submit_jobs")
+          .update({
+            status: "cancelled",
+            completed_at: new Date().toISOString(),
+            last_error: "cancelled_application_already_closed",
+          })
+          .eq("id", job.id);
+        continue;
+      }
     }
 
     try {
@@ -279,6 +312,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         job,
         jobId: job.id,
         error: errorMessage,
+        oneShot: postDeadline,
         onFinalFail: async () => {
           await completeHostSubmitJob({
             supabase,
@@ -300,6 +334,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         job,
         jobId: job.id,
         error: message,
+        oneShot: postDeadline,
         onFinalFail: async () => {
           if (job.job_kind === "prefill") {
             await completeHostPrefillJob({

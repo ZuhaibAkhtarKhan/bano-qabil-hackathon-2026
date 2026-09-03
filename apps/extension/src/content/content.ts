@@ -9,7 +9,6 @@ import {
   fieldsEligibleForBatch,
   fillTargetAllowed,
   findPrimaryStepAdvance,
-  findPrimarySubmitControl,
   inspectPage,
   inventoryFromDocument,
   isProtectedControl,
@@ -58,8 +57,6 @@ const root = globalThis as {
   __1APPLY_STEPS?: number;
   /** Hard stop — ignores late APPLY / Next until the user fills again. */
   __1APPLY_STOPPED?: boolean;
-  /** When true, auto-click host Submit on the final page (deadline automation). */
-  __1APPLY_AUTO_SUBMIT_HOST?: boolean;
   __1APPLY_PENDING_TIMERS?: number[];
 };
 if (!root.__1APPLY_LISTENERS) {
@@ -200,9 +197,6 @@ if (!root.__1APPLY_LISTENERS) {
 
     const btn = findPrimaryStepAdvance(document);
     if (!btn) {
-      if (root.__1APPLY_AUTO_SUBMIT_HOST) {
-        return tryAutoSubmit();
-      }
       showToast("1-Apply finished fillable pages. Missing answers stay in Need You — Stop when done.");
       return { clicked: false, reason: "no-next" };
     }
@@ -240,48 +234,6 @@ if (!root.__1APPLY_LISTENERS) {
     } finally {
       // Release promptly so the next page’s fill can schedule another advance.
       root.__1APPLY_ADVANCE_LOCK = false;
-    }
-  }
-
-  async function tryAutoSubmit(): Promise<{ clicked: boolean; submitted?: boolean; reason?: string; blockedReason?: string }> {
-    if (!isFillActive()) return { clicked: false, reason: "stopped" };
-    if (root.__1APPLY_FILLING) return { clicked: false, reason: "busy" };
-
-    const hazards = inspectPage(document, document.body?.innerText ?? "", inventoryFromDocument(document));
-    if (hazards.captcha) {
-      return { clicked: false, blockedReason: "CAPTCHA on this page — complete it manually." };
-    }
-    if (hazards.accountCreation) {
-      return { clicked: false, blockedReason: "Account creation required — sign in manually." };
-    }
-
-    const empty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
-    if (empty > 0) {
-      return { clicked: false, reason: "empty-fields" };
-    }
-
-    const btn = findPrimarySubmitControl(document);
-    if (!btn) {
-      return { clicked: false, reason: "no-submit" };
-    }
-
-    try {
-      assertFillActionAllowed("clickSubmit", { hostSubmitAllowed: true });
-      btn.scrollIntoView({ block: "center", inline: "nearest" });
-      await sleep(120);
-      btn.click();
-      showToast("1-Apply clicked Submit…");
-      await sleep(2500);
-      const bodyText = (document.body?.innerText ?? "").toLowerCase();
-      const submitted =
-        /response recorded|thank you|submission received|your response has been recorded|تم إرسال/i.test(bodyText) ||
-        /forms\.gle|google\.com\/forms.*\/viewform/i.test(location.href) === false;
-      return { clicked: true, submitted };
-    } catch (error) {
-      return {
-        clicked: false,
-        reason: error instanceof Error ? error.message : "submit-failed",
-      };
     }
   }
 
@@ -1355,23 +1307,8 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === "SET_AUTO_SUBMIT_HOST") {
-      root.__1APPLY_AUTO_SUBMIT_HOST = Boolean(message.enabled);
-      if (message.enabled) {
-        root.__1APPLY_STOPPED = false;
-        enableAutoContinueWatch();
-      }
-      sendResponse({ ok: true });
-      return false;
-    }
-
     if (message?.type === "TRY_AUTO_ADVANCE") {
       void tryAutoAdvance().then(sendResponse);
-      return true;
-    }
-
-    if (message?.type === "TRY_AUTO_SUBMIT") {
-      void tryAutoSubmit().then(sendResponse);
       return true;
     }
 
