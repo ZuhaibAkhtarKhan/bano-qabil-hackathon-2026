@@ -91,6 +91,16 @@ export async function loadMemoryCatalog(
   const university = typeof preferences.university === "string" ? preferences.university : "";
   const educationSummary = typeof preferences.educationSummary === "string" ? preferences.educationSummary : "";
 
+  // Temporary debug: log what profile data is available
+  console.log("[memory-catalog-debug]", JSON.stringify({
+    userId: actor.userId,
+    hasDisplayName: Boolean(profile?.display_name),
+    hasEmail: Boolean(profile?.email),
+    hasPhone: Boolean(profile?.phone),
+    hasCity: Boolean(profile?.location_city),
+    catalogSize: catalog.length,
+  }));
+
   add("Profile → Full name", profile?.display_name, ["name", "full name"]);
   add("Profile → Email", profile?.email, ["email"]);
   add("Profile → Phone", profile?.phone, ["phone", "mobile", "whatsapp", "telephone", "contact", "contact number", "contact no"]);

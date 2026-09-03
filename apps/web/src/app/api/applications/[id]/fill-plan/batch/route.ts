@@ -109,6 +109,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }),
   });
 
+  // Temporary debug: log fill results so we can diagnose "filled 0" in Vercel logs.
+  const fieldSummary = result.fields.map((f) => ({
+    label: parsed.data.fields.find((pf: { fieldId?: string; label?: string }) => pf.fieldId === f.fieldId)?.label ?? f.fieldId,
+    status: f.status,
+    hasValue: Boolean(f.value),
+  }));
+  console.log("[batch-fill-debug]", JSON.stringify({ applicationId: parsedId.data, userId: session.user.id, fields: fieldSummary }));
+
   return withExtensionCors(
     request,
     NextResponse.json(
