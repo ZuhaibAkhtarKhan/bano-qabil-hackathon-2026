@@ -155,16 +155,78 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
   function visible(el: Element): boolean {
     const node = el as HTMLElement;
     if ((node as HTMLButtonElement).disabled) return false;
+    try {
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    } catch {
+      // ignore
+    }
     const rect = node.getBoundingClientRect();
     return rect.width > 2 && rect.height > 2;
+  }
+
+  function isInvisibleOrBadgeCaptcha(el: Element): boolean {
+    if (el.closest(".grecaptcha-badge, .h-captcha-badge")) return true;
+    if (el.getAttribute("data-size") === "invisible") return true;
+    const src = (el.getAttribute("src") ?? "").toLowerCase();
+    // Privacy badge / challenge popup / invisible widget — not a blocking checkbox on the form.
+    if (src.includes("badge") || src.includes("/bframe") || /[?&]size=invisible\b/.test(src)) return true;
+    return false;
+  }
+
+  function isBlockingCaptchaWidget(el: Element): boolean {
+    return visible(el) && !isInvisibleOrBadgeCaptcha(el);
   }
 
   function captureFormPage(): CapturedFormPage {
     const BATCH_ATTR = "data-1apply-batch-id";
     const pageText = (document.body?.innerText ?? "").slice(0, 20_000);
-    const html = document.documentElement.outerHTML;
-    const captcha = /captcha|recaptcha|hcaptcha|turnstile/i.test(html + pageText);
-    const accountCreation = /create an account|sign up to apply|register to continue/i.test(pageText);
+
+    // Only treat CAPTCHA as present when a challenge widget is actually visible.
+    // Matching /recaptcha|captcha|turnstile/ against full outerHTML false-positives on
+    // Google Forms and other pages that load inactive scripts/strings in the HTML.
+    function detectVisibleCaptcha(): boolean {
+      const selectors = [
+        ".g-recaptcha",
+        ".h-captcha",
+        ".cf-turnstile",
+        "iframe[src*='recaptcha']",
+        "iframe[src*='hcaptcha']",
+        "iframe[src*='turnstile']",
+        "iframe[src*='challenges.cloudflare.com']",
+        "#captcha",
+        "[data-captcha-widget]",
+      ];
+      for (const selector of selectors) {
+        for (const el of Array.from(document.querySelectorAll(selector))) {
+          if (isBlockingCaptchaWidget(el)) return true;
+        }
+      }
+      // Challenge copy alone is not enough; require a visible iframe/widget with it.
+      if (/\bi'?m not a robot\b|\bverify you are (a )?human\b|\bcomplete the captcha\b/i.test(pageText)) {
+        for (const challenge of Array.from(
+          document.querySelectorAll(
+            "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='turnstile'], .g-recaptcha, .h-captcha, .cf-turnstile",
+          ),
+        )) {
+          if (isBlockingCaptchaWidget(challenge)) return true;
+        }
+      }
+      return false;
+    }
+
+    function detectAccountWall(): boolean {
+      const password = document.querySelector('input[type="password"]');
+      if (!password || !visible(password)) return false;
+      const email = document.querySelector('input[type="email"], input[name*="email" i]');
+      const createCopy = /create (your )?account|sign up to apply|register to continue|sign up to continue/i.test(
+        pageText,
+      );
+      return Boolean(email && createCopy);
+    }
+
+    const captcha = detectVisibleCaptcha();
+    const accountCreation = detectAccountWall();
     const buttons = Array.from(
       document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]'),
     );

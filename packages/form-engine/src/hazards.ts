@@ -7,22 +7,65 @@ const CAPTCHA_SELECTORS = [
   "iframe[src*='recaptcha']",
   "iframe[src*='hcaptcha']",
   "iframe[src*='turnstile']",
-  "[data-sitekey]",
+  "iframe[src*='challenges.cloudflare.com']",
   "#captcha",
-  "[name='g-recaptcha-response']",
+  "[data-captcha-widget]",
 ];
 
+function isInvisibleOrBadgeCaptcha(node: Element): boolean {
+  const el = node as HTMLElement;
+  if (el.closest?.(".grecaptcha-badge, .h-captcha-badge")) return true;
+  if (el.getAttribute?.("data-size") === "invisible") return true;
+  const src = (el.getAttribute?.("src") ?? "").toLowerCase();
+  if (src.includes("badge") || src.includes("/bframe") || /[?&]size=invisible\b/.test(src)) return true;
+  return false;
+}
+
+function isVisibleCaptchaNode(node: Element | null | undefined): boolean {
+  if (!node) return false;
+  if (isInvisibleOrBadgeCaptcha(node)) return false;
+  const el = node as HTMLElement & { disabled?: boolean };
+  if (el.disabled) return false;
+  if (typeof el.getBoundingClientRect !== "function") return true;
+  try {
+    const style = typeof getComputedStyle === "function" ? getComputedStyle(el) : null;
+    if (style && (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")) {
+      return false;
+    }
+  } catch {
+    // ignore — some test DOMs don't implement getComputedStyle fully
+  }
+  const rect = el.getBoundingClientRect();
+  // Real browsers: require a painted box. Hidden/zero-size widgets are ignored.
+  return rect.width > 2 && rect.height > 2;
+}
+
 export function detectCaptcha(root: ParentNode, pageText = ""): Pick<PageHazards, "captcha" | "captchaVendor" | "captchaMessage"> {
-  const html = `${pageText} ${"outerHTML" in root && typeof (root as Element).outerHTML === "string" ? (root as Element).outerHTML : ""}`.toLowerCase();
+  // Require a visible challenge widget. Do not scan full HTML for the word "recaptcha"
+  // — many forms (including Google Forms) embed inactive script strings and false-positive.
+  const findVisible = (selector: string): Element | null => {
+    const matches = root.querySelectorAll?.(selector);
+    if (!matches) return null;
+    for (const node of Array.from(matches)) {
+      if (isVisibleCaptchaNode(node)) return node;
+    }
+    return null;
+  };
+
   let vendor: string | null = null;
-  if (root.querySelector?.(".g-recaptcha, iframe[src*='recaptcha'], [name='g-recaptcha-response']") || /recaptcha/.test(html)) {
+  if (findVisible(".g-recaptcha, iframe[src*='recaptcha']")) {
     vendor = "reCAPTCHA";
-  } else if (root.querySelector?.(".h-captcha, iframe[src*='hcaptcha']") || /hcaptcha|h-captcha/.test(html)) {
+  } else if (findVisible(".h-captcha, iframe[src*='hcaptcha']")) {
     vendor = "hCaptcha";
-  } else if (root.querySelector?.(".cf-turnstile, iframe[src*='turnstile']") || /turnstile/.test(html)) {
+  } else if (findVisible(".cf-turnstile, iframe[src*='turnstile'], iframe[src*='challenges.cloudflare.com']")) {
     vendor = "Cloudflare Turnstile";
-  } else if (root.querySelector?.(CAPTCHA_SELECTORS.join(",")) || /\bi'?m not a robot\b/.test(html) || /\bcaptcha\b/.test(html)) {
+  } else if (findVisible(CAPTCHA_SELECTORS.join(","))) {
     vendor = "CAPTCHA";
+  } else if (/\bi'?m not a robot\b|\bverify you are (a )?human\b|\bcomplete the captcha\b/i.test(pageText)) {
+    // Challenge copy only counts with a visible widget nearby.
+    if (findVisible("iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='turnstile'], .g-recaptcha, .h-captcha, .cf-turnstile")) {
+      vendor = "CAPTCHA";
+    }
   }
 
   if (!vendor) {

@@ -26,10 +26,41 @@ const memory: MemoryValue[] = [
   { path: "Approved Application Answer", source: "Approved Application Answer", value: "I want to build retrieval systems.", aliases: ["why"] },
 ];
 
+function stubVisibleBox(el: Element) {
+  (el as HTMLElement).getBoundingClientRect = () =>
+    ({
+      x: 0,
+      y: 0,
+      top: 10,
+      left: 10,
+      bottom: 70,
+      right: 310,
+      width: 300,
+      height: 60,
+      toJSON() {
+        return {};
+      },
+    }) as DOMRect;
+}
+
 function documentFrom(html: string) {
   const window = new Window();
   window.document.body.innerHTML = html;
-  return window.document as unknown as ParentNode & { body: { innerText: string }; textContent: string; documentElement: { outerHTML: string } };
+  const document = window.document as unknown as ParentNode & {
+    body: { innerText: string };
+    textContent: string;
+    documentElement: { outerHTML: string };
+    querySelectorAll: Document["querySelectorAll"];
+  };
+  // happy-dom reports 0×0 boxes until layout; CAPTCHA detection requires a painted box.
+  for (const el of Array.from(
+    document.querySelectorAll(
+      ".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='turnstile'], #captcha, [data-captcha-widget]",
+    ),
+  )) {
+    stubVisibleBox(el);
+  }
+  return document;
 }
 
 describe("protected controls", () => {
@@ -491,6 +522,17 @@ describe("sensitive fields, CAPTCHA, and unsupported forms", () => {
     const result = detectCaptcha(document, "I'm not a robot");
     expect(result.captcha).toBe(true);
     expect(result.captchaMessage).toMatch(/never bypasses CAPTCHA/i);
+  });
+
+  it("does not treat script/HTML mentions of recaptcha as a CAPTCHA wall", () => {
+    const document = documentFrom(`
+      <form><input name="name" /><button type="submit">Submit</button></form>
+      <script>window.__X = "recaptcha hcaptcha turnstile captcha";</script>
+      <textarea name="g-recaptcha-response" style="display:none"></textarea>
+      <div class="grecaptcha-badge"><iframe src="https://www.google.com/recaptcha/api2/anchor?k=badge"></iframe></div>
+    `);
+    const result = detectCaptcha(document, "Submit your application");
+    expect(result.captcha).toBe(false);
   });
 
   it("detects account creation and refuses to bypass it", () => {

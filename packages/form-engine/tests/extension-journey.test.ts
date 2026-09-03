@@ -20,7 +20,30 @@ const memory: MemoryValue[] = [
 function documentFrom(html: string) {
   const window = new Window();
   window.document.body.innerHTML = html;
-  return window.document as unknown as ParentNode & { body: { innerText: string }; textContent: string };
+  const document = window.document as unknown as ParentNode & {
+    body: { innerText: string };
+    textContent: string;
+    querySelectorAll: Document["querySelectorAll"];
+  };
+  for (const el of Array.from(
+    document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha'], iframe[src*='hcaptcha'], #captcha"),
+  )) {
+    (el as HTMLElement).getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 10,
+        left: 10,
+        bottom: 70,
+        right: 310,
+        width: 300,
+        height: 60,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+  }
+  return document;
 }
 
 describe("extension field, label, name, and id detection", () => {
