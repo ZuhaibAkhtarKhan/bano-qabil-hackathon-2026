@@ -36,8 +36,10 @@ describe("planDocumentExtraction", () => {
 
     expect(plan.evidence[0]?.verificationStatus).toBe("unverified");
     expect(plan.evidence[0]?.extractionStatus).toBe("extracted");
-    expect(plan.evidence[0]?.factKey).toContain("end-year");
-    expect(plan.facts.some((fact) => fact.value.includes("2027"))).toBe(true);
+    expect(plan.evidence[0]?.factKey).toContain("title");
+    const gradFact = plan.facts.find((fact) => fact.value.includes("2027"));
+    expect(gradFact).toBeDefined();
+    expect(gradFact!.factKey).toContain("end-year");
   });
 
   it("detects graduation conflicts across existing and planned facts", () => {
