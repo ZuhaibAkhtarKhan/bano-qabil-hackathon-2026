@@ -292,6 +292,7 @@ export function preferFilledResults(base: BatchFieldResult[], overlay: BatchFiel
 
 export function attachCatalogCitations(results: BatchFieldResult[], catalog: GroundingCatalog): BatchFieldResult[] {
   const allowedDocs = new Set(catalog.allowedDocumentVersionIds);
+  const allowedIds = new Set(catalog.allowedEvidenceIds);
   return results.map((field) => {
     if (field.status !== "filled") return field;
     if (field.documentVersionId) {
@@ -301,10 +302,19 @@ export function attachCatalogCitations(results: BatchFieldResult[], catalog: Gro
     }
     const value = (field.value ?? "").trim();
     if (!value) return { fieldId: field.fieldId, status: "need_you" as const };
+
+    // If the result already carries valid evidence IDs from the memory-match phase, trust them.
+    const preAttached = (field.evidenceIds ?? []).filter((id) => allowedIds.has(id));
+    if (preAttached.length) {
+      return { ...field, value, evidenceIds: preAttached };
+    }
+
     const evidenceIds = [
-      ...new Set([...(field.evidenceIds ?? []), ...citeNarrativeCatalogIds(value, catalog)]),
-    ].filter((id) => catalog.allowedEvidenceIds.includes(id));
+      ...new Set(citeNarrativeCatalogIds(value, catalog)),
+    ].filter((id) => allowedIds.has(id));
     if (!evidenceIds.length) {
+      // LLM produced a filled value with no grounding — downgrade unless it was already
+      // trusted by the memory-match phase (pre-attached evidence would have been caught above).
       return { fieldId: field.fieldId, status: "need_you" as const };
     }
     return { ...field, value, evidenceIds };
@@ -475,11 +485,16 @@ export function mappingsToBatchResults(
     if (cited.length) {
       return { fieldId: field.fieldId, status: "filled" as const, value, evidenceIds: cited };
     }
+
+    // Profile / kit fields (name, email, phone, address, etc.) are always trusted even if the
+    // grounding catalog citation lookup returned nothing — they come straight from the user's own
+    // stored profile and don't need AI-style evidence grounding.
     const trustedKitPath =
       /^(Profile →|Education →|Skills →|Contact →|Evidence →)/i.test(mapping.memoryPath) ||
       mapping.source === "Application Memory";
-    if (trustedKitPath && mapping.confidence >= 0.65 && catalog.allowedEvidenceIds.includes(kitPathId)) {
-      return { fieldId: field.fieldId, status: "filled" as const, value, evidenceIds: [kitPathId] };
+    if (trustedKitPath && mapping.confidence >= 0.55) {
+      const kitCite = catalog.allowedEvidenceIds.includes(kitPathId) ? [kitPathId] : [];
+      return { fieldId: field.fieldId, status: "filled" as const, value, evidenceIds: kitCite };
     }
     if (isChoice) {
       const options = field.options?.length ? field.options : mapping.options.map((item) => item.value);

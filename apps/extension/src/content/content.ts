@@ -821,8 +821,20 @@ if (!root.__1APPLY_LISTENERS) {
       card.querySelector<HTMLElement>('[contenteditable="true"], [role="textbox"]');
     if (editable) {
       editable.focus();
+      // Clear existing content
+      editable.textContent = "";
+      editable.dispatchEvent(new Event("input", { bubbles: true }));
+      // Insert value the same way as native inputs so React/Angular listeners fire
       editable.textContent = mapping.value;
-      editable.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, composed: true, data: mapping.value }));
+      editable.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          inputType: "insertFromPaste",
+          data: mapping.value,
+        }),
+      );
       editable.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
       editable.blur();
       return Boolean((editable.textContent ?? "").trim());
@@ -879,7 +891,7 @@ if (!root.__1APPLY_LISTENERS) {
       (el.getAttribute("contenteditable") === "true" || el.getAttribute("role") === "textbox" ? el : null) ||
       card.querySelector<HTMLElement>('[contenteditable="true"], [role="textbox"]');
     const editableText = (editable?.textContent ?? "").replace(/\s+/g, " ").trim();
-    return Boolean(editableText) && !/^(your answer|your response|type your answer)$/i.test(editableText);
+    return Boolean(editableText) && !/^(your answer|your response|type your answer|enter your answer)$/i.test(editableText);
   }
 
   function ensureHighlightStyle() {
