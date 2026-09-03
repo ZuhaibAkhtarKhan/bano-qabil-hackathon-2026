@@ -37,7 +37,7 @@ export type FillPlanEntry = {
   documentVersionId?: string;
 };
 
-export type FormDomAction = "capture" | "apply" | "next" | "submit" | "confirm" | "validation";
+export type FormDomAction = "capture" | "apply" | "next" | "submit" | "confirm" | "validation" | "read";
 
 export type FormDomEvaluateInput = {
   action: FormDomAction;
@@ -46,9 +46,10 @@ export type FormDomEvaluateInput = {
 
 export type FormDomEvaluateResult =
   | CapturedFormPage
-  | { filled: number; skipped: number }
+  | { filled: number; skipped: number; details?: Array<{ fieldId: string; ok: boolean }> }
   | { clicked: boolean; reason?: string }
-  | boolean;
+  | boolean
+  | Array<{ fieldId: string; value: string; empty: boolean }>;
 
 /**
  * Single entry point for Playwright page.evaluate.
@@ -300,7 +301,9 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
         fieldKey,
         type: normalizeBatchFieldType(type),
         label,
-        required: /required|\*/i.test(item.textContent ?? ""),
+        required:
+          /required|\*/i.test(item.textContent ?? "") ||
+          Boolean(item.querySelector('[aria-required="true"], .freebirdFormviewerComponentsQuestionBaseRequiredAsterisk')),
         options,
       });
     }
@@ -358,12 +361,23 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
   }
 
   function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    // Mirror extension content script — Google Forms ignores bare Event("input").
+    el.focus();
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     if (setter) setter.call(el, value);
-    else el.value = value;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+    if (el.value !== value) el.value = value;
+    el.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        inputType: "insertFromPaste",
+        data: value,
+      }),
+    );
+    el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    el.blur();
   }
 
   function applyField(item: HTMLElement, entry: FillPlanEntry): boolean {
@@ -457,26 +471,60 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     if (editable) {
       editable.focus();
       editable.textContent = value;
-      editable.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      editable.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          inputType: "insertFromPaste",
+          data: value,
+        }),
+      );
+      editable.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      editable.blur();
       return Boolean((editable.textContent ?? "").trim());
     }
 
     return false;
   }
 
-  function applyFillPlan(entries: FillPlanEntry[]): { filled: number; skipped: number } {
+  function applyFillPlan(entries: FillPlanEntry[]): { filled: number; skipped: number; details: Array<{ fieldId: string; ok: boolean }> } {
     let filled = 0;
     let skipped = 0;
+    const details: Array<{ fieldId: string; ok: boolean }> = [];
     for (const entry of entries) {
       const item = findByBatchId(entry.fieldId);
-      if (!item) {
+      if (!item || entry.status !== "filled") {
         skipped += 1;
+        details.push({ fieldId: entry.fieldId, ok: false });
         continue;
       }
-      if (applyField(item, entry)) filled += 1;
+      const ok = applyField(item, entry);
+      if (ok) filled += 1;
       else skipped += 1;
+      details.push({ fieldId: entry.fieldId, ok });
     }
-    return { filled, skipped };
+    return { filled, skipped, details };
+  }
+
+  function readFilledValues(entries: FillPlanEntry[]): Array<{ fieldId: string; value: string; empty: boolean }> {
+    return entries.map((entry) => {
+      const item = findByBatchId(entry.fieldId);
+      if (!item) return { fieldId: entry.fieldId, value: "", empty: true };
+      const input = item.querySelector(
+        'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea, [contenteditable="true"], [role="textbox"]',
+      ) as HTMLInputElement | HTMLTextAreaElement | HTMLElement | null;
+      if (!input) {
+        const checked = item.querySelector('[aria-checked="true"], input:checked');
+        return { fieldId: entry.fieldId, value: checked ? "checked" : "", empty: !checked };
+      }
+      const value =
+        input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+          ? input.value
+          : (input.textContent ?? "");
+      const trimmed = value.trim();
+      return { fieldId: entry.fieldId, value: trimmed, empty: !trimmed };
+    });
   }
 
   function clickFormControl(kind: "next" | "submit"): { clicked: boolean; reason?: string } {
@@ -554,6 +602,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
   if (action === "capture") return captureFormPage();
   if (action === "apply") return applyFillPlan(arg ?? []);
+  if (action === "read") return readFilledValues(arg ?? []);
   if (action === "next") return clickNextControl();
   if (action === "submit") return clickSubmitControl();
   if (action === "confirm") return detectSubmissionConfirmation();

@@ -33,7 +33,13 @@ export type ServerHostSubmitResult =
 
 async function waitForPageReady(page: Page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 45_000 }).catch(() => undefined);
-  await page.waitForTimeout(1200);
+  // Google Forms paints questions after scripts load.
+  await page
+    .locator('[role="listitem"], input:not([type=hidden]), textarea, [role="radio"], [role="checkbox"]')
+    .first()
+    .waitFor({ state: "visible", timeout: 12_000 })
+    .catch(() => undefined);
+  await page.waitForTimeout(800);
 }
 
 async function waitForHostConfirmation(page: Page): Promise<boolean> {
@@ -70,6 +76,91 @@ async function clickHostSubmitWithPlaywright(page: Page): Promise<boolean> {
     }
   }
   return false;
+}
+
+/**
+ * Playwright's locator.fill() updates React/Google Forms state more reliably than
+ * DOM property setters alone. Used after (or instead of) in-page apply.
+ */
+async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
+  let filled = 0;
+  for (const entry of entries) {
+    if (entry.status !== "filled") continue;
+    if (entry.type === "file" || entry.documentVersionId) continue;
+    const value = entry.value?.trim() ?? "";
+    if (!value) continue;
+    if (entry.type === "radio" || entry.type === "checkbox" || entry.type === "select") continue;
+
+    const scope = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
+    if ((await scope.count()) === 0) continue;
+
+    const control = scope
+      .locator(
+        'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea, [contenteditable="true"], [role="textbox"]',
+      )
+      .first();
+    if ((await control.count()) === 0) continue;
+
+    try {
+      await control.scrollIntoViewIfNeeded().catch(() => undefined);
+      await control.click({ timeout: 2_000 }).catch(() => undefined);
+      await control.fill(value, { timeout: 4_000 });
+      // Some Google Forms widgets need an Enter/Tab to commit.
+      await control.press("Tab").catch(() => undefined);
+      filled += 1;
+    } catch {
+      try {
+        await control.evaluate((node, nextValue) => {
+          const el = node as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+          el.focus();
+          if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+            const proto =
+              el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, nextValue);
+            if (el.value !== nextValue) el.value = nextValue;
+          } else {
+            el.textContent = nextValue;
+          }
+          el.dispatchEvent(
+            new InputEvent("input", {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              inputType: "insertFromPaste",
+              data: nextValue,
+            }),
+          );
+          el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+          el.blur();
+        }, value);
+        filled += 1;
+      } catch {
+        // leave for validation gate
+      }
+    }
+  }
+  return filled;
+}
+
+async function plannedTextStillEmpty(page: Page, entries: FillPlanEntry[]): Promise<string[]> {
+  const planned = entries.filter(
+    (entry) =>
+      entry.status === "filled" &&
+      Boolean(entry.value?.trim()) &&
+      entry.type !== "file" &&
+      entry.type !== "radio" &&
+      entry.type !== "checkbox" &&
+      entry.type !== "select" &&
+      !entry.documentVersionId,
+  );
+  if (planned.length === 0) return [];
+  const reads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
+    page,
+    "read",
+    planned,
+  );
+  const emptyIds = new Set(reads.filter((row) => row.empty).map((row) => row.fieldId));
+  return planned.filter((entry) => emptyIds.has(entry.fieldId)).map((entry) => entry.fieldId);
 }
 
 export async function runPlaywrightHostSubmit(input: {
@@ -169,12 +260,25 @@ async function runPlaywrightHostSession(input: {
           type: capture.fields.find((item) => item.fieldId === field.fieldId)?.type,
         }));
 
-        const applyResult = (await evaluateFormDom<{ filled: number; skipped: number }>(
+        const applyResult = await evaluateFormDom<{ filled: number; skipped: number }>(
           page,
           "apply",
           entries,
-        ));
+        );
         totalFilled += applyResult.filled;
+
+        // Playwright fill is more reliable for Google Forms controlled inputs.
+        totalFilled += await fillEntriesWithPlaywright(page, entries);
+
+        let stillEmpty = await plannedTextStillEmpty(page, entries);
+        if (stillEmpty.length > 0) {
+          await evaluateFormDom(page, "apply", entries.filter((entry) => stillEmpty.includes(entry.fieldId)));
+          await fillEntriesWithPlaywright(
+            page,
+            entries.filter((entry) => stillEmpty.includes(entry.fieldId)),
+          );
+          stillEmpty = await plannedTextStillEmpty(page, entries);
+        }
 
         const versionIds = [
           ...new Set(
@@ -201,6 +305,28 @@ async function runPlaywrightHostSession(input: {
         }
 
         await page.waitForTimeout(600);
+
+        const plannedFilled = entries.filter(
+          (entry) => entry.status === "filled" && (Boolean(entry.value?.trim()) || Boolean(entry.documentVersionId)),
+        );
+        if (input.clickFinalSubmit && capture.fields.length > 0 && plannedFilled.length === 0) {
+          return {
+            ok: false,
+            error:
+              "Host form has fields to fill, but Application Memory / Need You had no values ready. Complete Need You, then retry.",
+          };
+        }
+
+        if (input.clickFinalSubmit && stillEmpty.length > 0) {
+          const labels = capture.fields
+            .filter((field) => stillEmpty.includes(field.fieldId))
+            .map((field) => field.label)
+            .slice(0, 4);
+          return {
+            ok: false,
+            error: `Could not fill required host fields before submit${labels.length ? `: ${labels.join(", ")}` : ""}.`,
+          };
+        }
       }
 
       const advance = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "next");
