@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Actor } from "@/auth/actor";
 import { isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
 import { normalizeNeedsYouFieldType } from "@/lib/needs-you-field-kinds";
-import { dedupeFieldMappingsByKey } from "@/lib/field-mappings";
+import { dedupeFieldMappings } from "@/lib/field-mappings";
 
 const CLOSED_STATUSES = new Set(["submitted", "rejected", "withdrawn", "archived", "offer"]);
 
@@ -71,7 +71,7 @@ export async function assessNoDeadlineHostSubmitReadiness(input: {
   let openCount = 0;
 
   // Prefer filled Need You / memory rows over empty page_capture duplicates.
-  const uniqueMappings = dedupeFieldMappingsByKey(mappings ?? []);
+  const uniqueMappings = dedupeFieldMappings(mappings ?? []);
 
   for (const mapping of uniqueMappings) {
     const value = String(mapping.value ?? "").trim();

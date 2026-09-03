@@ -259,7 +259,12 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
       const heading = item.querySelector(
         '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
       );
-      const label = (heading?.textContent ?? item.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
+      const label = (heading?.textContent ?? item.getAttribute("aria-label") ?? "")
+        .replace(/\s+/g, " ")
+        .replace(/\bYour answer\b/gi, " ")
+        .replace(/\s*\*\s*/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!label || label.length < 2) continue;
 
       const key = label.slice(0, 120);

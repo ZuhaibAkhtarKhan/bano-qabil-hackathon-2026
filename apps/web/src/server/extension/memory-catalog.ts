@@ -255,7 +255,7 @@ export async function loadMemoryCatalog(
   }
 
   const looksLikeVersionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const { dedupeFieldMappingsByKey, mappingHasUsableFill } = await import("@/lib/field-mappings");
+  const { dedupeFieldMappings, mappingHasUsableFill } = await import("@/lib/field-mappings");
   const savedRows = (savedFields ?? []).map((row, index) => ({
     id: `saved-${index}`,
     field_key: String(row.label ?? `field_${index}`),
@@ -266,7 +266,7 @@ export async function loadMemoryCatalog(
     excluded_by_default: row.excluded_by_default as boolean | null,
     field_type: row.field_type as string | null,
   }));
-  for (const row of dedupeFieldMappingsByKey(savedRows)) {
+  for (const row of dedupeFieldMappings(savedRows)) {
     const value = String(row.value ?? "").trim();
     const label = String(row.label ?? "").trim();
     const fieldType = String((row as { field_type?: string | null }).field_type ?? "");

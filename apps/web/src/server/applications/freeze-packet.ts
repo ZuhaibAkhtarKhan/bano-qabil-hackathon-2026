@@ -2,7 +2,7 @@ import { freezeSubmissionManifest, packetAnswerText } from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
-import { dedupeFieldMappingsByKey } from "@/lib/field-mappings";
+import { dedupeFieldMappings } from "@/lib/field-mappings";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
@@ -113,7 +113,7 @@ export async function freezeApplicationPacket(input: {
         questionId: row.questionId,
         evidenceIds: row.evidenceIds,
       })),
-      field_manifest: dedupeFieldMappingsByKey(mappings ?? []).map((item) => ({
+      field_manifest: dedupeFieldMappings(mappings ?? []).map((item) => ({
         fieldKey: item.field_key,
         label: item.label,
         value: item.value,

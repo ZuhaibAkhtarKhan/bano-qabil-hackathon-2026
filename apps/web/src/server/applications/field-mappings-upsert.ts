@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  dedupeFieldMappingsByKey,
+  dedupeFieldMappings,
   fieldMappingFillScore,
   type FieldMappingLike,
 } from "@/lib/field-mappings";
@@ -111,6 +111,9 @@ export async function upsertApplicationFieldMappings(input: {
       .in("id", [...deleteIds]);
   }
 
+  // Also collapse Email * / Email style label duplicates across different keys.
+  await collapseDuplicateFieldMappings({ supabase, userId, applicationId });
+
   return written;
 }
 
@@ -118,7 +121,7 @@ function mappingHasValue(row: FieldMappingLike): boolean {
   return Boolean(String(row.value ?? "").trim());
 }
 
-/** Collapse any remaining duplicate field_keys for an application (filled wins). */
+/** Collapse duplicate field_keys and duplicate labels (filled wins). */
 export async function collapseDuplicateFieldMappings(input: {
   supabase: SupabaseClient;
   userId: string;
@@ -133,7 +136,7 @@ export async function collapseDuplicateFieldMappings(input: {
 
   if (!data?.length) return 0;
 
-  const winners = new Set(dedupeFieldMappingsByKey(data).map((row) => String(row.id)));
+  const winners = new Set(dedupeFieldMappings(data).map((row) => String(row.id)));
   const losers = data.map((row) => String(row.id)).filter((id) => !winners.has(id));
   if (!losers.length) return 0;
 

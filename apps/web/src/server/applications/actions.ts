@@ -895,12 +895,28 @@ export async function updateApplicationFieldMapping(formData: FormData) {
 
   const { data: siblings } = await supabase
     .from("field_mappings")
-    .select("id")
+    .select("id, field_key, label, value, source, confidence, excluded_by_default")
     .eq("application_id", applicationId)
-    .eq("user_id", user.id)
-    .eq("field_key", String(mapping.field_key))
-    .neq("id", mappingId);
-  const siblingIds = (siblings ?? []).map((row) => String(row.id));
+    .eq("user_id", user.id);
+  const { dedupeFieldMappings } = await import("@/lib/field-mappings");
+  const winners = new Set(
+    dedupeFieldMappings(
+      (siblings ?? []).map((row) =>
+        String(row.id) === mappingId
+          ? {
+              ...row,
+              value,
+              confidence: value ? 1 : 0.2,
+              excluded_by_default: !value,
+              source: "Application tab edit",
+            }
+          : row,
+      ),
+    ).map((row) => String(row.id)),
+  );
+  const siblingIds = (siblings ?? [])
+    .map((row) => String(row.id))
+    .filter((id) => id !== mappingId && !winners.has(id));
   if (siblingIds.length) {
     await supabase.from("field_mappings").delete().eq("user_id", user.id).in("id", siblingIds);
   }

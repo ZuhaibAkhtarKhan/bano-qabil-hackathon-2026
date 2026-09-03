@@ -974,21 +974,20 @@ export async function runBatchFillPlan(input: {
     .select("field_key, label, value, source, confidence, excluded_by_default")
     .eq("application_id", input.applicationId)
     .eq("user_id", input.actor.userId);
-  const { dedupeFieldMappingsByKey, mappingHasUsableFill } = await import("@/lib/field-mappings");
-  const bestStored = dedupeFieldMappingsByKey(storedMappings ?? []).filter((row) =>
+  const { dedupeFieldMappings, mappingHasUsableFill, matchStoredMappingForHostField } = await import(
+    "@/lib/field-mappings"
+  );
+  const bestStored = dedupeFieldMappings(storedMappings ?? []).filter((row) =>
     mappingHasUsableFill(row, 0.5),
   );
   if (bestStored.length) {
-    const byKey = new Map(bestStored.map((row) => [String(row.field_key), row]));
-    const byLabel = new Map(
-      bestStored.map((row) => [String(row.label ?? "").trim().toLowerCase(), row] as const),
-    );
     const fromStored: BatchFieldResult[] = fields.flatMap((field) => {
       const hostKey = input.hostFieldKeyById?.[field.fieldId] ?? field.fieldId;
-      const match =
-        byKey.get(hostKey) ??
-        byKey.get(field.fieldId) ??
-        byLabel.get(field.label.trim().toLowerCase());
+      const match = matchStoredMappingForHostField(bestStored, {
+        fieldKey: hostKey,
+        fieldId: field.fieldId,
+        label: field.label,
+      });
       const value = String(match?.value ?? "").trim();
       if (!value) return [];
       return [

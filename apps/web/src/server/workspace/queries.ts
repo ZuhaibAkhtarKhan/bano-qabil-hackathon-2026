@@ -13,7 +13,7 @@ import { cache } from "react";
 import { after } from "next/server";
 
 import { logError } from "@/lib/log";
-import { dedupeFieldMappingsByKey } from "@/lib/field-mappings";
+import { dedupeFieldMappings } from "@/lib/field-mappings";
 import { requireWorkspace } from "@/server/auth/require-workspace";
 import { ensureApplicationResumeSelection } from "@/server/intelligence/auto-resume";
 import { mapEvidence } from "@/server/memory/map-evidence";
@@ -619,7 +619,7 @@ export async function loadApplicationWorkspace(applicationId: string) {
     attached: attached ?? [],
     snapshots: snapshots ?? [],
     reviewItems: reviewItems ?? [],
-    fieldMappings: dedupeFieldMappingsByKey(fieldMappings ?? []),
+    fieldMappings: dedupeFieldMappings(fieldMappings ?? []),
     fillSessions: fillSessions ?? [],
     statusHistory: statusHistory ?? [],
     events: events ?? [],
