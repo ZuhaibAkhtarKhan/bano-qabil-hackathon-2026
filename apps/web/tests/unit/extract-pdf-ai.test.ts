@@ -21,7 +21,8 @@ describe("extractPdfTextWithAi", () => {
 
     expect(text).toContain("Jane Doe");
     expect(fetchMock).toHaveBeenCalledOnce();
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const call0 = (fetchMock.mock.calls[0] as unknown) as [string, RequestInit];
+    const body = JSON.parse(String(call0[1]?.body));
     expect(body.messages[1].content[0].text).toContain("professional resume/CV");
     expect(body.messages[1].content[1].file.filename).toBe("resume.pdf");
   });
@@ -41,8 +42,9 @@ describe("extractPdfTextWithAi", () => {
     const text = await extractPdfTextWithAi(Buffer.from("%PDF-1.7\n"), { fileName: "resume.pdf" });
 
     expect(text).toContain("Jane Doe");
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1beta/models/gemini-3.6-flash:generateContent");
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const call0 = (fetchMock.mock.calls[0] as unknown) as [string, RequestInit];
+    expect(String(call0[0])).toContain("/v1beta/models/gemini-3.6-flash:generateContent");
+    const body = JSON.parse(String(call0[1]?.body));
     expect(body.contents[0].parts[1].inline_data.mime_type).toBe("application/pdf");
   });
 
