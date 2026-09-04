@@ -7,6 +7,7 @@ import {
 import { cache } from "react";
 
 import { sourceLabelFromOpportunity } from "@/lib/dashboard-display";
+import { logError } from "@/lib/log";
 import { dedupeFieldMappings, fieldMappingFillScore } from "@/lib/field-mappings";
 import {
   detectProfileMemoryField,
@@ -788,11 +789,16 @@ export const loadNeedsYouBadgeCounts = cache(async () => {
   return countsFromNeedsYouQueue(await loadNeedsYouQueueCached(false, true));
 });
 
-/** Dashboard + applications table — full queue (same items as /app/needs-you). */
+/** Dashboard + applications table — must not take down the Applications page if Need You fails. */
 export const loadNeedsYouFieldCounts = cache(async (): Promise<{
   applicationCount: number;
   totalFields: number;
   fieldCountByApplicationId: Record<string, number>;
 }> => {
-  return countsFromNeedsYouQueue(await loadNeedsYouQueue({ polish: false }));
+  try {
+    return countsFromNeedsYouQueue(await loadNeedsYouQueueCached(false, true));
+  } catch (err) {
+    logError("needs_you.field_counts_failed", { err });
+    return { applicationCount: 0, totalFields: 0, fieldCountByApplicationId: {} };
+  }
 });

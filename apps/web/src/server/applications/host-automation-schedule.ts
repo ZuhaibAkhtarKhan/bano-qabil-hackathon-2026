@@ -5,11 +5,13 @@ import { logError } from "@/lib/log";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 
 import {
+  loadHostSubmitAttemptState,
   queueHostFillContinueJob,
   queueHostPrefillJob,
   scheduleHostSubmitJob,
   scheduleHostSubmitWhenFullyComplete,
 } from "./host-submit";
+import { shouldClickSubmitOnContinue, shouldContinueHostFill } from "./host-submit-policy";
 import { kickHostSubmitWorkerIfEnabled } from "./host-submit-worker-kick";
 import { isServerHostSubmitEnabled } from "./playwright-host-submit";
 import { maybeSendPreDeadlineReviewForApplication } from "./pre-deadline-review-email";
@@ -60,14 +62,20 @@ export async function syncHostAutomationForApplication(input: {
     if (
       !complete.ok &&
       complete.reason !== "not_ready" &&
-      complete.reason !== "open_needs_you"
+      complete.reason !== "open_needs_you" &&
+      complete.reason !== "already_submitted" &&
+      complete.reason !== "submit_already_attempted"
     ) {
       logError("host_automation.no_deadline_submit_failed", {
         applicationId: input.applicationId,
         reason: complete.reason,
       });
     }
-  } else if (!submit.ok) {
+  } else if (
+    !submit.ok &&
+    submit.reason !== "already_submitted" &&
+    submit.reason !== "submit_already_attempted"
+  ) {
     logError("host_automation.submit_schedule_failed", {
       applicationId: input.applicationId,
       reason: submit.reason,
@@ -104,9 +112,12 @@ export async function tryContinueHostFillAfterNeedsYou(input: {
   const blocking = dedupeFieldMappings(mappings ?? []).some((row) => mappingBlocksPageAdvance(row));
   if (blocking) return;
 
+  const state = await loadHostSubmitAttemptState(input.supabase, input.applicationId);
+  if (!shouldContinueHostFill(state)) return;
+
   const continued = await queueHostFillContinueJob({
     ...input,
-    clickFinalSubmit: prefs.prepareAndSendIfSilent,
+    clickFinalSubmit: prefs.prepareAndSendIfSilent && shouldClickSubmitOnContinue(state),
   });
   if (continued.ok) {
     await kickHostSubmitWorkerIfEnabled();

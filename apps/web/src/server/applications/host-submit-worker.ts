@@ -9,10 +9,12 @@ import { isPostDeadlineHostSubmitKey } from "@1apply/domain";
 import {
   completeHostPrefillJob,
   completeHostSubmitJob,
+  loadHostSubmitAttemptState,
   recoverStaleRunningHostJobs,
   type HostSubmitJobKind,
   type HostSubmitJobRow,
 } from "./host-submit";
+import { isManualHostSubmitKey, shouldSkipClaimedSubmitJob } from "./host-submit-policy";
 import {
   isServerHostSubmitEnabled,
   runPlaywrightHostPrefill,
@@ -181,28 +183,17 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
   let blocked = 0;
 
   for (const job of jobs) {
-    const claimed = await claimHostJob(supabase, job.id);
-    if (!claimed) continue;
-
-    processed += 1;
-    const actor = await loadActorForUser(supabase, job.user_id);
-    if (!actor) {
-      failed += 1;
-      continue;
-    }
-
     const postDeadline = isPostDeadlineHostSubmitKey(job.idempotency_key);
+    const manual = isManualHostSubmitKey(job.idempotency_key);
 
     if (job.job_kind === "submit") {
       const { data: application } = await supabase
         .from("applications")
-        .select("status")
+        .select("status, submitted_at")
         .eq("id", job.application_id)
         .maybeSingle();
-      if (
-        application &&
-        ["submitted", "rejected", "withdrawn", "archived", "offer"].includes(String(application.status))
-      ) {
+      const state = await loadHostSubmitAttemptState(supabase, job.application_id, application ?? undefined);
+      if (state.hostSubmitSucceeded || state.applicationSubmitted) {
         await supabase
           .from("host_submit_jobs")
           .update({
@@ -213,6 +204,73 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
           .eq("id", job.id);
         continue;
       }
+      if (shouldSkipClaimedSubmitJob({ state, postDeadline, manual })) {
+        if (
+          !postDeadline &&
+          !manual &&
+          (state.hostSubmitClicked || state.firstSubmitAttemptFinished)
+        ) {
+          await supabase
+            .from("host_submit_jobs")
+            .update({
+              status: "cancelled",
+              completed_at: new Date().toISOString(),
+              last_error: "cancelled_extra_auto_submit",
+            })
+            .eq("id", job.id)
+            .eq("status", "pending");
+        }
+        continue;
+      }
+
+      const { data: siblings } = await supabase
+        .from("host_submit_jobs")
+        .select("id, status, host_submit_clicked, due_at, idempotency_key")
+        .eq("application_id", job.application_id)
+        .eq("job_kind", "submit");
+      if ((siblings ?? []).some((row) => String(row.id) !== job.id && row.host_submit_clicked)) {
+        await supabase
+          .from("host_submit_jobs")
+          .update({
+            status: "cancelled",
+            completed_at: new Date().toISOString(),
+            last_error: "cancelled_after_submit_click",
+          })
+          .eq("id", job.id)
+          .eq("status", "pending");
+        continue;
+      }
+      if ((siblings ?? []).some((row) => String(row.id) !== job.id && String(row.status) === "running")) {
+        continue;
+      }
+      if (!postDeadline && !manual) {
+        const pendingAutos = (siblings ?? []).filter((row) => {
+          if (String(row.status) !== "pending") return false;
+          if (isPostDeadlineHostSubmitKey(row.idempotency_key)) return false;
+          if (isManualHostSubmitKey(row.idempotency_key)) return false;
+          return true;
+        });
+        if (pendingAutos.length > 1) {
+          const chosen = pendingAutos
+            .slice()
+            .sort(
+              (a, b) =>
+                String(a.due_at ?? "").localeCompare(String(b.due_at ?? "")) ||
+                String(a.id).localeCompare(String(b.id)),
+            )[0];
+          if (String(chosen.id) !== job.id) continue;
+        }
+      }
+    }
+
+    const claimed = await claimHostJob(supabase, job.id);
+    if (!claimed) continue;
+
+    processed += 1;
+    const actor = await loadActorForUser(supabase, job.user_id);
+    if (!actor) {
+      failed += 1;
+      continue;
     }
 
     try {
@@ -332,6 +390,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
       const errorMessage = result.ok
         ? "Submit clicked but host confirmation was not detected — response may not have been recorded."
         : (result.error ?? "submit_failed");
+      const hostSubmitClicked = Boolean(result.hostSubmitClicked);
 
       await requeueOrFail({
         supabase,
@@ -339,14 +398,14 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         job,
         jobId: job.id,
         error: errorMessage,
-        oneShot: postDeadline,
+        oneShot: postDeadline || manual || hostSubmitClicked,
         onFinalFail: async () => {
           await completeHostSubmitJob({
             supabase,
             actor,
             jobId: job.id,
             submitted: false,
-            hostSubmitClicked: false,
+            hostSubmitClicked,
             error: errorMessage,
           });
         },
@@ -361,7 +420,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         job,
         jobId: job.id,
         error: message,
-        oneShot: postDeadline,
+        oneShot: postDeadline || manual,
         onFinalFail: async () => {
           if (job.job_kind === "prefill") {
             await completeHostPrefillJob({

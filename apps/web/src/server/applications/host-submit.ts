@@ -14,6 +14,14 @@ import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
 
 import { freezeApplicationPacket } from "./freeze-packet";
+import {
+  shouldContinueHostFill,
+  shouldCreateNewAutoSubmitJob,
+  shouldQueuePostDeadlineRetry,
+  summarizeHostSubmitJobs,
+  type HostJobLite,
+  type HostSubmitAttemptState,
+} from "./host-submit-policy";
 
 export type HostSubmitJobKind = "prefill" | "submit";
 
@@ -67,6 +75,23 @@ async function loadApplicationContext(
   return { application, opportunity, sourceUrl };
 }
 
+export async function loadHostSubmitAttemptState(
+  supabase: SupabaseClient,
+  applicationId: string,
+  application?: { status?: string | null; submitted_at?: string | null },
+): Promise<HostSubmitAttemptState> {
+  const [{ data: jobs }, appRow] = await Promise.all([
+    supabase
+      .from("host_submit_jobs")
+      .select("status, job_kind, host_submit_clicked, last_error, idempotency_key")
+      .eq("application_id", applicationId),
+    application
+      ? Promise.resolve({ data: application })
+      : supabase.from("applications").select("status, submitted_at").eq("id", applicationId).maybeSingle(),
+  ]);
+  return summarizeHostSubmitJobs((jobs ?? []) as HostJobLite[], appRow.data ?? {});
+}
+
 async function upsertHostJob(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -78,8 +103,10 @@ async function upsertHostJob(input: {
   nextAction: string;
   eventTitle: string;
   eventBody: string;
-  /** Re-open a completed/failed job so page-loop can resume after Need You. */
+  /** Re-open a Need You pause so the page-loop can resume. Never reopens a failed submit. */
   reopenIfComplete?: boolean;
+  /** User tapped Resubmit — allow a new attempt even if earlier jobs failed. */
+  forceManual?: boolean;
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const {
     supabase,
@@ -93,26 +120,38 @@ async function upsertHostJob(input: {
     eventTitle,
     eventBody,
     reopenIfComplete,
+    forceManual,
   } = input;
 
   const queue = createServiceRoleSupabaseClient();
 
   const { data: existing } = await queue
     .from("host_submit_jobs")
-    .select("id, status")
+    .select("id, status, last_error, host_submit_clicked, attempt_count")
     .eq("idempotency_key", idempotencyKey)
     .maybeSingle();
 
   if (existing) {
-    const terminal = ["submitted", "blocked", "cancelled"];
-    if (!reopenIfComplete) terminal.push("completed");
-    if (terminal.includes(String(existing.status))) {
+    const status = String(existing.status);
+    const waitingNeedsYou =
+      status === "completed" &&
+      String(existing.last_error ?? "") === "waiting_needs_you" &&
+      !existing.host_submit_clicked;
+
+    if (["submitted", "blocked", "cancelled"].includes(status)) {
       return { ok: true, jobId: String(existing.id) };
     }
-    // Post-deadline is a single attempt — never reopen after failure.
-    if (String(existing.status) === "failed" && isPostDeadlineHostSubmitKey(idempotencyKey) && !reopenIfComplete) {
+    if (status === "failed" && !forceManual) {
       return { ok: true, jobId: String(existing.id) };
     }
+    if (status === "completed" && !(reopenIfComplete && waitingNeedsYou)) {
+      return { ok: true, jobId: String(existing.id) };
+    }
+    if (status === "running") {
+      return { ok: true, jobId: String(existing.id) };
+    }
+
+    const reopeningNeedsYou = reopenIfComplete && waitingNeedsYou;
     const { error: updateError } = await queue
       .from("host_submit_jobs")
       .update({
@@ -120,9 +159,9 @@ async function upsertHostJob(input: {
         source_url: sourceUrl,
         status: "pending",
         job_kind: jobKind,
-        attempt_count: 0,
-        last_error: null,
-        completed_at: null,
+        ...(reopeningNeedsYou || forceManual
+          ? { attempt_count: 0, last_error: null, completed_at: null }
+          : {}),
       })
       .eq("id", existing.id);
     if (updateError) {
@@ -134,6 +173,7 @@ async function upsertHostJob(input: {
       jobKind,
       jobId: String(existing.id),
       dueAt: dueAt.toISOString(),
+      reopeningNeedsYou,
     });
     return { ok: true, jobId: String(existing.id) };
   }
@@ -251,8 +291,15 @@ export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): 
     if (!actor) continue;
 
     const pastDeadline = deadlineMs <= now.getTime();
+    const state = await loadHostSubmitAttemptState(supabase, String(application.id), {
+      status: String(application.status),
+      submitted_at: null,
+    });
+    if (state.hostSubmitSucceeded || state.applicationSubmitted) continue;
 
     if (pastDeadline) {
+      if (!shouldQueuePostDeadlineRetry(state)) continue;
+
       const postKey = postDeadlineHostSubmitIdempotencyKey(String(application.id), deadlineAt);
       const { data: postJob } = await supabase
         .from("host_submit_jobs")
@@ -261,7 +308,7 @@ export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): 
         .maybeSingle();
 
       // One attempt after the deadline — do not reopen terminal outcomes.
-      if (postJob && ["submitted", "failed", "blocked", "cancelled"].includes(String(postJob.status))) {
+      if (postJob && ["submitted", "failed", "blocked", "cancelled", "completed"].includes(String(postJob.status))) {
         continue;
       }
       if (postJob && ["pending", "running"].includes(String(postJob.status))) {
@@ -287,6 +334,7 @@ export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): 
 
     const dueAt = computeHostSubmitDueAt(deadlineAt, now);
     if (dueAt.getTime() > now.getTime()) continue;
+    if (!shouldCreateNewAutoSubmitJob(state)) continue;
 
     const idempotencyKey = `${application.id}:host_submit:${deadlineAt}`;
     const { data: job } = await supabase
@@ -295,9 +343,9 @@ export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): 
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
 
-    if (job?.status === "submitted") continue;
-    if (job?.status === "pending" || job?.status === "running") continue;
-    if (job?.status === "blocked" || job?.status === "cancelled") continue;
+    if (job && ["submitted", "pending", "running", "blocked", "cancelled", "failed", "completed"].includes(String(job.status))) {
+      continue;
+    }
 
     const result = await upsertHostJob({
       supabase,
@@ -307,9 +355,9 @@ export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): 
       jobKind: "submit",
       dueAt: now,
       idempotencyKey,
-      nextAction: "Auto-submit re-queued — retrying host form submission.",
-      eventTitle: "Auto-submit re-queued",
-      eventBody: "The server will fill and submit this form again before the deadline passes.",
+      nextAction: "Auto-submit queued — filling and submitting the host form.",
+      eventTitle: "Auto-submit queued",
+      eventBody: "The server will fill and submit this form once before the deadline.",
     });
     if (result.ok) requeued += 1;
   }
@@ -357,36 +405,52 @@ export async function scheduleHostSubmitJob(input: {
 
   const dueAt = computeHostSubmitDueAt(deadlineAt);
   const idempotencyKey = `${input.applicationId}:host_submit:${deadlineAt}`;
-
-  const primary = await upsertHostJob({
-    supabase: input.supabase,
-    actor: input.actor,
-    applicationId: input.applicationId,
-    sourceUrl: ctx.sourceUrl,
-    jobKind: "submit",
-    dueAt,
-    idempotencyKey,
-    nextAction: `Auto-submit scheduled ${dueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })} (1 hour before deadline).`,
-    eventTitle: `Auto-submit scheduled — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
-    eventBody:
-      "You'll get a review email up to 2 hours before the deadline. The form submits automatically 1 hour before unless you edit. If it is still open after the deadline, 1-Apply tries once more and notifies you.",
+  const state = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
+    status: String(ctx.application.status),
+    submitted_at: null,
   });
 
-  // Always schedule a one-shot post-deadline attempt (cancelled if primary submit succeeds).
-  const postDueAt = computePostDeadlineHostSubmitDueAt(deadlineAt);
-  await upsertHostJob({
-    supabase: input.supabase,
-    actor: input.actor,
-    applicationId: input.applicationId,
-    sourceUrl: ctx.sourceUrl,
-    jobKind: "submit",
-    dueAt: postDueAt,
-    idempotencyKey: postDeadlineHostSubmitIdempotencyKey(input.applicationId, deadlineAt),
-    nextAction: `If still open after the deadline (${postDueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}), 1-Apply will try once more.`,
-    eventTitle: `Post-deadline retry scheduled — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
-    eventBody:
-      "If this form is not submitted by the deadline, 1-Apply will attempt one final host submit and email you the result.",
-  });
+  if (state.hostSubmitSucceeded || state.applicationSubmitted) {
+    return { ok: false, reason: "already_submitted" };
+  }
+
+  let primary: { ok: true; jobId: string } | { ok: false; reason: string } = {
+    ok: false,
+    reason: "submit_already_attempted",
+  };
+  if (shouldCreateNewAutoSubmitJob(state)) {
+    primary = await upsertHostJob({
+      supabase: input.supabase,
+      actor: input.actor,
+      applicationId: input.applicationId,
+      sourceUrl: ctx.sourceUrl,
+      jobKind: "submit",
+      dueAt,
+      idempotencyKey,
+      nextAction: `Auto-submit scheduled ${dueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })} (1 hour before deadline).`,
+      eventTitle: `Auto-submit scheduled — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+      eventBody:
+        "You'll get a review email up to 2 hours before the deadline. The form submits automatically 1 hour before unless you edit. If it is still open after the deadline, 1-Apply tries once more and notifies you.",
+    });
+  }
+
+  // One-shot post-deadline attempt (cancelled if primary submit succeeds).
+  if (!state.postDeadlineAttempted) {
+    const postDueAt = computePostDeadlineHostSubmitDueAt(deadlineAt);
+    await upsertHostJob({
+      supabase: input.supabase,
+      actor: input.actor,
+      applicationId: input.applicationId,
+      sourceUrl: ctx.sourceUrl,
+      jobKind: "submit",
+      dueAt: postDueAt,
+      idempotencyKey: postDeadlineHostSubmitIdempotencyKey(input.applicationId, deadlineAt),
+      nextAction: `If still open after the deadline (${postDueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}), 1-Apply will try once more.`,
+      eventTitle: `Post-deadline retry scheduled — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+      eventBody:
+        "If this form is not submitted by the deadline, 1-Apply will attempt one final host submit and email you the result.",
+    });
+  }
 
   return primary;
 }
@@ -403,6 +467,17 @@ export async function scheduleHostSubmitWhenFullyComplete(input: {
 
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
   if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  const noDeadlineState = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
+    status: String(ctx.application.status),
+    submitted_at: null,
+  });
+  if (!shouldCreateNewAutoSubmitJob(noDeadlineState)) {
+    return {
+      ok: false,
+      reason: noDeadlineState.hostSubmitSucceeded ? "already_submitted" : "submit_already_attempted",
+    };
+  }
 
   return upsertHostJob({
     supabase: input.supabase,
@@ -427,6 +502,14 @@ export async function queueHostFillContinueJob(input: {
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
   if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  const continueState = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
+    status: String(ctx.application.status),
+    submitted_at: null,
+  });
+  if (!shouldContinueHostFill(continueState)) {
+    return { ok: false, reason: "submit_already_attempted" };
+  }
 
   return upsertHostJob({
     supabase: input.supabase,
@@ -455,6 +538,13 @@ export async function queueHostSubmitJob(input: {
   if (input.dueAt) {
     const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
     if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+    const state = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
+      status: String(ctx.application.status),
+      submitted_at: null,
+    });
+    if (!shouldCreateNewAutoSubmitJob(state)) {
+      return { ok: false, reason: state.hostSubmitSucceeded ? "already_submitted" : "submit_already_attempted" };
+    }
     return upsertHostJob({
       supabase: input.supabase,
       actor: input.actor,
@@ -469,6 +559,44 @@ export async function queueHostSubmitJob(input: {
     });
   }
   return scheduleHostSubmitJob(input);
+}
+
+/** User tapped Resubmit — one new submit job, independent of earlier auto-submit attempts. */
+export async function queueManualHostSubmitJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
+  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  const now = new Date();
+  const queue = createServiceRoleSupabaseClient();
+  await queue
+    .from("host_submit_jobs")
+    .update({
+      status: "cancelled",
+      completed_at: now.toISOString(),
+      last_error: "cancelled_by_manual_resubmit",
+    })
+    .eq("application_id", input.applicationId)
+    .eq("user_id", input.actor.userId)
+    .eq("job_kind", "submit")
+    .in("status", ["pending", "running"]);
+
+  return upsertHostJob({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+    sourceUrl: ctx.sourceUrl,
+    jobKind: "submit",
+    dueAt: now,
+    idempotencyKey: `${input.applicationId}:host_submit:manual:${Date.now()}`,
+    forceManual: true,
+    nextAction: "Resubmit queued — filling and submitting the host form now.",
+    eventTitle: `Resubmit queued — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+    eventBody: "You asked 1-Apply to submit this form again. The server will fill and click Submit once.",
+  });
 }
 
 export async function completeHostPrefillJob(input: {
@@ -588,6 +716,29 @@ export async function completeHostSubmitJob(input: {
   const postDeadline = isPostDeadlineHostSubmitKey(String(job.idempotency_key ?? ""));
   const now = new Date().toISOString();
 
+  async function cancelPendingSubmitSiblings(reason: string, includePostDeadline: boolean) {
+    const { data: siblings } = await supabase
+      .from("host_submit_jobs")
+      .select("id, idempotency_key")
+      .eq("application_id", applicationId)
+      .eq("user_id", actor.userId)
+      .eq("job_kind", "submit")
+      .in("status", ["pending", "running"])
+      .neq("id", jobId);
+    const ids = (siblings ?? [])
+      .filter((row) => includePostDeadline || !isPostDeadlineHostSubmitKey(String(row.idempotency_key ?? "")))
+      .map((row) => String(row.id));
+    if (ids.length === 0) return;
+    await supabase
+      .from("host_submit_jobs")
+      .update({
+        status: "cancelled",
+        completed_at: now,
+        last_error: reason,
+      })
+      .in("id", ids);
+  }
+
   if (blockedReason) {
     await supabase
       .from("host_submit_jobs")
@@ -650,19 +801,7 @@ export async function completeHostSubmitJob(input: {
       })
       .eq("id", jobId);
 
-    // Cancel any other pending/running submit jobs for this application (including post-deadline).
-    await supabase
-      .from("host_submit_jobs")
-      .update({
-        status: "cancelled",
-        completed_at: now,
-        last_error: "cancelled_after_successful_submit",
-      })
-      .eq("application_id", applicationId)
-      .eq("user_id", actor.userId)
-      .eq("job_kind", "submit")
-      .in("status", ["pending", "running"])
-      .neq("id", jobId);
+    await cancelPendingSubmitSiblings("cancelled_after_successful_submit", true);
 
     const freeze = await freezeApplicationPacket({
       supabase,
@@ -731,6 +870,11 @@ export async function completeHostSubmitJob(input: {
       completed_at: now,
     })
     .eq("id", jobId);
+
+  if (hostSubmitClicked) {
+    // Keep the post-deadline one-shot; cancel any other auto-submit retries.
+    await cancelPendingSubmitSiblings("cancelled_after_submit_click", false);
+  }
 
   await emitDomainEvent(supabase, {
     name: "submission.failed",

@@ -954,12 +954,11 @@ export async function resubmitApplication(formData: FormData) {
   }
 
   // Queue an immediate submit job (dueAt = now).
-  const { queueHostSubmitJob } = await import("@/server/applications/host-submit");
-  const result = await queueHostSubmitJob({
+  const { queueManualHostSubmitJob } = await import("@/server/applications/host-submit");
+  const result = await queueManualHostSubmitJob({
     supabase,
     actor,
     applicationId,
-    dueAt: new Date(),
   });
   if (!result.ok) {
     redirectWith(applicationPath(applicationId), { error: "save" }, "submission");

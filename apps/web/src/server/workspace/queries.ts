@@ -369,29 +369,71 @@ export async function loadOpportunitiesWorkspace() {
 
 export async function loadApplicationsWorkspace() {
   const { profile, supabase } = await requireWorkspace();
-  const { data } = await supabase
+
+  // Nested `fit_evaluations` in this select can fail PostgREST for some rows and
+  // return an empty list — same workaround as loadDashboard.
+  let applicationRows: ApplicationListRow[] = [];
+  const primaryApps = await supabase
     .from("applications")
     .select(
-      "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source, source_url, canonical_url ), fit_evaluations ( score )",
+      "id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at, opportunities ( title, organization, category, source, source_url, canonical_url )",
     )
     .eq("user_id", profile.id)
     .order("updated_at", { ascending: false });
 
-  const applicationRows = (data ?? []) as ApplicationListRow[];
-  const trackerDocs =
-    applicationRows.length > 0
-      ? await loadApplicationTrackerDocumentMaps(
-          supabase,
-          profile.id,
-          applicationRows.map((row) => ({ id: row.id, opportunity_id: row.opportunity_id })),
-        )
-      : new Map<string, ApplicationTrackerDocumentContext>();
+  if (primaryApps.error) {
+    logError("applications.list_failed", {
+      code: primaryApps.error.code,
+      message: primaryApps.error.message,
+    });
+    const fallbackApps = await supabase
+      .from("applications")
+      .select("id, opportunity_id, status, deadline_at, next_action, submitted_at, updated_at")
+      .eq("user_id", profile.id)
+      .order("updated_at", { ascending: false });
+    applicationRows = (fallbackApps.data ?? []).map((row) => ({
+      ...(row as Omit<ApplicationListRow, "opportunities" | "fit_evaluations">),
+      opportunities: null,
+      fit_evaluations: null,
+    }));
+  } else {
+    applicationRows = (primaryApps.data ?? []) as ApplicationListRow[];
+  }
+
+  const applicationIds = applicationRows.map((row) => row.id);
+  const fitByApplication = new Map<string, { score: number }>();
+  let trackerDocs = new Map<string, ApplicationTrackerDocumentContext>();
+
+  if (applicationIds.length > 0) {
+    try {
+      trackerDocs = await loadApplicationTrackerDocumentMaps(
+        supabase,
+        profile.id,
+        applicationRows.map((row) => ({ id: row.id, opportunity_id: row.opportunity_id })),
+      );
+    } catch (err) {
+      logError("applications.tracker_docs_failed", { err });
+    }
+
+    const { data: fits } = await supabase
+      .from("fit_evaluations")
+      .select("application_id, score")
+      .eq("user_id", profile.id)
+      .in("application_id", applicationIds);
+    for (const row of fits ?? []) {
+      if (typeof row.score === "number" && typeof row.application_id === "string") {
+        fitByApplication.set(row.application_id, { score: row.score });
+      }
+    }
+  }
 
   return {
     applications: applicationRows.map((row) => {
       const tracker = trackerDocs.get(row.id);
+      const fit = fitByApplication.get(row.id);
       return {
         ...row,
+        fit_evaluations: fit ?? row.fit_evaluations ?? null,
         requiredDocumentLabels: tracker?.requiredDocumentLabels ?? [],
         resumeStatus: tracker?.resume,
         coverStatus: tracker?.cover,
