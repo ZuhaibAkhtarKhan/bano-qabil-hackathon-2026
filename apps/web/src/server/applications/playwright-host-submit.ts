@@ -136,9 +136,10 @@ async function clickGoogleChoice(
     scope.getByRole(role, { name: exact }),
     scope.locator(`[data-value="${value}"]`),
     scope.locator(`[aria-label="${value}"]`),
+    scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: exact }),
     scope.getByText(exact),
     scope.getByRole(role, { name: fuzzy }),
-    scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: exact }),
+    scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: fuzzy }),
     scope.getByText(fuzzy),
   ];
   if (type === "select") {
@@ -163,21 +164,22 @@ async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntr
   let filled = 0;
   for (const entry of entries) {
     if (entry.status !== "filled") continue;
-    const type = entry.type;
-    if (type && type !== "radio" && type !== "select" && type !== "checkbox") continue;
+    if (isHostFileUploadEntry(entry)) continue;
     const value = entry.value?.trim() ?? "";
     if (!value) continue;
     const scope = await findHostFieldScope(page, entry);
     if (!scope) continue;
+    const type = entry.type;
     const inferred =
-      type ??
-      ((await scope.locator('[role="radio"]').count()) > 0
-        ? "radio"
-        : (await scope.locator('[role="checkbox"]').count()) > 0
-          ? "checkbox"
+      type === "radio" || type === "select" || type === "checkbox"
+        ? type
+        : (await scope.locator('[role="radio"]').count()) > 0
+          ? "radio"
           : (await scope.locator('[role="listbox"]').count()) > 0
             ? "select"
-            : null);
+            : (await scope.locator('[role="checkbox"]').count()) > 0
+              ? "checkbox"
+              : null;
     if (!inferred || (inferred !== "radio" && inferred !== "select" && inferred !== "checkbox")) continue;
     const parts =
       inferred === "checkbox"

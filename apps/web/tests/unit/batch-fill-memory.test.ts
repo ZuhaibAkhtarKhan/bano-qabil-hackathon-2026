@@ -206,7 +206,7 @@ describe("batch fill uses Application Memory instead of uncited LLM output", () 
     expect(results.find((item) => item.fieldId === "f_year")).toMatchObject({ status: "filled", value: "3rd" });
     expect(results.find((item) => item.fieldId === "f_track")).toMatchObject({ status: "filled", value: "Engineering" });
     expect(results.find((item) => item.fieldId === "f_agree")?.status).toBe("filled");
-    expect(formRequirementFieldIds).toEqual(expect.arrayContaining(["f_year", "f_track", "f_agree"]));
+    expect(formRequirementFieldIds).toEqual(["f_agree"]);
   });
 
   it("does not treat an unselected radio as already filled", () => {
@@ -258,6 +258,32 @@ describe("batch fill uses Application Memory instead of uncited LLM output", () 
     );
     expect(results[0]?.status).toBe("filled");
     expect(results[0]?.value).toMatch(/retrieval/i);
+  });
+
+  it("fills Need You radio choices from the saved Need You answer", () => {
+    const memory = catalog({
+      allowedEvidenceIds: ["kit:Need You → Rate your communication skills"],
+      kit: [
+        {
+          id: "kit:Need You → Rate your communication skills",
+          path: "Need You → Rate your communication skills",
+          value: "Advanced",
+        },
+      ],
+    });
+    const results = fillCustomQuestionsFromMemory(
+      [
+        {
+          fieldId: "f_comm",
+          type: "radio",
+          label: "Rate your communication skills",
+          options: ["Basic", "Intermediate", "Advanced", "Expert"],
+        },
+      ],
+      [],
+      memory,
+    );
+    expect(results[0]).toMatchObject({ status: "filled", value: "Advanced" });
   });
 
   it("does not overwrite an already-filled custom question with kit mapping", () => {

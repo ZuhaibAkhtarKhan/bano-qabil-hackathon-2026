@@ -346,6 +346,29 @@ describe("multi-choice memory matching", () => {
     expect(mapping?.showChip).toBe(true);
   });
 
+  it("selects a Need You radio answer for the matching question", () => {
+    const document = documentFrom(`
+      <fieldset>
+        <legend>Rate your communication skills</legend>
+        <label><input type="radio" name="comm" value="Basic" /> Basic</label>
+        <label><input type="radio" name="comm" value="Intermediate" /> Intermediate</label>
+        <label><input type="radio" name="comm" value="Advanced" /> Advanced</label>
+        <label><input type="radio" name="comm" value="Expert" /> Expert</label>
+      </fieldset>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Need You → Rate your communication skills",
+        source: "Need You",
+        value: "Advanced",
+        aliases: ["rate your communication skills", "communication"],
+      },
+    ];
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.proposedValue).toBe("Advanced");
+    expect(mapping?.source).toBe("Need You");
+  });
+
   it("matches graduation year options against memory years", () => {
     const document = documentFrom(`
       <label>Expected graduation year

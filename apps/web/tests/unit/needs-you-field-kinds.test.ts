@@ -11,6 +11,7 @@ import {
   parseNeedsYouMultiValues,
   persistableFormChoiceOptions,
   resolveNeedsYouChoiceOptions,
+  snapToHostOption,
 } from "@/lib/needs-you-field-kinds";
 
 describe("needs-you field kinds", () => {
@@ -126,5 +127,10 @@ describe("needs-you field kinds", () => {
       "Captions / subtitles",
       "Sound design / SFX",
     ]);
+  });
+
+  it("snaps Need You answers onto live host options", () => {
+    expect(snapToHostOption("advanced", ["Basic", "Intermediate", "Advanced", "Expert"])).toBe("Advanced");
+    expect(snapToHostOption("Expert", ["Basic", "Intermediate", "Advanced", "Expert"])).toBe("Expert");
   });
 });

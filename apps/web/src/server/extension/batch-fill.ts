@@ -24,7 +24,7 @@ import type { Actor } from "@/auth/actor";
 import { tryGetAiProvider } from "@/infra/ai/openai";
 import { wrapUntrustedFormFields } from "@/lib/opportunities/untrusted";
 import { logError } from "@/lib/log";
-import { persistableFormChoiceOptions } from "@/lib/needs-you-field-kinds";
+import { persistableFormChoiceOptions, snapToHostOption } from "@/lib/needs-you-field-kinds";
 import { recordAuditEvent } from "@/server/audit";
 import { markFillStarted } from "@/server/applications/fill-lifecycle";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
@@ -237,6 +237,10 @@ export function keepAlreadyFilledFields(fields: BatchFieldInput[]): {
 
 const SAVED_ANSWER_PATH = /^(approved application answer|answer →|need you →|saved answer)/i;
 
+function isChoiceField(type: string | undefined): boolean {
+  return type === "radio" || type === "checkbox" || type === "select";
+}
+
 export function fillCustomQuestionsFromMemory(
   fields: BatchFieldInput[],
   mappings: FieldMapping[],
@@ -246,16 +250,28 @@ export function fillCustomQuestionsFromMemory(
   const answers = catalog.kit.filter((item) => SAVED_ANSWER_PATH.test(item.path) || item.path.startsWith("Evidence →"));
 
   return fields.map((field) => {
-    if (
-      field.type === "file" ||
-      field.type === "radio" ||
-      field.type === "checkbox" ||
-      field.type === "select" ||
-      field.type === "date" ||
-      field.type === "number"
-    ) {
+    if (field.type === "file" || field.type === "date" || field.type === "number") {
       return { fieldId: field.fieldId, status: "need_you" as const };
     }
+
+    if (isChoiceField(field.type)) {
+      const question = `${field.label} ${field.nearbyText ?? ""}`;
+      let best: { value: string; score: number } | null = null;
+      for (const item of catalog.kit) {
+        if (!SAVED_ANSWER_PATH.test(item.path) && item.path !== "Approved Application Answer") continue;
+        const pathTail = item.path.replace(/^[^→]+→\s*/, "");
+        const score = Math.max(tokenOverlapScore(question, item.path), tokenOverlapScore(question, pathTail));
+        if (score < 0.28) continue;
+        const snapped = snapToHostOption(item.value, field.options);
+        if (!snapped) continue;
+        if (!best || score > best.score) best = { value: snapped, score };
+      }
+      if (best) {
+        return { fieldId: field.fieldId, status: "filled" as const, value: best.value };
+      }
+      return { fieldId: field.fieldId, status: "need_you" as const };
+    }
+
     const detected = toDetectedField(field);
     const mapping = byKey.get(field.fieldId);
     const custom = Boolean(mapping?.aiAnswerable) || isAiAnswerableField(detected) || field.type === "textarea" || field.type === "contenteditable";
@@ -518,8 +534,9 @@ export function mappingsToBatchResults(
     // grounding catalog citation lookup returned nothing — they come straight from the user's own
     // stored profile and don't need AI-style evidence grounding.
     const trustedKitPath =
-      /^(Profile →|Education →|Skills →|Contact →|Evidence →)/i.test(mapping.memoryPath) ||
-      mapping.source === "Application Memory";
+      /^(Profile →|Education →|Skills →|Contact →|Evidence →|Need You →|Saved answer)/i.test(mapping.memoryPath) ||
+      mapping.source === "Application Memory" ||
+      /need you/i.test(mapping.source);
     if (trustedKitPath && mapping.confidence >= 0.55) {
       const kitCite = catalog.allowedEvidenceIds.includes(kitPathId) ? [kitPathId] : [];
       return { fieldId: field.fieldId, status: "filled" as const, value, evidenceIds: kitCite };
@@ -1034,10 +1051,14 @@ export async function runBatchFillPlan(input: {
       });
       const value = String(match?.value ?? "").trim();
       if (!value) return [];
+      const choiceValue =
+        field.type === "radio" || field.type === "checkbox" || field.type === "select"
+          ? snapToHostOption(value, field.options) ?? value
+          : value;
       const result = storedMappingToFillResult({
         fieldId: field.fieldId,
         fieldType: field.type,
-        value,
+        value: choiceValue,
         source: match?.source,
         allowedDocumentVersionIds: catalog.allowedDocumentVersionIds,
       });

@@ -199,6 +199,47 @@ export function joinNeedsYouMultiValues(values: string[]): string {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))].join("; ");
 }
 
+/** Pick the host option that matches a Need You / stored answer, keeping live form wording. */
+export function snapToHostOption(value: string, options: string[] | null | undefined): string | null {
+  const wanted = value.trim();
+  if (!wanted) return null;
+  if (!options?.length) return wanted;
+
+  const norm = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+  const wantedN = norm(wanted);
+  const exact = options.find((option) => norm(option) === wantedN);
+  if (exact) return exact;
+
+  const parts = wanted.split(/\n|;/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const snapped = parts
+      .map((part) => snapToHostOption(part, options))
+      .filter((part): part is string => Boolean(part));
+    if (snapped.length) return [...new Set(snapped)].join("; ");
+  }
+
+  let best: { option: string; score: number } | null = null;
+  for (const option of options) {
+    const optionN = norm(option);
+    if (!optionN) continue;
+    let score = 0;
+    if (optionN.includes(wantedN) || wantedN.includes(optionN)) {
+      score = Math.min(optionN.length, wantedN.length) / Math.max(optionN.length, wantedN.length);
+    }
+    if (score >= 0.35 && (!best || score > best.score)) {
+      best = { option, score };
+    }
+  }
+  if (best && best.score >= 0.45) {
+    // Prefer the applicant's short label when the captured option is a concatenated blob.
+    if (wantedN.length >= 2 && wantedN.length <= 48 && norm(best.option).includes(wantedN) && norm(best.option).length > wantedN.length + 8) {
+      return wanted;
+    }
+    return best.option;
+  }
+  return wanted;
+}
+
 /** Options persisted on field_mappings — only real form choices. */
 export function persistableFormChoiceOptions(input: {
   fieldType: string | null | undefined;

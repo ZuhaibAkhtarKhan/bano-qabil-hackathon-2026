@@ -651,6 +651,32 @@ function isRequiredSoleCheckbox(field: DetectedField): boolean {
   return field.required;
 }
 
+function isNeedYouMemory(memory: MemoryValue): boolean {
+  return /need you/i.test(memory.source) || /^(need you|saved answer|answer →)\b/i.test(memory.path);
+}
+
+/** Use the applicant's Need You pick for this question, snapped to a live form option. */
+function pickNeedYouChoice(field: DetectedField, catalog: MemoryValue[]): { choice: string; mem: MemoryValue } | null {
+  const question = normalize(`${field.label} ${field.nearbyText} ${field.ariaLabel}`);
+  if (!question) return null;
+  let best: { choice: string; mem: MemoryValue; score: number } | null = null;
+  for (const mem of catalog) {
+    if (!isNeedYouMemory(mem)) continue;
+    const pathTail = normalize(mem.path.replace(/^[^→]+→\s*/, ""));
+    const labelScore = Math.max(choiceScore(question, pathTail), choiceScore(question, normalize(mem.path)));
+    if (labelScore < 0.42) continue;
+    const value = mem.value.trim();
+    if (!value) continue;
+    const snapped =
+      field.options.find((option) => choiceScore(option, value) >= 0.88) ??
+      (field.options.length === 0 ? value : null);
+    if (!snapped) continue;
+    const score = labelScore + (choiceScore(snapped, value) >= 0.99 ? 0.3 : 0.1);
+    if (!best || score > best.score) best = { choice: snapped, mem, score };
+  }
+  return best;
+}
+
 function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive: boolean): FieldMapping | null {
   if (!["select", "radio", "checkbox", "multi-select"].includes(field.type)) return null;
 
@@ -733,6 +759,34 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
         : "Yes/No question — not auto-filled from unrelated kit Yes/No answers. Needs You or AI with evidence.",
       fieldType: field.type,
       aiAnswerable: true,
+      showChip: true,
+    };
+  }
+
+  const needYou = pickNeedYouChoice(field, catalog);
+  if (needYou && !sensitive) {
+    const formOptions =
+      field.options.length > 0
+        ? field.options.map((value) => ({
+            value,
+            label: field.label || "Form option",
+            source: value === needYou.choice ? needYou.mem.source : "Form choice",
+          }))
+        : [{ value: needYou.choice, label: needYou.mem.path, source: needYou.mem.source }];
+    return {
+      fieldKey: field.key,
+      label: humanQuestionLabel(field),
+      memoryPath: needYou.mem.path,
+      source: needYou.mem.source,
+      confidence: 1,
+      proposedValue: needYou.choice,
+      options: formOptions,
+      approvalState: "pending",
+      sensitive: false,
+      excludedByDefault: false,
+      reason: `Need You answer “${needYou.choice}” for this question.`,
+      fieldType: field.type,
+      aiAnswerable: false,
       showChip: true,
     };
   }
