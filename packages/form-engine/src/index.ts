@@ -1,7 +1,7 @@
 export type { ApprovalState, DetectedField, FieldAttachment, FieldMapping, FieldMappingOption, FieldType, FillAction, MemoryValue, PageHazards } from "./types";
 export type { ActionControlKind } from "./step-controls";
 export { FIELD_TYPES, fieldSignals } from "./types";
-export { fillTargetAllowed, isForbiddenFillAction, isProtectedControl, isSensitiveField, proposedFillTargets } from "./safety";
+export { fillTargetAllowed, isCaptchaChallengeCopy, isForbiddenFillAction, isProtectedControl, isSensitiveField, proposedFillTargets } from "./safety";
 export {
   APPLY_BATCH_ID_ATTR,
   fieldsEligibleForBatch,

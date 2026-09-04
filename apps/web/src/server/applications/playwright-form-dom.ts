@@ -157,13 +157,32 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     return Boolean(month && (day || year));
   }
 
-  function itemHasFillableControl(item: Element): boolean {
-    if (looksLikeFileField(item) || looksLikeDateField(item)) return true;
-    return Boolean(
+  function itemLooksLikeCaptcha(item: Element): boolean {
+    if (
       item.querySelector(
-        'input:not([type=hidden]), textarea, select, [role="radio"], [role="checkbox"], [role="listbox"], [role="textbox"], [contenteditable="true"]',
+        'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"], .g-recaptcha, .h-captcha, .cf-turnstile, textarea.g-recaptcha-response, textarea[name="g-recaptcha-response"]',
+      )
+    ) {
+      return true;
+    }
+    const heading = item.querySelector(
+      '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
+    );
+    const blob = `${heading?.textContent ?? ""} ${item.getAttribute("aria-label") ?? ""}`;
+    return /type the text you hear or see|type what you (hear|see)|i'?m not a robot|select all (squares|images|pictures)|verify (you are|that you'?re) (a )?human|complete the captcha|\b(hcaptcha|recaptcha)\b/i.test(
+      blob,
+    );
+  }
+
+  function itemHasFillableControl(item: Element): boolean {
+    if (itemLooksLikeCaptcha(item)) return false;
+    if (looksLikeFileField(item) || looksLikeDateField(item)) return true;
+    const controls = Array.from(
+      item.querySelectorAll(
+        'input:not([type=hidden]):not([name="g-recaptcha-response"]), textarea:not(.g-recaptcha-response):not([name="g-recaptcha-response"]), select, [role="radio"], [role="checkbox"], [role="listbox"], [role="textbox"], [contenteditable="true"]',
       ),
     );
+    return controls.some((el) => visible(el));
   }
 
   /** Prefer the option's own label — Google Forms aria/textContent often concatenates every choice. */
@@ -422,12 +441,20 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
         ),
       );
       for (const el of inputs) {
+        const name = (el as HTMLInputElement).name ?? "";
+        if (/g-recaptcha-response|h-captcha-response|cf-turnstile-response/i.test(`${name} ${el.id}`)) continue;
+        if (!visible(el)) continue;
         const label =
           el.getAttribute("aria-label") ||
           el.getAttribute("placeholder") ||
           (el as HTMLInputElement).name ||
           el.id ||
           `Field ${fields.length + 1}`;
+        if (
+          /type the text you hear or see|i'?m not a robot|g-recaptcha|h-captcha|turnstile/i.test(String(label))
+        ) {
+          continue;
+        }
         const fieldKey = String(label)
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "_")

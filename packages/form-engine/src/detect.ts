@@ -1,5 +1,6 @@
 import { fieldSignals, type DetectedField, type FieldType } from "./types";
 import { humanQuestionLabel, isNoiseFormField, stripFormSyntaxDecorators } from "./question-label";
+import { isCaptchaChallengeCopy } from "./safety";
 
 export const APPLY_FIELD_ATTR = "data-1apply-key";
 export const APPLY_EMPTY_ATTR = "data-1apply-empty";
@@ -287,11 +288,26 @@ function pushField(fields: DetectedField[], field: Omit<DetectedField, "signals"
   fields.push(next);
 }
 
+function looksLikeCaptchaWidget(item: Element): boolean {
+  if (
+    item.querySelector(
+      'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"], .g-recaptcha, .h-captcha, .cf-turnstile, textarea.g-recaptcha-response, textarea[name="g-recaptcha-response"]',
+    )
+  ) {
+    return true;
+  }
+  const heading = item.querySelector('[role="heading"]');
+  return isCaptchaChallengeCopy(
+    `${heading?.textContent ?? ""} ${item.getAttribute("aria-label") ?? ""} ${item.textContent ?? ""}`.slice(0, 400),
+  );
+}
+
 function inventoryGoogleFormsListitems(root: ParentNode, seen: Set<string>): DetectedField[] {
   const fields: DetectedField[] = [];
   const items = Array.from((root as Document | Element).querySelectorAll?.('[role="listitem"]') ?? []);
 
   for (const [index, item] of items.entries()) {
+    if (looksLikeCaptchaWidget(item)) continue;
     const key = listitemKey(item, index);
     if (seen.has(key)) continue;
 
@@ -523,6 +539,8 @@ export function inventoryFromDocument(root: ParentNode): DetectedField[] {
 
     const name = attr(el, "name") || (el as HTMLInputElement).name || "";
     const id = attr(el, "id") || el.id || "";
+    if (/g-recaptcha-response|h-captcha-response|cf-turnstile-response/i.test(`${name} ${id}`)) continue;
+    if (isCaptchaChallengeCopy(`${attr(el, "aria-label")} ${attr(el, "placeholder")}`)) continue;
     const key = fieldKey(el, index, name, id);
 
     if (seen.has(key) && inputType !== "radio") {

@@ -1,4 +1,4 @@
-import { humanQuestionLabel, humanizeFieldToken, isMachineFieldToken } from "@1apply/form-engine";
+import { humanQuestionLabel, humanizeFieldToken, isCaptchaChallengeCopy, isMachineFieldToken } from "@1apply/form-engine";
 import {
   classifyRequiredDocumentLabel,
   matchVaultDocument,
@@ -479,6 +479,10 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
         id: fieldKey,
         key: fieldKey,
       });
+
+      if (isCaptchaChallengeCopy(title) || isCaptchaChallengeCopy(rawLabel) || isCaptchaChallengeCopy(fieldKey)) {
+        continue;
+      }
 
       // Skip plumbing / hex ids that never resolved to a real question.
       if (

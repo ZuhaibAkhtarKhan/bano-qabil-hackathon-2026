@@ -1,4 +1,5 @@
 import type { DetectedField } from "./types";
+import { isCaptchaChallengeCopy } from "./safety";
 
 /** Tokens that are DOM ids/names, not human questions. */
 export function isMachineFieldToken(value: string | null | undefined): boolean {
@@ -114,6 +115,9 @@ export function isNoiseFormField(
   const blob = [field.name, field.id, field.key, field.label, field.ariaLabel].join(" ").toLowerCase();
   if (field.inputType === "hidden") return true;
   if (/csrf|xsrf|authenticity_token|recaptcha|honeypot|botcheck|utm_|tracking[_-]?id|session[_-]?id/i.test(blob)) {
+    return true;
+  }
+  if (isCaptchaChallengeCopy(`${field.label} ${field.ariaLabel} ${field.placeholder} ${field.nearbyText}`)) {
     return true;
   }
   if (/share[-_]?link|copy[-_]?link|invite[-_]?token/i.test(blob)) {

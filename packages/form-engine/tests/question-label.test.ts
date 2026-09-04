@@ -45,6 +45,42 @@ describe("human question labels", () => {
     ).toBe(true);
   });
 
+  it("does not treat reCAPTCHA challenge copy as an applicant question", () => {
+    expect(
+      isNoiseFormField({
+        label: "Type the text you hear or see",
+        nearbyText: "",
+        ariaLabel: "Type the text you hear or see",
+        placeholder: "",
+        name: "audio-response",
+        id: "audio-response",
+        key: "audio-response",
+        type: "text",
+        inputType: "text",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not inventory a recaptcha challenge field into the form", () => {
+    const document = documentFrom(`
+      <form>
+        <div role="listitem">
+          <div role="heading">Email or phone</div>
+          <input type="text" aria-label="Email or phone" />
+        </div>
+        <div role="listitem">
+          <div role="heading">Type the text you hear or see</div>
+          <input id="audio-response" type="text" aria-label="Type the text you hear or see" />
+        </div>
+        <textarea name="g-recaptcha-response" class="g-recaptcha-response"></textarea>
+      </form>
+    `);
+    const fields = inventoryFromDocument(document);
+    expect(fields.map((field) => field.label).join(" ")).toMatch(/Email or phone/i);
+    expect(fields.some((field) => /hear or see|recaptcha/i.test(field.label))).toBe(false);
+    expect(fields.some((field) => /g-recaptcha-response/i.test(field.name))).toBe(false);
+  });
+
   it("strips Swedish Obligatoriskt and other required chrome from labels", () => {
     expect(stripFormSyntaxDecorators("How long is your notice period?***Obligatoriskt***")).toBe(
       "How long is your notice period?",

@@ -73,6 +73,13 @@ describe("protected controls", () => {
       { name: "card", label: "Payment card", type: "text" },
     ];
     expect(fields.filter((field) => !isProtectedControl(field)).map((field) => field.name)).toEqual(["full_name"]);
+    expect(
+      isProtectedControl({
+        name: "audio-response",
+        label: "Type the text you hear or see",
+        type: "text",
+      }),
+    ).toBe(true);
   });
 });
 

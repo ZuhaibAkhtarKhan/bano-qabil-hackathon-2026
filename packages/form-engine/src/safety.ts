@@ -21,6 +21,22 @@ const PROTECTED = [
   /ssn|social.?security/i,
 ];
 
+/** reCAPTCHA / hCaptcha challenge copy — often captured as a fake form question. */
+export function isCaptchaChallengeCopy(text: string): boolean {
+  const value = text.replace(/\s+/g, " ").trim();
+  if (!value) return false;
+  return (
+    /type the text you hear or see/i.test(value) ||
+    /type what you (hear|see)/i.test(value) ||
+    /\bi'?m not a robot\b/i.test(value) ||
+    /select all (squares|images|pictures) (with|that)/i.test(value) ||
+    /verify (you are|that you'?re) (a )?human/i.test(value) ||
+    /complete the captcha/i.test(value) ||
+    /\b(hcaptcha|recaptcha|cloudflare turnstile)\b/i.test(value) ||
+    /please (solve|complete) this (security )?challenge/i.test(value)
+  );
+}
+
 const SENSITIVE = [
   /citizenship/i,
   /work.?authorization/i,
@@ -49,6 +65,7 @@ export function isProtectedControl(field: {
   nearbyText?: string;
 }): boolean {
   const haystack = `${field.name} ${field.id ?? ""} ${field.label} ${field.placeholder ?? ""} ${field.ariaLabel ?? ""} ${field.nearbyText ?? ""} ${field.type} ${field.role ?? ""}`;
+  if (isCaptchaChallengeCopy(haystack)) return true;
   if (PROTECTED.some((pattern) => pattern.test(haystack))) return true;
   if (field.type === "submit" || field.type === "password" || field.type === "button") return true;
   if (field.role === "button" && /submit|pay|sign|register/i.test(field.label)) return true;
