@@ -1,6 +1,6 @@
 import { FormPageCaptureSchema } from "@1apply/contracts";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Page } from "playwright";
+import type { Page, Locator } from "playwright";
 
 import type { Actor } from "@/auth/actor";
 import { logError } from "@/lib/log";
@@ -97,23 +97,93 @@ function escapeRegExp(value: string): string {
 }
 
 /** Click radios / selects from saved headless memory — Google Forms often ignores DOM-only clicks. */
+async function findChoiceScope(page: Page, entry: FillPlanEntry): Promise<Locator | null> {
+  const byId = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
+  if ((await byId.count()) > 0) return byId;
+  const label = entry.label?.replace(/\s+/g, " ").trim() ?? "";
+  if (label.length < 2) return null;
+  const items = page.locator('[role="listitem"]');
+  const count = await items.count();
+  const want = label.toLowerCase();
+  for (let index = 0; index < count; index += 1) {
+    const item = items.nth(index);
+    const heading = item.locator(
+      '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
+    ).first();
+    const text = ((await heading.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!text) continue;
+    if (text === want || text.includes(want) || want.includes(text)) return item;
+  }
+  return null;
+}
+
+async function clickGoogleChoice(
+  page: Page,
+  scope: Locator,
+  type: string | undefined,
+  value: string,
+): Promise<boolean> {
+  const exact = new RegExp(`^\\s*${escapeRegExp(value)}\\s*$`, "i");
+  const fuzzy = new RegExp(escapeRegExp(value), "i");
+  if (type === "select") {
+    const listbox = scope.getByRole("listbox").first();
+    if ((await listbox.count()) > 0) {
+      await listbox.scrollIntoViewIfNeeded().catch(() => undefined);
+      await listbox.click({ timeout: 3_000 }).catch(() => undefined);
+      await page.waitForTimeout(200);
+    }
+  }
+
+  const role = type === "checkbox" ? "checkbox" : type === "select" ? "option" : "radio";
+  const candidates: Locator[] = [
+    scope.getByRole(role, { name: exact }),
+    scope.locator(`[data-value="${value}"]`),
+    scope.locator(`[aria-label="${value}"]`),
+    scope.getByText(exact),
+    scope.getByRole(role, { name: fuzzy }),
+    scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: exact }),
+    scope.getByText(fuzzy),
+  ];
+  if (type === "select") {
+    candidates.unshift(page.getByRole("option", { name: exact }), page.getByRole("option", { name: fuzzy }));
+  }
+
+  for (const locator of candidates) {
+    try {
+      const first = locator.first();
+      if ((await first.count()) === 0) continue;
+      await first.scrollIntoViewIfNeeded().catch(() => undefined);
+      await first.click({ timeout: 3_000 });
+      return true;
+    } catch {
+      // try next candidate
+    }
+  }
+  return false;
+}
+
 async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
   let filled = 0;
   for (const entry of entries) {
     if (entry.status !== "filled") continue;
-    if (entry.type !== "radio" && entry.type !== "select" && entry.type !== "checkbox") continue;
+    const type = entry.type;
+    if (type && type !== "radio" && type !== "select" && type !== "checkbox") continue;
     const value = entry.value?.trim() ?? "";
     if (!value) continue;
-    const scope = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
-    if ((await scope.count()) === 0) continue;
+    const scope = await findChoiceScope(page, entry);
+    if (!scope) continue;
+    const inferred =
+      type ??
+      ((await scope.locator('[role="radio"]').count()) > 0
+        ? "radio"
+        : (await scope.locator('[role="checkbox"]').count()) > 0
+          ? "checkbox"
+          : (await scope.locator('[role="listbox"]').count()) > 0
+            ? "select"
+            : null);
+    if (!inferred || (inferred !== "radio" && inferred !== "select" && inferred !== "checkbox")) continue;
     try {
-      const option = scope.getByRole(entry.type === "checkbox" ? "checkbox" : "radio", {
-        name: new RegExp(escapeRegExp(value), "i"),
-      }).first();
-      if ((await option.count()) === 0) continue;
-      await option.scrollIntoViewIfNeeded().catch(() => undefined);
-      await option.click({ timeout: 3_000 });
-      filled += 1;
+      if (await clickGoogleChoice(page, scope, inferred, value)) filled += 1;
     } catch {
       // leave for in-page apply / validation
     }
@@ -326,13 +396,17 @@ async function runPlaywrightHostSession(input: {
           };
         }
 
-        const entries: FillPlanEntry[] = plan.fields.map((field) => ({
-          fieldId: field.fieldId,
-          status: field.status,
-          value: field.value,
-          documentVersionId: field.documentVersionId,
-          type: capture.fields.find((item) => item.fieldId === field.fieldId)?.type,
-        }));
+        const entries: FillPlanEntry[] = plan.fields.map((field) => {
+          const captured = capture.fields.find((item) => item.fieldId === field.fieldId);
+          return {
+            fieldId: field.fieldId,
+            status: field.status,
+            value: field.value,
+            documentVersionId: field.documentVersionId,
+            type: captured?.type,
+            label: captured?.label,
+          };
+        });
 
         const applyResult = await evaluateFormDom<{ filled: number; skipped: number }>(
           page,
@@ -344,6 +418,28 @@ async function runPlaywrightHostSession(input: {
         // Playwright fill is more reliable for Google Forms controlled inputs.
         totalFilled += await fillEntriesWithPlaywright(page, entries);
         totalFilled += await fillChoiceEntriesWithPlaywright(page, entries);
+
+        const choiceEntries = entries.filter(
+          (entry) =>
+            entry.status === "filled" &&
+            Boolean(entry.value?.trim()) &&
+            (entry.type === "radio" || entry.type === "select" || entry.type === "checkbox"),
+        );
+        if (choiceEntries.length > 0) {
+          const choiceReads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
+            page,
+            "read",
+            choiceEntries,
+          );
+          const stillOpen = new Set(
+            (choiceReads ?? []).filter((row) => row.empty).map((row) => row.fieldId),
+          );
+          if (stillOpen.size > 0) {
+            const retry = choiceEntries.filter((entry) => stillOpen.has(entry.fieldId));
+            await evaluateFormDom(page, "apply", retry);
+            totalFilled += await fillChoiceEntriesWithPlaywright(page, retry);
+          }
+        }
 
         let stillEmpty = await plannedTextStillEmpty(page, entries);
         if (stillEmpty.length > 0) {

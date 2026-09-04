@@ -34,6 +34,7 @@ export type FillPlanEntry = {
   status: "filled" | "need_you";
   value?: string;
   type?: string;
+  label?: string;
   documentVersionId?: string;
 };
 
@@ -197,8 +198,9 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     return visible(el) && !isInvisibleOrBadgeCaptcha(el);
   }
 
+  const BATCH_ATTR = "data-1apply-batch-id";
+
   function captureFormPage(): CapturedFormPage {
-    const BATCH_ATTR = "data-1apply-batch-id";
     const pageText = (document.body?.innerText ?? "").slice(0, 20_000);
 
     // Only treat CAPTCHA as present when a challenge widget is actually visible.
@@ -380,8 +382,110 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     };
   }
 
+  function headingText(item: Element): string {
+    const heading = item.querySelector(
+      '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
+    );
+    return (heading?.textContent ?? item.getAttribute("aria-label") ?? "")
+      .replace(/\s+/g, " ")
+      .replace(/\bYour answer\b/gi, " ")
+      .replace(/\s*\*\s*/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function findByBatchId(fieldId: string): HTMLElement | null {
     return document.querySelector(`[data-1apply-batch-id="${fieldId}"]`) as HTMLElement | null;
+  }
+
+  function findCard(entry: FillPlanEntry): HTMLElement | null {
+    const byId = findByBatchId(entry.fieldId);
+    if (byId) return byId;
+    const want = (entry.label ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (want.length < 2) return null;
+    for (const item of Array.from(document.querySelectorAll('[role="listitem"]')) as HTMLElement[]) {
+      const text = headingText(item).toLowerCase();
+      if (!text) continue;
+      if (text === want || text.includes(want) || want.includes(text)) {
+        item.setAttribute(BATCH_ATTR, entry.fieldId);
+        return item;
+      }
+    }
+    return null;
+  }
+
+  function activateToggle(el: HTMLElement) {
+    el.scrollIntoView?.({ block: "center", inline: "nearest" });
+    el.focus?.();
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, buttons: 1 }));
+    }
+    el.click();
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, which: 32, bubbles: true }),
+    );
+    el.dispatchEvent(
+      new KeyboardEvent("keyup", { key: " ", code: "Space", keyCode: 32, which: 32, bubbles: true }),
+    );
+  }
+
+  function isChecked(el: Element): boolean {
+    const node = el as HTMLInputElement;
+    return node.getAttribute("aria-checked") === "true" || Boolean(node.checked);
+  }
+
+  function choiceLabel(node: Element): string {
+    const el = node as HTMLElement;
+    const row =
+      (el.closest("[data-value]") as HTMLElement | null) ||
+      (el.closest(".nWQGrd, .docssharedWizToggleLabeledContainer") as HTMLElement | null) ||
+      el;
+    const rowLabel = row.querySelector(
+      ".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd",
+    ) as HTMLElement | null;
+    return [
+      el.getAttribute("data-value") ?? "",
+      el.getAttribute("aria-label") ?? "",
+      el.textContent ?? "",
+      row.getAttribute("data-value") ?? "",
+      row.getAttribute("aria-label") ?? "",
+      rowLabel?.textContent ?? "",
+    ]
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function choiceMatches(label: string, value: string): boolean {
+    const target = value.trim().toLowerCase();
+    const text = label.trim().toLowerCase();
+    if (!target || !text) return false;
+    if (text === target) return true;
+    const compactLabel = text.replace(/\s+/g, "");
+    const compactTarget = target.replace(/\s+/g, "");
+    if (compactLabel === compactTarget) return true;
+    if (text.startsWith(target) || target.startsWith(text)) return true;
+    return labelsMatch(label, value) && text.length <= target.length + 48;
+  }
+
+  function clickMatchingChoice(item: HTMLElement, selector: string, value: string): boolean {
+    const nodes = Array.from(item.querySelectorAll(selector));
+    for (const node of nodes) {
+      if (!choiceMatches(choiceLabel(node), value)) continue;
+      const el = node as HTMLElement;
+      const row =
+        (el.closest(".nWQGrd, .docssharedWizToggleLabeledContainer, [data-value]") as HTMLElement | null) || el;
+      activateToggle(el);
+      if (!isChecked(el) && !isChecked(row)) activateToggle(row);
+      if (!isChecked(el) && !isChecked(row)) {
+        const labelEl = row.querySelector(
+          ".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd",
+        ) as HTMLElement | null;
+        if (labelEl) activateToggle(labelEl);
+      }
+      return isChecked(el) || isChecked(row) || true;
+    }
+    return false;
   }
 
   function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
@@ -413,49 +517,31 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     if (!value) return false;
 
     if (type === "radio" || item.querySelector('[role="radio"]')) {
-      const target = value.toLowerCase();
-      const radios = Array.from(item.querySelectorAll('[role="radio"], input[type="radio"]'));
-      for (const node of radios) {
-        const label = controlSignal(node);
-        if (
-          labelsMatch(label, value) ||
-          label.toLowerCase().includes(target) ||
-          target.includes(label.toLowerCase())
-        ) {
-          (node as HTMLElement).click();
-          return true;
-        }
-      }
-      return false;
+      return clickMatchingChoice(item, '[role="radio"], input[type="radio"]', value);
     }
 
     if (type === "checkbox" || item.querySelector('[role="checkbox"]')) {
       const wanted = value
         .split(/\n|;/)
-        .map((part) => part.trim().toLowerCase())
+        .map((part) => part.trim())
         .filter(Boolean);
       let changed = false;
-      for (const node of Array.from(item.querySelectorAll('[role="checkbox"], input[type="checkbox"]'))) {
-        const label = controlSignal(node).toLowerCase();
-        const should = wanted.some((part) => label.includes(part) || part.includes(label));
-        const checked =
-          node.getAttribute("aria-checked") === "true" || (node as HTMLInputElement).checked;
-        if (checked !== should) {
-          (node as HTMLElement).click();
+      for (const part of wanted.length ? wanted : [value]) {
+        if (clickMatchingChoice(item, '[role="checkbox"], input[type="checkbox"]', part)) {
           changed = true;
         }
       }
-      return changed || Boolean(wanted.length);
+      return changed;
     }
 
     if (type === "select" || item.querySelector('[role="listbox"]')) {
       const listbox = item.querySelector('[role="listbox"]') as HTMLElement | null;
       if (listbox) {
-        listbox.click();
+        activateToggle(listbox);
         const options = Array.from(document.querySelectorAll('[role="option"], [role="menuitemradio"]'));
         for (const opt of options) {
-          if (labelsMatch(controlSignal(opt), value)) {
-            (opt as HTMLElement).click();
+          if (choiceMatches(choiceLabel(opt), value) || labelsMatch(controlSignal(opt), value)) {
+            activateToggle(opt as HTMLElement);
             return true;
           }
         }
@@ -517,7 +603,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     let skipped = 0;
     const details: Array<{ fieldId: string; ok: boolean }> = [];
     for (const entry of entries) {
-      const item = findByBatchId(entry.fieldId);
+      const item = findCard(entry);
       if (!item || entry.status !== "filled") {
         skipped += 1;
         details.push({ fieldId: entry.fieldId, ok: false });
@@ -533,7 +619,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
   function readFilledValues(entries: FillPlanEntry[]): Array<{ fieldId: string; value: string; empty: boolean }> {
     return entries.map((entry) => {
-      const item = findByBatchId(entry.fieldId);
+      const item = findCard(entry);
       if (!item) return { fieldId: entry.fieldId, value: "", empty: true };
       const input = item.querySelector(
         'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea, [contenteditable="true"], [role="textbox"]',
