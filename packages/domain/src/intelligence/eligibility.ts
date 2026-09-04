@@ -1,4 +1,5 @@
 import { extractYears, overlapScore, tokenize } from "./text";
+import { isWorkAuthorizationRequirement, workAuthorizationMeetsRequirement } from "../work-authorization";
 import {
   eligibleEvidence,
   evidenceBlob,
@@ -135,6 +136,45 @@ export function evaluateRequirement(
   };
 
   if (kind === "location") {
+    const requirementText = requirement.text;
+    const authorization = (profile?.workAuthorization ?? "").trim();
+    if (isWorkAuthorizationRequirement(requirementText) || /visa|authorized to work|citizenship/i.test(requirementText)) {
+      if (!authorization) {
+        return verdict(
+          requirement,
+          kind,
+          "needs_confirmation",
+          `Location / work authorization is not specified in your profile. Requirement: ${requirementText}`,
+          null,
+        );
+      }
+      const settled = workAuthorizationMeetsRequirement(requirementText, authorization);
+      if (settled === "met") {
+        return verdict(
+          requirement,
+          kind,
+          "met",
+          `Matched your work authorization against: ${requirementText}`,
+          null,
+        );
+      }
+      if (settled === "not_met") {
+        return verdict(
+          requirement,
+          kind,
+          "not_met",
+          `Profile work authorization (${authorization}) conflicts with this requirement. Assistance only — not an official decision.`,
+          null,
+        );
+      }
+      return verdict(
+        requirement,
+        kind,
+        "needs_confirmation",
+        `Work authorization is on file but does not clearly settle this restriction. Requirement: ${requirementText}`,
+        null,
+      );
+    }
     if (!profileFacts.location) {
       return verdict(
         requirement,

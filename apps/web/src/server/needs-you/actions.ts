@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
-import { isDeadlineInPast, memoryFactKey, parseDeadlineLocalInput } from "@1apply/domain";
+import { expandAffirmativeAuthorizationValue, isDeadlineInPast, memoryFactKey, parseDeadlineLocalInput } from "@1apply/domain";
 
 import { documentStoragePath } from "@/infra/storage/documents";
 import { loadAppConfig } from "@/config/env";
@@ -26,10 +26,8 @@ import { syncMemoryConflicts } from "@/server/memory/persist-extraction";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
 import { applyValueToApplication } from "@/server/needs-you/apply-needs-you-value";
 import {
-  canApplicantConfirmEligibility,
-  confirmEligibilityResult,
-  markEligibilityAckOnly,
   resolveEligibilityForConfirm,
+  settleEligibilityFromApplicantAnswer,
 } from "@/server/needs-you/confirm-eligibility";
 import { emitDomainEvent } from "@/server/notifications/service";
 import { recordApplicationEvent } from "@/services/platform";
@@ -90,6 +88,10 @@ async function storeMemoryValue(input: {
   const isProfileField = Boolean(input.profileField);
   const category = isProfileField ? "personal" : "answers";
   const field = input.profileField ?? "saved_answer";
+  const storedValue =
+    field === "work_authorization"
+      ? expandAffirmativeAuthorizationValue(value, input.label)
+      : value;
   const factKey = memoryFactKey({
     category,
     title: input.label.slice(0, 80) || field,
@@ -101,7 +103,7 @@ async function storeMemoryValue(input: {
     category,
     fact_type: field,
     fact_key: factKey,
-    value: { text: value, label: input.label },
+    value: { text: storedValue, label: input.label },
     source: "needs_you",
     extraction_status: "manual",
     verification_status: "verified",
@@ -112,7 +114,7 @@ async function storeMemoryValue(input: {
   if (column) {
     await input.supabase
       .from("profiles")
-      .update({ [column]: value })
+      .update({ [column]: storedValue })
       .eq("id", input.userId);
   }
 
@@ -306,6 +308,8 @@ export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYou
   const questionId = String(formData.get("questionId") ?? "").trim() || null;
   const answerId = String(formData.get("answerId") ?? "").trim() || null;
   const mappingId = String(formData.get("mappingId") ?? "").trim() || null;
+  const eligibilityId = String(formData.get("eligibilityId") ?? "").trim() || null;
+  const requirementId = String(formData.get("requirementId") ?? "").trim() || null;
   const scopeRaw = String(formData.get("scope") ?? "memory").trim().toLowerCase();
   const scope: "memory" | "application" = scopeRaw === "application" ? "application" : "memory";
 
@@ -313,12 +317,25 @@ export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYou
     return { ok: false, error: "required" };
   }
 
+  let memoryValue = value;
+  if (eligibilityId) {
+    const eligibility = await resolveEligibilityForConfirm(
+      supabase,
+      user.id,
+      applicationId,
+      eligibilityId,
+      requirementId,
+    );
+    const requirementText = String(eligibility?.requirement_text ?? label);
+    memoryValue = expandAffirmativeAuthorizationValue(value, requirementText);
+  }
+
   if (scope === "memory") {
     await storeMemoryValue({
       supabase,
       userId: user.id,
       label,
-      value,
+      value: memoryValue,
       profileField,
     });
   }
@@ -328,7 +345,7 @@ export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYou
     userId: user.id,
     applicationId,
     label,
-    value,
+    value: memoryValue,
     mappingId,
     questionId,
     answerId,
@@ -350,7 +367,15 @@ export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYou
   }
 
   // Re-run Fit / eligibility after the user edits a field that was blocking eligibility.
-  if (String(formData.get("eligibilityId") ?? "").trim()) {
+  if (eligibilityId) {
+    await settleEligibilityFromApplicantAnswer({
+      supabase,
+      actor,
+      applicationId,
+      eligibilityId,
+      requirementId,
+      value: memoryValue,
+    });
     const { data: application } = await supabase
       .from("applications")
       .select("opportunity_id")
@@ -627,15 +652,14 @@ export async function confirmNeedsYouEligibility(formData: FormData): Promise<Ne
     return { ok: true, notice: "eligibility_confirmed" };
   }
 
-  if (!canApplicantConfirmEligibility(eligibility)) {
-    return { ok: false, error: "confirm_failed" };
-  }
-
-  if (!eligibility.ack_only) {
-    await markEligibilityAckOnly(supabase, user.id, [String(eligibility.id)]);
-  }
-
-  const confirmed = await confirmEligibilityResult(supabase, actor, String(eligibility.id));
+  const confirmed = await settleEligibilityFromApplicantAnswer({
+    supabase,
+    actor,
+    applicationId,
+    eligibilityId,
+    requirementId,
+    value: "Yes",
+  });
   if (!confirmed) {
     return { ok: false, error: "confirm_failed" };
   }

@@ -11,6 +11,10 @@ import {
   type MemoryRequirement,
 } from "./intelligence-types";
 import { extractYears, includesAny, overlapScore, tokenize } from "./text";
+import {
+  isWorkAuthorizationRequirement,
+  workAuthorizationMeetsRequirement,
+} from "./work-authorization";
 
 export const ELIGIBILITY_LABELS: Record<EligibilityState, string> = {
   met: "Satisfied",
@@ -80,7 +84,7 @@ export function inferRequirementKind(requirement: MemoryRequirement): Requiremen
   if (includesAny(text, ["available", "availability", "start date", "full-time", "part-time", "hours per"])) {
     return "availability";
   }
-  if (includesAny(text, ["remote", "on-site", "onsite", "in-person", "reloc", "based in", "located", "visa", "work authorization", "citizen"])) {
+  if (includesAny(text, ["remote", "on-site", "onsite", "in-person", "reloc", "based in", "located", "visa", "work authorization", "authorized to work", "work permit", "citizen"])) {
     return "location";
   }
   if (includesAny(text, ["degree", "bachelor", "undergraduate", "master", "phd", "doctorate", "gpa", "graduat", "university", "college"])) {
@@ -328,6 +332,16 @@ function evaluateExperience(
   );
 }
 
+function combinedWorkAuthorization(context: EligibilityContext): string {
+  const fromFacts = (context.facts ?? [])
+    .filter((fact) => fact.verificationStatus !== "rejected")
+    .map((fact) => fact.value)
+    .filter((value) =>
+      /\b(visa|authoriz|citizen|eligib|green card|sponsorship|work permit|h-?1b|\bopt\b|\bead\b)\b/i.test(value),
+    );
+  return [context.workAuthorization, ...fromFacts].filter(Boolean).join(" ").trim();
+}
+
 function evaluateLocation(
   requirement: MemoryRequirement,
   kind: string,
@@ -337,15 +351,19 @@ function evaluateLocation(
   const remote = /remote|anywhere|worldwide|work from home/i.test(text) || /remote/i.test(context.opportunityLocation ?? "");
   const city = (context.locationCity ?? "").trim();
   const country = (context.locationCountry ?? "").trim();
-  const authorization = (context.workAuthorization ?? "").trim();
+  const authorization = combinedWorkAuthorization(context);
   const profile = `${city} ${country} ${authorization}`.trim();
 
-  if (/visa|work authorization|citizen|authorized to work/i.test(text)) {
+  if (isWorkAuthorizationRequirement(text) || /visa|work authorization|citizen|authorized to work/i.test(text)) {
     if (!authorization) {
       return verdict(requirement, kind, "unclear", `Work authorization is not specified in Application Memory. Requirement: ${text}`);
     }
-    if (overlapScore(text, authorization) >= 0.2 || /authorized|citizen|eligible/i.test(authorization)) {
-      return verdict(requirement, kind, "met", `Verified work authorization “${authorization}” overlaps this restriction. Requirement: ${text}`);
+    const settled = workAuthorizationMeetsRequirement(text, authorization);
+    if (settled === "met") {
+      return verdict(requirement, kind, "met", `Applicant work authorization “${authorization}” meets this restriction. Requirement: ${text}`);
+    }
+    if (settled === "not_met") {
+      return verdict(requirement, kind, "not_met", `Recorded work authorization “${authorization}” does not meet this restriction. Requirement: ${text}`);
     }
     return verdict(requirement, kind, "unclear", `Work authorization is on file but does not clearly settle this restriction. Requirement: ${text}`);
   }
@@ -497,7 +515,7 @@ export function evaluateRequirement(
     default:
       if (kind === "eligibility") {
         const educationLike = /graduat|degree|bachelor|undergraduate|master|phd/i.test(requirement.text);
-        const locationLike = /remote|on-site|located|visa|citizen|authorization/i.test(requirement.text);
+        const locationLike = /remote|on-site|located|visa|citizen|authoriz/i.test(requirement.text);
         const availabilityLike = /available|availability|start date|full-time/i.test(requirement.text);
         if (educationLike) return evaluateEducation(requirement, kind, usable, context);
         if (locationLike) return evaluateLocation(requirement, kind, context);

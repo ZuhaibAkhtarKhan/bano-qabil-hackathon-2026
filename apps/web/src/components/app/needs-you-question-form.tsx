@@ -92,6 +92,7 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
     if (item.payload.answerId) fd.set("answerId", item.payload.answerId);
     if (item.payload.mappingId) fd.set("mappingId", item.payload.mappingId);
     if (item.payload.eligibilityId) fd.set("eligibilityId", item.payload.eligibilityId);
+    if (item.payload.requirementId) fd.set("requirementId", item.payload.requirementId);
 
     if (item.inputType === "multi-select") {
       for (const option of selected) fd.append("value", option);

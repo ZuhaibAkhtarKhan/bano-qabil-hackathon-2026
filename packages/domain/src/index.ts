@@ -1,4 +1,13 @@
 export {
+  expandAffirmativeAuthorizationValue,
+  isAffirmativeEligibilityAnswer,
+  isNegativeEligibilityAnswer,
+  isWorkAuthorizationRequirement,
+  workAuthorizationMeetsRequirement,
+  type WorkAuthorizationVerdict,
+} from "./work-authorization";
+
+export {
   computeFitIndex,
   eligibleEvidence,
   evaluateEligibility,

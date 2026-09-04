@@ -2,6 +2,7 @@ import {
   buildAutoResumeSelection,
   computeFitIndex,
   evaluateEligibility,
+  isWorkAuthorizationRequirement,
   rankResumes,
   type EligibilityContext,
   type MemoryEvidence,
@@ -243,6 +244,11 @@ export async function persistIntelligence(
       .filter((row) => row.user_confirmed_at)
       .map((row) => [normalizeRequirementText(String(row.requirement_text ?? "")), row] as const),
   );
+  const priorConfirmedWorkAuth = (priorRows ?? []).find(
+    (row) =>
+      Boolean(row.user_confirmed_at) &&
+      isWorkAuthorizationRequirement(String(row.requirement_text ?? "")),
+  );
 
   await supabase.from("eligibility_results").delete().eq("application_id", applicationId);
   const eligibilityRows = eligibility.filter((item) => item.requirementId !== "none");
@@ -253,6 +259,13 @@ export async function persistIntelligence(
         if (!prior?.user_confirmed_at) {
           const byText = priorConfirmedByText.get(normalizeRequirementText(item.requirementText));
           if (byText) prior = byText;
+        }
+        if (
+          !prior?.user_confirmed_at &&
+          priorConfirmedWorkAuth &&
+          isWorkAuthorizationRequirement(item.requirementText)
+        ) {
+          prior = priorConfirmedWorkAuth;
         }
         if (prior?.user_confirmed_at) {
           return {

@@ -1,4 +1,11 @@
-import { computeDeadlineInfo } from "@1apply/domain";
+import {
+  computeDeadlineInfo,
+  expandAffirmativeAuthorizationValue,
+  isAffirmativeEligibilityAnswer,
+  isNegativeEligibilityAnswer,
+  isWorkAuthorizationRequirement,
+  workAuthorizationMeetsRequirement,
+} from "@1apply/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
@@ -121,6 +128,127 @@ export async function confirmEligibilityResult(
   );
 
   return true;
+}
+
+async function resolveMatchingEligibilityReviews(
+  supabase: SupabaseClient,
+  userId: string,
+  applicationId: string,
+  requirementText: string,
+) {
+  const { data: reviews } = await supabase
+    .from("review_items")
+    .select("id, prompt")
+    .eq("application_id", applicationId)
+    .eq("user_id", userId)
+    .eq("kind", "eligibility")
+    .eq("resolved", false);
+  const req = requirementText.toLowerCase();
+  const workAuth = isWorkAuthorizationRequirement(requirementText);
+  for (const row of reviews ?? []) {
+    const prompt = String(row.prompt ?? "").toLowerCase();
+    const matches =
+      (req && prompt.includes(req.slice(0, 48))) ||
+      (workAuth && isWorkAuthorizationRequirement(prompt));
+    if (!matches) continue;
+    await supabase.from("review_items").update({ resolved: true }).eq("id", row.id).eq("user_id", userId);
+  }
+}
+
+async function persistWorkAuthorizationFromRequirement(
+  supabase: SupabaseClient,
+  userId: string,
+  requirementText: string,
+  value: string,
+) {
+  if (!isWorkAuthorizationRequirement(requirementText) && !isWorkAuthorizationRequirement(value)) return;
+  const next = expandAffirmativeAuthorizationValue(value || "Yes", requirementText);
+  if (!next) return;
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("work_authorization")
+    .eq("id", userId)
+    .maybeSingle();
+  const current = String(profile?.work_authorization ?? "").trim();
+  if (current && !isAffirmativeEligibilityAnswer(current) && current.length > next.length) return;
+  if (current === next) return;
+  await supabase.from("profiles").update({ work_authorization: next.slice(0, 400) }).eq("id", userId);
+}
+
+/**
+ * Lock an eligibility gap after the applicant answers it so fill/analyze cannot reopen it.
+ * Empty value (confirm button) is treated as Yes.
+ */
+export async function settleEligibilityFromApplicantAnswer(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+  eligibilityId: string;
+  requirementId?: string | null;
+  value?: string | null;
+}): Promise<boolean> {
+  const row = await resolveEligibilityForConfirm(
+    input.supabase,
+    input.actor.userId,
+    input.applicationId,
+    input.eligibilityId,
+    input.requirementId,
+  );
+  if (!row) return false;
+
+  const requirement = String(row.requirement_text ?? "").trim();
+  const value = String(input.value ?? "").trim();
+  const implicitYes = !value;
+  const verdict = value ? workAuthorizationMeetsRequirement(requirement || value, value) : "met";
+
+  if (row.user_confirmed_at) {
+    await resolveMatchingEligibilityReviews(input.supabase, input.actor.userId, input.applicationId, requirement);
+    return true;
+  }
+
+  if (implicitYes || isAffirmativeEligibilityAnswer(value) || verdict === "met") {
+    if (!row.ack_only) {
+      await markEligibilityAckOnly(input.supabase, input.actor.userId, [String(row.id)]);
+    }
+    const ok = await confirmEligibilityResult(input.supabase, input.actor, String(row.id));
+    if (ok) {
+      await persistWorkAuthorizationFromRequirement(
+        input.supabase,
+        input.actor.userId,
+        requirement,
+        value || "Yes",
+      );
+      await resolveMatchingEligibilityReviews(input.supabase, input.actor.userId, input.applicationId, requirement);
+    }
+    return ok;
+  }
+
+  if (isNegativeEligibilityAnswer(value) || verdict === "not_met") {
+    const confirmedAt = new Date().toISOString();
+    const { error } = await input.supabase
+      .from("eligibility_results")
+      .update({
+        state: "not_met",
+        needs_confirmation: false,
+        user_confirmed_at: confirmedAt,
+        ack_only: true,
+        explanation: `Applicant indicated they do not meet this requirement: ${requirement || value}`,
+      })
+      .eq("id", row.id)
+      .eq("user_id", input.actor.userId);
+    if (error) return false;
+    await resolveMatchingEligibilityReviews(input.supabase, input.actor.userId, input.applicationId, requirement);
+    await recordApplicationEvent(
+      input.supabase,
+      input.actor,
+      input.applicationId,
+      "eligibility.confirmed",
+      { eligibilityResultId: row.id, requirement, state: "not_met" },
+    );
+    return true;
+  }
+
+  return false;
 }
 
 /** Auto-confirm ack-only eligibility gaps when the application deadline is near. */

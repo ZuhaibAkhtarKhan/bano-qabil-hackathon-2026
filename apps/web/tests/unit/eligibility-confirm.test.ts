@@ -21,4 +21,10 @@ describe("needs-you eligibility confirm payload", () => {
     const { NeedsYouEligibilityConfirm } = await import("@/components/app/needs-you-eligibility-confirm");
     expect(NeedsYouEligibilityConfirm).toBeTypeOf("function");
   });
+
+  it("treats a saved Yes as an affirmative eligibility answer", async () => {
+    const { isAffirmativeEligibilityAnswer, workAuthorizationMeetsRequirement } = await import("@1apply/domain");
+    expect(isAffirmativeEligibilityAnswer("Yes")).toBe(true);
+    expect(workAuthorizationMeetsRequirement("Authorized to work in the United States", "yes")).toBe("met");
+  });
 });
