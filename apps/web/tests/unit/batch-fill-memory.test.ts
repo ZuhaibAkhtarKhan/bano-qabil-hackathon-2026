@@ -330,4 +330,44 @@ describe("batch fill uses Application Memory instead of uncited LLM output", () 
     );
     expect(iso[0]).toMatchObject({ status: "filled", value: "2024-09-01" });
   });
+
+  it("keeps an LLM radio fill when it matches a host option even without catalog ids", () => {
+    const cited = attachCatalogCitations(
+      [{ fieldId: "f_comm", status: "filled", value: "advanced" }],
+      catalog({ allowedEvidenceIds: [], kit: [], evidence: [] }),
+      [
+        {
+          fieldId: "f_comm",
+          type: "radio",
+          label: "Rate your communication skills",
+          options: ["Basic", "Intermediate", "Advanced", "Expert"],
+        },
+      ],
+    );
+    expect(cited[0]).toMatchObject({ status: "filled", value: "Advanced" });
+
+    const stripped = attachCatalogCitations(
+      [{ fieldId: "f_essay", status: "filled", value: "I invented a NASA fellowship" }],
+      catalog({ allowedEvidenceIds: [], kit: [], evidence: [] }),
+      [{ fieldId: "f_essay", type: "textarea", label: "Why this role" }],
+    );
+    expect(stripped[0]?.status).toBe("need_you");
+  });
+
+  it("maps memory by question label when fieldKey hashes differ", () => {
+    const { results } = mappingsToBatchResults(
+      [{ fieldId: "f_aaaa1111", type: "radio", label: "Year of study", options: ["1st", "2nd"] }],
+      [
+        mapping({
+          fieldKey: "f_bbbb2222",
+          label: "Year of study",
+          memoryPath: "Education → Year of study",
+          proposedValue: "2nd",
+          fieldType: "radio",
+        }),
+      ],
+      catalog(),
+    );
+    expect(results[0]).toMatchObject({ status: "filled", value: "2nd" });
+  });
 });

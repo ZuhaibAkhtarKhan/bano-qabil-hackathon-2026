@@ -276,6 +276,34 @@ describe("mapping confidence", () => {
     expect(student?.excludedByDefault).toBe(true);
   });
 
+  it("fills a commitment Yes/No from the matching Need You answer, not from kit No", () => {
+    const document = documentFrom(`
+      <div role="listitem">
+        <div role="heading">This role needs 4-5 hours a day, part-time. Can you commit to that consistently?</div>
+        <label><input type="radio" name="commit" value="Yes" /> Yes</label>
+        <label><input type="radio" name="commit" value="No" /> No</label>
+      </div>
+    `);
+    const catalog: MemoryValue[] = [
+      {
+        path: "Skills → Kit",
+        source: "Your kit",
+        value: "NoSQL",
+        aliases: ["skills"],
+      },
+      {
+        path: "Need You → Can you commit to that consistently",
+        source: "Need You",
+        value: "Yes",
+        aliases: ["commit", "part-time"],
+      },
+    ];
+    const [mapping] = mapFields(inventoryFromDocument(document), catalog);
+    expect(mapping?.proposedValue).toBe("Yes");
+    expect(mapping?.source).toBe("Need You");
+    expect(mapping?.excludedByDefault).toBe(false);
+  });
+
   it("auto-maps required sole confirmation checkboxes only", () => {
     const document = documentFrom(`
       <div role="listitem">

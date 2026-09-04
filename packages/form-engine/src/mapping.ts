@@ -667,7 +667,9 @@ function pickNeedYouChoice(field: DetectedField, catalog: MemoryValue[]): { choi
     if (labelScore < 0.42) continue;
     const value = mem.value.trim();
     if (!value) continue;
+    const wanted = normalize(value);
     const snapped =
+      field.options.find((option) => normalize(option) === wanted) ??
       field.options.find((option) => choiceScore(option, value) >= 0.88) ??
       (field.options.length === 0 ? value : null);
     if (!snapped) continue;
@@ -702,6 +704,31 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
   }
 
   if (!field.options.length) return null;
+
+  const needYou = pickNeedYouChoice(field, catalog);
+  if (needYou && !sensitive) {
+    const formOptions = field.options.map((value) => ({
+      value,
+      label: field.label || "Form option",
+      source: value === needYou.choice ? needYou.mem.source : "Form choice",
+    }));
+    return {
+      fieldKey: field.key,
+      label: humanQuestionLabel(field),
+      memoryPath: needYou.mem.path,
+      source: needYou.mem.source,
+      confidence: 1,
+      proposedValue: needYou.choice,
+      options: formOptions,
+      approvalState: "pending",
+      sensitive: false,
+      excludedByDefault: false,
+      reason: `Need You answer “${needYou.choice}” for this question.`,
+      fieldType: field.type,
+      aiAnswerable: false,
+      showChip: true,
+    };
+  }
 
   const question = `${field.label} ${field.nearbyText} ${field.ariaLabel}`.trim();
   const yesNo = findYesNoLabels(field);
@@ -759,34 +786,6 @@ function mapChoiceField(field: DetectedField, catalog: MemoryValue[], sensitive:
         : "Yes/No question — not auto-filled from unrelated kit Yes/No answers. Needs You or AI with evidence.",
       fieldType: field.type,
       aiAnswerable: true,
-      showChip: true,
-    };
-  }
-
-  const needYou = pickNeedYouChoice(field, catalog);
-  if (needYou && !sensitive) {
-    const formOptions =
-      field.options.length > 0
-        ? field.options.map((value) => ({
-            value,
-            label: field.label || "Form option",
-            source: value === needYou.choice ? needYou.mem.source : "Form choice",
-          }))
-        : [{ value: needYou.choice, label: needYou.mem.path, source: needYou.mem.source }];
-    return {
-      fieldKey: field.key,
-      label: humanQuestionLabel(field),
-      memoryPath: needYou.mem.path,
-      source: needYou.mem.source,
-      confidence: 1,
-      proposedValue: needYou.choice,
-      options: formOptions,
-      approvalState: "pending",
-      sensitive: false,
-      excludedByDefault: false,
-      reason: `Need You answer “${needYou.choice}” for this question.`,
-      fieldType: field.type,
-      aiAnswerable: false,
       showChip: true,
     };
   }

@@ -5,6 +5,7 @@ import type { Page, Locator } from "playwright";
 
 import type { Actor } from "@/auth/actor";
 import { logError } from "@/lib/log";
+import { snapToHostOption } from "@/lib/needs-you-field-kinds";
 import { persistFormPageCapture } from "@/server/extension/persist-form-page-capture";
 import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
 import { isHostFileUploadEntry, requiredHostFieldsMissing } from "@/server/applications/host-page-fill";
@@ -60,13 +61,13 @@ export type ServerHostSubmitResult =
 
 async function waitForPageReady(page: Page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 45_000 }).catch(() => undefined);
-  // Google Forms paints questions after scripts load.
   await page
     .locator('[role="listitem"], input:not([type=hidden]), textarea, [role="radio"], [role="checkbox"]')
     .first()
     .waitFor({ state: "visible", timeout: 12_000 })
     .catch(() => undefined);
-  await page.waitForTimeout(800);
+  // Google Forms questions often paint after the first listitem shell.
+  await page.waitForTimeout(1_200);
 }
 
 async function waitForHostConfirmation(page: Page): Promise<boolean> {
@@ -82,15 +83,7 @@ async function waitForHostConfirmation(page: Page): Promise<boolean> {
   return evaluateFormDom<boolean>(page, "confirm");
 }
 
-/** Prefer Playwright pointer click — Google Forms often ignores a bare DOM .click(). */
-async function clickHostSubmitWithPlaywright(page: Page): Promise<boolean> {
-  const candidates = [
-    page.locator('div[role="button"][jsname="M2UYVd"]').first(),
-    page.locator(".freebirdFormviewerViewNavigationSubmitButton").first(),
-    page.locator('[data-action-id="submit"]').first(),
-    page.getByRole("button", { name: /^(submit|send)$/i }).first(),
-    page.locator('button[type="submit"]').first(),
-  ];
+async function clickFirstVisibleLocator(candidates: Locator[]): Promise<boolean> {
   for (const locator of candidates) {
     try {
       if ((await locator.count()) === 0) continue;
@@ -103,6 +96,27 @@ async function clickHostSubmitWithPlaywright(page: Page): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Prefer Playwright pointer click — Google Forms often ignores a bare DOM .click(). */
+async function clickHostSubmitWithPlaywright(page: Page): Promise<boolean> {
+  return clickFirstVisibleLocator([
+    page.locator('div[role="button"][jsname="M2UYVd"]').first(),
+    page.locator(".freebirdFormviewerViewNavigationSubmitButton").first(),
+    page.locator('[data-action-id="submit"]').first(),
+    page.getByRole("button", { name: /^(submit|send)$/i }).first(),
+    page.locator('button[type="submit"]').first(),
+  ]);
+}
+
+async function clickHostNextWithPlaywright(page: Page): Promise<boolean> {
+  return clickFirstVisibleLocator([
+    page.locator('div[role="button"][jsname="OCpkoe"]').first(),
+    page.locator(".freebirdFormviewerViewNavigationNextButton").first(),
+    page.getByRole("button", { name: /^(next|continue|proceed)$/i }).first(),
+    page.locator('[aria-label="Next"]').first(),
+    page.locator('[aria-label="Continue"]').first(),
+  ]);
 }
 
 /**
@@ -122,7 +136,19 @@ async function clickGoogleChoice(
 ): Promise<boolean> {
   const exact = new RegExp(`^\\s*${escapeRegExp(value)}\\s*$`, "i");
   const fuzzy = new RegExp(escapeRegExp(value), "i");
+
   if (type === "select") {
+    const native = scope.locator("select").first();
+    if ((await native.count()) > 0) {
+      try {
+        await native.selectOption({ label: value }, { timeout: 2_000 });
+        return true;
+      } catch {
+        await native.selectOption({ value }).catch(() => undefined);
+        const selected = await native.inputValue().catch(() => "");
+        if (selected && selected.toLowerCase() === value.toLowerCase()) return true;
+      }
+    }
     const listbox = scope.getByRole("listbox").first();
     if ((await listbox.count()) > 0) {
       await listbox.scrollIntoViewIfNeeded().catch(() => undefined);
@@ -134,6 +160,7 @@ async function clickGoogleChoice(
   const role = type === "checkbox" ? "checkbox" : type === "select" ? "option" : "radio";
   const candidates: Locator[] = [
     scope.getByRole(role, { name: exact }),
+    scope.getByLabel(exact),
     scope.locator(`[data-value="${value}"]`),
     scope.locator(`[aria-label="${value}"]`),
     scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: exact }),
@@ -173,11 +200,11 @@ async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntr
     const inferred =
       type === "radio" || type === "select" || type === "checkbox"
         ? type
-        : (await scope.locator('[role="radio"]').count()) > 0
+        : (await scope.locator('[role="radio"], input[type="radio"]').count()) > 0
           ? "radio"
-          : (await scope.locator('[role="listbox"]').count()) > 0
+          : (await scope.locator('[role="listbox"], select').count()) > 0
             ? "select"
-            : (await scope.locator('[role="checkbox"]').count()) > 0
+            : (await scope.locator('[role="checkbox"], input[type="checkbox"]').count()) > 0
               ? "checkbox"
               : null;
     if (!inferred || (inferred !== "radio" && inferred !== "select" && inferred !== "checkbox")) continue;
@@ -346,10 +373,14 @@ function fillPlanEntriesFromCapture(
     const capturedType = captured?.type ?? (documentVersionId ? "file" : undefined);
     const type =
       capturedType === "file" && !documentVersionId && String(field.value ?? "").trim() ? "text" : capturedType;
+    let value = documentVersionId ? undefined : field.value ?? undefined;
+    if (value && (type === "radio" || type === "checkbox" || type === "select")) {
+      value = snapToHostOption(value, captured?.options) ?? value;
+    }
     return {
       fieldId: field.fieldId,
       status: field.status === "filled" ? "filled" : "need_you",
-      value: documentVersionId ? undefined : field.value ?? undefined,
+      value,
       documentVersionId,
       type,
       label: captured?.label,
@@ -492,8 +523,29 @@ async function runPlaywrightHostSession(input: {
       .maybeSingle();
     const opportunityId = applicationRow?.opportunity_id ? String(applicationRow.opportunity_id) : null;
 
+    const toPageCapture = (captured: CapturedFormPage, pageIndex: number) =>
+      FormPageCaptureSchema.parse({
+        pageIndex,
+        origin: new URL(page.url()).origin,
+        pageUrl: page.url(),
+        hazards: captured.hazards,
+        fields: captured.fields.map((field) => ({
+          fieldId: field.fieldId,
+          fieldKey: field.fieldKey,
+          type: field.type,
+          label: field.label,
+          required: field.required,
+          options: field.options,
+          currentValue: field.currentValue,
+        })),
+      });
+
     for (let step = 0; step < MAX_STEPS; step += 1) {
-      const capture = (await evaluateFormDom<CapturedFormPage>(page, "capture"));
+      let capture = await evaluateFormDom<CapturedFormPage>(page, "capture");
+      if (capture.fields.length === 0) {
+        await waitForPageReady(page);
+        capture = await evaluateFormDom<CapturedFormPage>(page, "capture");
+      }
 
       if (capture.hazards.captcha) {
         return { ok: false, blockedReason: "CAPTCHA on this page — complete it manually in the browser." };
@@ -502,23 +554,10 @@ async function runPlaywrightHostSession(input: {
         return { ok: false, blockedReason: "This form requires account creation or sign-in." };
       }
 
+      let lastPlanEntries: FillPlanEntry[] = [];
+
       if (capture.fields.length > 0) {
-        const origin = new URL(page.url()).origin;
-        const pageCapture = FormPageCaptureSchema.parse({
-          pageIndex: step,
-          origin,
-          pageUrl: page.url(),
-          hazards: capture.hazards,
-          fields: capture.fields.map((field) => ({
-            fieldId: field.fieldId,
-            fieldKey: field.fieldKey,
-            type: field.type,
-            label: field.label,
-            required: field.required,
-            options: field.options,
-            currentValue: field.currentValue,
-          })),
-        });
+        const pageCapture = toPageCapture(capture, step);
 
         if (opportunityId) {
           await persistFormPageCapture(
@@ -541,7 +580,36 @@ async function runPlaywrightHostSession(input: {
           hostFieldKeyById,
         });
 
-        const entries = fillPlanEntriesFromCapture(capture, plan);
+        // LLM planning can take long enough for Google Forms to re-render and drop stamps.
+        const recapture = await evaluateFormDom<CapturedFormPage>(page, "capture");
+        let liveCapture = recapture.fields.length > 0 ? recapture : capture;
+        let livePlan = plan;
+        const originalIds = new Set(capture.fields.map((field) => field.fieldId));
+        const recaptureHasNewFields = liveCapture.fields.some((field) => !originalIds.has(field.fieldId));
+        if (opportunityId && recapture.fields.length > 0) {
+          await persistFormPageCapture(
+            input.supabase,
+            input.actor.userId,
+            input.applicationId,
+            opportunityId,
+            toPageCapture(recapture, step),
+          );
+        }
+        if (recaptureHasNewFields) {
+          livePlan = await fillFormPageFromJson({
+            supabase: input.supabase,
+            actor: input.actor,
+            applicationId: input.applicationId,
+            page: toPageCapture(liveCapture, step),
+            hostFieldKeyById: Object.fromEntries(
+              liveCapture.fields.map((field) => [field.fieldId, field.fieldKey || field.fieldId]),
+            ),
+          });
+        }
+        capture = liveCapture;
+
+        const entries = fillPlanEntriesFromCapture(liveCapture, livePlan);
+        lastPlanEntries = entries;
         totalFilled += await applyFillPlanToHostPage({
           page,
           supabase: input.supabase,
@@ -549,7 +617,7 @@ async function runPlaywrightHostSession(input: {
           entries,
         });
 
-        const missingRequired = requiredHostFieldsMissing(capture.fields, plan.fields);
+        const missingRequired = requiredHostFieldsMissing(liveCapture.fields, livePlan.fields);
         if (missingRequired.length > 0) {
           await context.close();
           return {
@@ -563,20 +631,42 @@ async function runPlaywrightHostSession(input: {
         }
       }
 
-      const advance = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "next");
-      lastNavigationReason = advance.reason ?? (advance.clicked ? "next-clicked" : "no-next");
-      if (advance.clicked) {
-        const previousUrl = page.url();
-        const previousText = capture.pageText.slice(0, 200);
+      const previousUrl = page.url();
+      const previousText = capture.pageText.slice(0, 200);
+      const pageUnchanged = async () =>
+        page.url() === previousUrl &&
+        (await evaluateFormDom<CapturedFormPage>(page, "capture")).pageText.slice(0, 200) === previousText;
+
+      let advanced = await clickHostNextWithPlaywright(page);
+      if (advanced) {
+        lastNavigationReason = "next-clicked-playwright";
+      } else {
+        const advance = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "next");
+        advanced = advance.clicked;
+        lastNavigationReason = advance.reason ?? (advance.clicked ? "next-clicked" : "no-next");
+      }
+
+      if (advanced) {
         await waitForPageReady(page);
-        const stillSamePage =
-          page.url() === previousUrl &&
-          ((await evaluateFormDom<CapturedFormPage>(page, "capture")).pageText.slice(0, 200) === previousText);
-        if (!stillSamePage) {
+        if (!(await pageUnchanged())) {
           continue;
         }
-        // Next didn't advance (often required-field validation) — fall through to Submit.
         lastNavigationReason = "next-stuck";
+        if (lastPlanEntries.length > 0) {
+          totalFilled += await applyFillPlanToHostPage({
+            page,
+            supabase: input.supabase,
+            userId: input.actor.userId,
+            entries: lastPlanEntries,
+          });
+          const retried =
+            (await clickHostNextWithPlaywright(page)) ||
+            (await evaluateFormDom<{ clicked: boolean }>(page, "next")).clicked;
+          if (retried) {
+            await waitForPageReady(page);
+            if (!(await pageUnchanged())) continue;
+          }
+        }
       }
 
       if (input.clickFinalSubmit) {

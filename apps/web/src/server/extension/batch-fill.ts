@@ -25,6 +25,7 @@ import { tryGetAiProvider } from "@/infra/ai/openai";
 import { wrapUntrustedFormFields } from "@/lib/opportunities/untrusted";
 import { logError } from "@/lib/log";
 import { persistableFormChoiceOptions, snapToHostOption } from "@/lib/needs-you-field-kinds";
+import { mappingKeyComparable, normalizeMappingIdentity } from "@/lib/field-mappings";
 import { recordAuditEvent } from "@/server/audit";
 import { markFillStarted } from "@/server/applications/fill-lifecycle";
 import { scheduleRefreshOpenApplicationsFromKit } from "@/server/applications/refresh-from-kit";
@@ -334,9 +335,14 @@ export function preferFilledResults(base: BatchFieldResult[], overlay: BatchFiel
   });
 }
 
-export function attachCatalogCitations(results: BatchFieldResult[], catalog: GroundingCatalog): BatchFieldResult[] {
+export function attachCatalogCitations(
+  results: BatchFieldResult[],
+  catalog: GroundingCatalog,
+  fields?: BatchFieldInput[],
+): BatchFieldResult[] {
   const allowedDocs = new Set(catalog.allowedDocumentVersionIds);
   const allowedIds = new Set(catalog.allowedEvidenceIds);
+  const liveById = new Map((fields ?? []).map((field) => [field.fieldId, field]));
   return results.map((field) => {
     if (field.status !== "filled") return field;
     if (field.documentVersionId) {
@@ -357,6 +363,15 @@ export function attachCatalogCitations(results: BatchFieldResult[], catalog: Gro
       ...new Set(citeNarrativeCatalogIds(value, catalog)),
     ].filter((id) => allowedIds.has(id));
     if (!evidenceIds.length) {
+      const live = liveById.get(field.fieldId);
+      const isChoice =
+        live?.type === "radio" || live?.type === "checkbox" || live?.type === "select";
+      if (isChoice) {
+        const snapped = snapToHostOption(value, live.options);
+        if (snapped) {
+          return { ...field, value: snapped };
+        }
+      }
       // LLM produced a filled value with no grounding — downgrade unless it was already
       // trusted by the memory-match phase (pre-attached evidence would have been caught above).
       return { fieldId: field.fieldId, status: "need_you" as const };
@@ -464,17 +479,31 @@ function pickResumeDocument(field: BatchFieldInput, catalog: GroundingCatalog): 
   return match?.documentVersionId;
 }
 
+function mappingForBatchField(field: BatchFieldInput, mappings: FieldMapping[]): FieldMapping | undefined {
+  const direct = mappings.find((item) => item.fieldKey === field.fieldId);
+  if (direct) return direct;
+  const want = normalizeMappingIdentity(field.label);
+  if (want.length < 2) return undefined;
+  const exactLabel = mappings.find((item) => normalizeMappingIdentity(item.label) === want);
+  if (exactLabel) return exactLabel;
+  const wantSlug = mappingKeyComparable(field.fieldId) || want.replace(/\s+/g, "_");
+  if (wantSlug.length < 4) return undefined;
+  return mappings.find((item) => {
+    const slug = mappingKeyComparable(item.fieldKey) || normalizeMappingIdentity(item.label).replace(/\s+/g, "_");
+    return slug.length >= 4 && slug === wantSlug;
+  });
+}
+
 export function mappingsToBatchResults(
   fields: BatchFieldInput[],
   mappings: FieldMapping[],
   catalog: GroundingCatalog,
 ): { results: BatchFieldResult[]; formRequirementFieldIds: string[] } {
-  const byKey = new Map(mappings.map((item) => [item.fieldKey, item]));
   const allowedDocs = new Set(catalog.allowedDocumentVersionIds);
   const formRequirementFieldIds: string[] = [];
 
   const results = fields.map((field) => {
-    const mapping = byKey.get(field.fieldId);
+    const mapping = mappingForBatchField(field, mappings);
 
     if (field.type === "file") {
       const versionId =
@@ -1009,7 +1038,7 @@ export async function runBatchFillPlan(input: {
 
   const llmFields = remaining.length ? await llmFormFillFromMemory(remaining, catalog) : [];
   if (llmFields?.length) {
-    merged = preferFilledResults(merged, attachCatalogCitations(ensureEveryField(remaining, llmFields), catalog));
+    merged = preferFilledResults(merged, attachCatalogCitations(ensureEveryField(remaining, llmFields), catalog, remaining));
   }
 
   if (llmFields === null && remaining.length) {

@@ -156,6 +156,45 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     return Boolean(month && (day || year));
   }
 
+  function itemHasFillableControl(item: Element): boolean {
+    if (looksLikeFileField(item) || looksLikeDateField(item)) return true;
+    return Boolean(
+      item.querySelector(
+        'input:not([type=hidden]), textarea, select, [role="radio"], [role="checkbox"], [role="listbox"], [role="textbox"], [contenteditable="true"]',
+      ),
+    );
+  }
+
+  /** Prefer the option's own label — Google Forms aria/textContent often concatenates every choice. */
+  function optionLabelFromNode(node: Element): string {
+    const el = node as HTMLElement;
+    const span = el.querySelector(
+      ".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd, .vRMGwf",
+    );
+    const fromSpan = (span?.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (fromSpan && fromSpan.length <= 160) return fromSpan;
+    const associated =
+      (node.id ? document.querySelector(`label[for="${CSS.escape(node.id)}"]`) : null) ?? node.closest("label");
+    const fromLabel = (associated?.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (fromLabel && fromLabel.length <= 160) return fromLabel;
+    const aria = (el.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
+    if (aria && aria.length <= 160 && !/\b(basic|intermediate|advanced|expert).{8,}(basic|intermediate|advanced|expert)\b/i.test(aria)) {
+      return aria;
+    }
+    const data = (el.getAttribute("data-value") ?? "").replace(/\s+/g, " ").trim();
+    if (data && data.length <= 80) return data;
+    const text = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (text.length <= 160) return text;
+    return (text.split(/\s{2,}|\n/)[0] ?? "").trim().slice(0, 80);
+  }
+
+  function uniqueOptionLabels(nodes: Element[]): string[] | undefined {
+    const labels = [
+      ...new Set(nodes.map((node) => optionLabelFromNode(node)).filter((label) => label.length >= 1 && label.length <= 200)),
+    ];
+    return labels.length ? labels : undefined;
+  }
+
   function classifyButton(el: Element): "next" | "submit" | "other" {
     const text = controlSignal(el);
     const nextRe =
@@ -275,6 +314,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
     const listItems = Array.from(document.querySelectorAll('[role="listitem"]'));
     for (const item of listItems) {
+      if (!itemHasFillableControl(item)) continue;
       const heading = item.querySelector(
         '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
       );
@@ -293,21 +333,27 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
       let type = "text";
       let options: string[] | undefined;
-      if (item.querySelector('[role="radio"]')) {
+      if (item.querySelector('[role="radio"], input[type="radio"]')) {
         type = "radio";
-        options = Array.from(item.querySelectorAll('[role="radio"]'))
-          .map((node) => (node.getAttribute("aria-label") ?? node.textContent ?? "").trim())
-          .filter(Boolean);
-      } else if (item.querySelector('[role="checkbox"]')) {
+        options = uniqueOptionLabels(
+          Array.from(item.querySelectorAll('[role="radio"], input[type="radio"]')),
+        );
+      } else if (item.querySelector('[role="checkbox"], input[type="checkbox"]')) {
         type = "checkbox";
-        options = Array.from(item.querySelectorAll('[role="checkbox"]'))
-          .map((node) => (node.getAttribute("aria-label") ?? node.textContent ?? "").trim())
-          .filter(Boolean);
+        options = uniqueOptionLabels(
+          Array.from(item.querySelectorAll('[role="checkbox"], input[type="checkbox"]')),
+        );
       } else if (item.querySelector('[role="listbox"]')) {
         type = "select";
-        options = Array.from(item.querySelectorAll('[role="option"]'))
-          .map((node) => (node.getAttribute("aria-label") ?? node.textContent ?? "").trim())
-          .filter(Boolean);
+        options = uniqueOptionLabels(Array.from(item.querySelectorAll('[role="option"]')));
+      } else if (item.querySelector("select")) {
+        type = "select";
+        options = uniqueOptionLabels(
+          Array.from(item.querySelectorAll("option")).filter((opt) => {
+            const text = (opt.textContent ?? "").trim();
+            return Boolean(text) && !/^(select|choose|pick)\b/i.test(text);
+          }),
+        );
       } else if (item.querySelector('input[type="file"]') || looksLikeFileField(item)) {
         type = "file";
       } else if (item.querySelector("textarea")) {
@@ -340,9 +386,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
           | null
       )?.value;
       const currentValue =
-        (checkedChoice
-          ? (checkedChoice.getAttribute("aria-label") ?? checkedChoice.textContent ?? "").trim()
-          : nativeValue?.trim()) || undefined;
+        (checkedChoice ? optionLabelFromNode(checkedChoice) : nativeValue?.trim()) || undefined;
       fields.push({
         fieldId,
         fieldKey,
@@ -699,7 +743,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
     if (!preferred) return { clicked: false, reason: kind === "next" ? "no-next" : "no-submit" };
     preferred.scrollIntoView({ block: "center" });
-    preferred.click();
+    activateToggle(preferred);
     return { clicked: true };
   }
 
