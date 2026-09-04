@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   shouldAutoQueueHostSubmit,
+  shouldCancelAfterSiblingSubmitClick,
   shouldClickSubmitOnContinue,
   shouldContinueHostFill,
   shouldCreateNewAutoSubmitJob,
@@ -103,6 +104,29 @@ describe("host submit attempt policy", () => {
     expect(shouldCreateNewAutoSubmitJob(inFlight)).toBe(false);
     expect(shouldSkipClaimedSubmitJob({ state: inFlight, postDeadline: false, manual: false })).toBe(
       false,
+    );
+  });
+
+  it("lets manual Resubmit run after a previous Submit click that was not confirmed", () => {
+    const afterClick = summarizeHostSubmitJobs(
+      [
+        {
+          status: "failed",
+          job_kind: "submit",
+          host_submit_clicked: true,
+          idempotency_key: "app-1:host_page_loop",
+        },
+      ],
+      { status: "in_progress" },
+    );
+    expect(shouldSkipClaimedSubmitJob({ state: afterClick, postDeadline: false, manual: true })).toBe(
+      false,
+    );
+    expect(shouldCancelAfterSiblingSubmitClick({ manual: true, siblingClickedSubmit: true })).toBe(
+      false,
+    );
+    expect(shouldCancelAfterSiblingSubmitClick({ manual: false, siblingClickedSubmit: true })).toBe(
+      true,
     );
   });
 });

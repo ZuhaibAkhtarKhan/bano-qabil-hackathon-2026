@@ -116,3 +116,15 @@ export function shouldSkipClaimedSubmitJob(input: {
   if (input.state.waitingNeedsYou) return true;
   return input.state.hostSubmitClicked || input.state.firstSubmitAttemptFinished;
 }
+
+/**
+ * Auto-submit siblings die after a Submit click so we never double-send.
+ * Manual Resubmit must still run — the first click often never recorded a response.
+ */
+export function shouldCancelAfterSiblingSubmitClick(input: {
+  manual: boolean;
+  siblingClickedSubmit: boolean;
+}): boolean {
+  if (input.manual) return false;
+  return input.siblingClickedSubmit;
+}

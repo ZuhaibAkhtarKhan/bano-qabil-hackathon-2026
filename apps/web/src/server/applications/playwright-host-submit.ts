@@ -102,13 +102,29 @@ async function waitForHostConfirmation(page: Page): Promise<boolean> {
   const deadline = Date.now() + 12_000;
   while (Date.now() < deadline) {
     await page.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => undefined);
-    if (await evaluateFormDom<boolean>(page, "confirm")) return true;
-    // Google Forms often lands on formResponse URL after a real submit.
-    const href = page.url().toLowerCase();
-    if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
+    if (await hostLooksConfirmed(page)) return true;
     await page.waitForTimeout(700);
   }
-  return evaluateFormDom<boolean>(page, "confirm");
+  return hostLooksConfirmed(page);
+}
+
+async function hostLooksConfirmed(page: Page): Promise<boolean> {
+  if (await evaluateFormDom<boolean>(page, "confirm")) return true;
+  const href = page.url().toLowerCase();
+  if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
+  const confirmation = page
+    .locator(".freebirdFormviewerViewResponseConfirmationMessage, .vHW8K")
+    .or(page.getByText(/your response has been recorded|response has been recorded/i))
+    .or(page.getByText(/submit another response/i));
+  return confirmation.first().isVisible().catch(() => false);
+}
+
+async function hostSubmitButtonStillVisible(page: Page): Promise<boolean> {
+  const submit = page
+    .locator('div[role="button"][jsname="M2UYVd"]')
+    .or(page.locator(".freebirdFormviewerViewNavigationSubmitButton"))
+    .first();
+  return submit.isVisible().catch(() => false);
 }
 
 async function clickFirstVisibleLocator(candidates: Locator[]): Promise<boolean> {
@@ -782,17 +798,6 @@ async function runPlaywrightHostSession(input: {
             userId: input.actor.userId,
             entries: entries.filter((entry) => blockedIds.includes(entry.fieldId)),
           });
-          blockedIds = await requiredEmptyOnHost();
-        }
-        if (blockedIds.length > 0) {
-          const labels = liveCapture.fields
-            .filter((field) => blockedIds.includes(field.fieldId))
-            .map((field) => field.label.trim() || field.fieldId);
-          await context.close();
-          return {
-            ok: false,
-            error: `Required host questions are still empty after fill, so Next/Submit would be rejected: ${labels.join("; ")}`,
-          };
         }
       }
 
@@ -849,11 +854,14 @@ async function runPlaywrightHostSession(input: {
           hostSubmitClicked = true;
           let confirmed = await waitForHostConfirmation(page);
           if (!confirmed && !(await evaluateFormDom<boolean>(page, "validation"))) {
-            // One retry — first click sometimes only focuses the control.
-            const retried = await clickHostSubmitWithPlaywright(page);
-            if (retried) confirmed = await waitForHostConfirmation(page);
+            // Retry only while the original Submit control is still on this page.
+            // Never click "Submit another response" — that opens a blank form after a real submit.
+            if ((await hostSubmitButtonStillVisible(page)) && !(await hostLooksConfirmed(page))) {
+              const retried = await clickHostSubmitWithPlaywright(page);
+              if (retried) confirmed = await waitForHostConfirmation(page);
+            }
           }
-          if (confirmed) {
+          if (confirmed || (await hostLooksConfirmed(page))) {
             await context.close();
             return {
               ok: true,

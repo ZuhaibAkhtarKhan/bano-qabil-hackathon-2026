@@ -198,6 +198,8 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
   function classifyButton(el: Element): "next" | "submit" | "other" {
     const text = controlSignal(el);
+    // Confirmation-page control — clicking it undoes a successful submit.
+    if (/submit another response|submit another form|send another response/i.test(text)) return "other";
     const nextRe =
       /\b(next|continue|proceed|forward|go\s*next|next\s*page|next\s*step|keep\s*going|save\s*(&|and)?\s*continue|weiter|siguiente|suivant|avanti|dalej|volgende|próximo|proximo|nästa|neste)\b/i;
     const submitRe =
@@ -777,6 +779,8 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     if (/your response has been recorded|response has been recorded|response recorded|تم تسجيل إجابتك/i.test(text)) {
       return true;
     }
+    if (/submit another response|submit another form/i.test(text)) return true;
+    if (document.querySelector(".freebirdFormviewerViewResponseConfirmationMessage, .vHW8K")) return true;
     if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
     return /thank you for (your )?(response|submission)|submission received|successfully submitted|application received|we have received your|تم إرسال/i.test(
       text,

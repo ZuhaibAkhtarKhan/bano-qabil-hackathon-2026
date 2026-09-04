@@ -19,6 +19,7 @@ import {
   shouldCreateNewAutoSubmitJob,
   shouldQueuePostDeadlineRetry,
   summarizeHostSubmitJobs,
+  isManualHostSubmitKey,
   type HostJobLite,
   type HostSubmitAttemptState,
 } from "./host-submit-policy";
@@ -711,6 +712,10 @@ export async function completeHostSubmitJob(input: {
     .maybeSingle();
 
   if (!job) return { ok: false };
+  if (String(job.status) === "cancelled") {
+    // Replaced by Resubmit — do not clobber the new job or mark this click as terminal.
+    return { ok: true };
+  }
 
   const applicationId = String(job.application_id);
   const postDeadline = isPostDeadlineHostSubmitKey(String(job.idempotency_key ?? ""));
@@ -727,6 +732,7 @@ export async function completeHostSubmitJob(input: {
       .neq("id", jobId);
     const ids = (siblings ?? [])
       .filter((row) => includePostDeadline || !isPostDeadlineHostSubmitKey(String(row.idempotency_key ?? "")))
+      .filter((row) => !isManualHostSubmitKey(String(row.idempotency_key ?? "")))
       .map((row) => String(row.id));
     if (ids.length === 0) return;
     await supabase
@@ -888,15 +894,15 @@ export async function completeHostSubmitJob(input: {
     payload: { postDeadline },
   });
 
-  if (postDeadline) {
-    await supabase
-      .from("applications")
-      .update({
-        next_action: "Post-deadline submit failed — open the host form and submit manually.",
-      })
-      .eq("id", applicationId)
-      .eq("user_id", actor.userId);
-  }
+  await supabase
+    .from("applications")
+    .update({
+      next_action: postDeadline
+        ? "Post-deadline submit failed — open the host form and submit manually."
+        : (error ?? "Could not submit the host form. Open the form and submit manually, or tap Resubmit."),
+    })
+    .eq("id", applicationId)
+    .eq("user_id", actor.userId);
 
   return { ok: true };
 }

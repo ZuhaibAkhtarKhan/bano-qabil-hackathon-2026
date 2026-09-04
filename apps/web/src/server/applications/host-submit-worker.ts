@@ -14,7 +14,11 @@ import {
   type HostSubmitJobKind,
   type HostSubmitJobRow,
 } from "./host-submit";
-import { isManualHostSubmitKey, shouldSkipClaimedSubmitJob } from "./host-submit-policy";
+import {
+  isManualHostSubmitKey,
+  shouldCancelAfterSiblingSubmitClick,
+  shouldSkipClaimedSubmitJob,
+} from "./host-submit-policy";
 import {
   isServerHostSubmitEnabled,
   runPlaywrightHostPrefill,
@@ -228,7 +232,10 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         .select("id, status, host_submit_clicked, due_at, idempotency_key")
         .eq("application_id", job.application_id)
         .eq("job_kind", "submit");
-      if ((siblings ?? []).some((row) => String(row.id) !== job.id && row.host_submit_clicked)) {
+      const siblingClickedSubmit = (siblings ?? []).some(
+        (row) => String(row.id) !== job.id && row.host_submit_clicked,
+      );
+      if (shouldCancelAfterSiblingSubmitClick({ manual, siblingClickedSubmit })) {
         await supabase
           .from("host_submit_jobs")
           .update({
