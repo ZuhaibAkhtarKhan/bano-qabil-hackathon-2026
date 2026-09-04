@@ -1,4 +1,4 @@
-import type { Page, Frame } from "playwright";
+import type { Page, Frame, Locator } from "playwright";
 
 import type { DocumentVersionUpload } from "@/server/documents/download-version";
 
@@ -9,7 +9,7 @@ function basename(filename: string): string {
   return filename.trim().toLowerCase().replace(/^.*[\\/]/, "");
 }
 
-async function fileAlreadyUploaded(scope: ReturnType<Page["locator"]>, filename: string): Promise<boolean> {
+async function fileAlreadyUploaded(scope: Locator, filename: string): Promise<boolean> {
   const wanted = basename(filename);
   if (!wanted) return false;
 
@@ -23,7 +23,7 @@ async function fileAlreadyUploaded(scope: ReturnType<Page["locator"]>, filename:
   }
 
   const text = ((await scope.innerText().catch(() => "")) || "").toLowerCase();
-  if (text.includes(wanted) && /uploaded|selected|attached|remove file/i.test(text)) return true;
+  if (text.includes(wanted) && /uploaded|selected|attached|remove file|1 file/i.test(text)) return true;
   return false;
 }
 
@@ -56,13 +56,14 @@ async function setFilesOnFrame(frame: Frame, file: DocumentVersionUpload): Promi
 
 async function attachViaChooser(
   page: Page,
-  clickTarget: ReturnType<Page["locator"]>,
+  clickTarget: Locator,
   file: DocumentVersionUpload,
+  timeoutMs = 2_500,
 ): Promise<boolean> {
   try {
     const [chooser] = await Promise.all([
-      page.waitForEvent("filechooser", { timeout: 4_000 }),
-      clickTarget.click({ timeout: 4_000 }),
+      page.waitForEvent("filechooser", { timeout: timeoutMs }),
+      clickTarget.click({ timeout: timeoutMs }),
     ]);
     await chooser.setFiles({
       name: file.filename,
@@ -73,6 +74,75 @@ async function attachViaChooser(
   } catch {
     return false;
   }
+}
+
+async function clickVisibleInFrames(
+  page: Page,
+  find: (root: Page | Frame) => Locator,
+): Promise<boolean> {
+  const roots: Array<Page | Frame> = [page, ...page.frames()];
+  for (const root of roots) {
+    const locator = find(root).first();
+    try {
+      if ((await locator.count()) === 0) continue;
+      if (!(await locator.isVisible().catch(() => false))) continue;
+      await locator.click({ timeout: 3_000 });
+      return true;
+    } catch {
+      // try next frame
+    }
+  }
+  return false;
+}
+
+/** Google Forms file questions open Drive picker; the OS chooser only appears on the Upload tab. */
+async function completeGoogleDrivePicker(page: Page, file: DocumentVersionUpload): Promise<boolean> {
+  await page.waitForTimeout(500);
+  await clickVisibleInFrames(page, (root) =>
+    root.getByRole("tab", { name: /upload/i }).or(root.locator('[role="tab"]').filter({ hasText: /^upload$/i })),
+  );
+  await page.waitForTimeout(350);
+
+  const browseFinders: Array<(root: Page | Frame) => Locator> = [
+    (root) => root.getByRole("button", { name: /browse|select files from your device/i }),
+    (root) => root.locator("button, [role='button']").filter({ hasText: /^(browse|select files from your device)$/i }),
+    (root) => root.locator('input[type="file"]'),
+  ];
+
+  for (const find of browseFinders) {
+    const roots: Array<Page | Frame> = [page, ...page.frames()];
+    for (const root of roots) {
+      const target = find(root).first();
+      if ((await target.count()) === 0) continue;
+      const attached = await attachViaChooser(page, target, file, 6_000);
+      if (attached) {
+        await page.waitForTimeout(600);
+        await page.keyboard.press("Escape").catch(() => undefined);
+        return true;
+      }
+      if (root !== page) {
+        try {
+          await target.setInputFiles({
+            name: file.filename,
+            mimeType: file.mimeType,
+            buffer: file.buffer,
+          });
+          await page.waitForTimeout(600);
+          return true;
+        } catch {
+          // keep looking
+        }
+      }
+    }
+  }
+
+  for (const frame of page.frames()) {
+    if (await setFilesOnFrame(frame, file)) {
+      await page.keyboard.press("Escape").catch(() => undefined);
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Attach vault documents to file inputs via Playwright (Node-side — not page.evaluate). */
@@ -98,64 +168,57 @@ export async function applyHostFileUploads(
     }
 
     let attached = false;
-    for (let attempt = 0; attempt < 8 && !attached; attempt += 1) {
-      if (attempt > 0) await page.waitForTimeout(350);
-
-      const addBtn = container.locator('button, [role="button"], span[role="link"], a').filter({
-        hasText: /add file|upload file|browse|choose file|attach|upload/i,
-      });
-      if ((await addBtn.count()) > 0) {
-        attached = await attachViaChooser(page, addBtn.first(), file);
-        if (attached) break;
-        await addBtn.first().click().catch(() => undefined);
-        await page.waitForTimeout(500);
+    const scopedInput = container.locator('input[type="file"]').first();
+    if ((await scopedInput.count()) > 0) {
+      try {
+        await scopedInput.setInputFiles({
+          name: file.filename,
+          mimeType: file.mimeType,
+          buffer: file.buffer,
+        });
+        attached = (await scopedInput.evaluate((el) => (el as HTMLInputElement).files?.length ?? 0)) > 0;
+      } catch {
+        attached = await attachViaChooser(page, scopedInput, file, 2_500);
       }
+    }
 
-      const scopedInput = container.locator('input[type="file"]').first();
-      if ((await scopedInput.count()) > 0) {
-        try {
-          await scopedInput.setInputFiles({
-            name: file.filename,
-            mimeType: file.mimeType,
-            buffer: file.buffer,
-          });
-          attached = (await scopedInput.evaluate((el) => (el as HTMLInputElement).files?.length ?? 0)) > 0;
-        } catch {
-          attached = await attachViaChooser(page, scopedInput, file);
-        }
+    const addBtn = container.locator('button, [role="button"], span[role="link"], a').filter({
+      hasText: /add file|upload file|browse|choose file|attach|upload/i,
+    });
+    if (!attached && (await addBtn.count()) > 0) {
+      const chooserOpened = page.waitForEvent("filechooser", { timeout: 1_800 }).catch(() => null);
+      await addBtn.first().click({ timeout: 4_000 }).catch(() => undefined);
+      const chooser = await chooserOpened;
+      if (chooser) {
+        await chooser.setFiles({
+          name: file.filename,
+          mimeType: file.mimeType,
+          buffer: file.buffer,
+        });
+        attached = true;
+      } else {
+        attached = await completeGoogleDrivePicker(page, file);
       }
+    }
 
-      if (!attached) {
-        for (const frame of page.frames()) {
-          if (await setFilesOnFrame(frame, file)) {
-            attached = true;
-            break;
-          }
-        }
-      }
+    if (!attached) {
+      attached = await completeGoogleDrivePicker(page, file);
+    }
 
-      if (!attached) {
-        const pageInput = page.locator('input[type="file"]').last();
-        if ((await pageInput.count()) > 0) {
-          try {
-            await pageInput.setInputFiles({
-              name: file.filename,
-              mimeType: file.mimeType,
-              buffer: file.buffer,
-            });
-            attached =
-              (await pageInput.evaluate((el) => (el as HTMLInputElement).files?.length ?? 0)) > 0 ||
-              (await fileAlreadyUploaded(page.locator("body"), file.filename));
-          } catch {
-            attached = false;
-          }
+    if (!attached) {
+      for (const frame of page.frames()) {
+        if (await setFilesOnFrame(frame, file)) {
+          attached = true;
+          break;
         }
       }
     }
 
-    if (attached || (await fileAlreadyUploaded(container, file.filename))) {
+    if (attached || (await fileAlreadyUploaded(container, file.filename)) || (await fileAlreadyUploaded(page.locator("body"), file.filename))) {
       filled += 1;
       await page.waitForTimeout(400);
+    } else {
+      await page.keyboard.press("Escape").catch(() => undefined);
     }
   }
 

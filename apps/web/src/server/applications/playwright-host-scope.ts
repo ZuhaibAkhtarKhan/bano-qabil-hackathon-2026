@@ -28,7 +28,10 @@ export async function findHostFieldScope(
       .first();
     const text = normalizeHostHeading((await heading.textContent().catch(() => "")) ?? "");
     if (!text) continue;
-    if (text === want || text.includes(want) || want.includes(text)) return item;
+    if (text === want || text.includes(want) || want.includes(text)) {
+      await item.evaluate((el, id) => el.setAttribute("data-1apply-batch-id", id), entry.fieldId).catch(() => undefined);
+      return item;
+    }
   }
   return null;
 }

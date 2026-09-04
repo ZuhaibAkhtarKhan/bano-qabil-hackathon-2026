@@ -70,6 +70,34 @@ async function waitForPageReady(page: Page) {
   await page.waitForTimeout(1_200);
 }
 
+/** Open each dropdown so capture can record real options (they live in a portal while closed). */
+async function harvestGoogleListboxOptions(page: Page): Promise<void> {
+  const items = page.locator('[role="listitem"]');
+  const count = await items.count();
+  for (let i = 0; i < count; i += 1) {
+    const item = items.nth(i);
+    const listbox = item.getByRole("listbox").first();
+    if ((await listbox.count()) === 0) continue;
+    await listbox.scrollIntoViewIfNeeded().catch(() => undefined);
+    await listbox.click({ timeout: 2_000 }).catch(() => undefined);
+    await page.getByRole("option").first().waitFor({ state: "visible", timeout: 2_500 }).catch(() => undefined);
+    const options = page.getByRole("option");
+    const n = await options.count();
+    const labels: string[] = [];
+    for (let j = 0; j < Math.min(n, 40); j += 1) {
+      const text = ((await options.nth(j).innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+      if (text && !/^(choose|select|pick)\b/i.test(text) && text.length <= 200) labels.push(text);
+    }
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await page.waitForTimeout(120);
+    if (labels.length > 0) {
+      await item
+        .evaluate((el, next) => el.setAttribute("data-1apply-options", JSON.stringify(next)), labels)
+        .catch(() => undefined);
+    }
+  }
+}
+
 async function waitForHostConfirmation(page: Page): Promise<boolean> {
   const deadline = Date.now() + 12_000;
   while (Date.now() < deadline) {
@@ -119,12 +147,49 @@ async function clickHostNextWithPlaywright(page: Page): Promise<boolean> {
   ]);
 }
 
-/**
- * Playwright's locator.fill() updates React/Google Forms state more reliably than
- * DOM property setters alone. Used after (or instead of) in-page apply.
- */
+/** Escape a string for use in a `RegExp` constructor. */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function locatorIsChecked(locator: Locator): Promise<boolean> {
+  const selected = ((await locator.getAttribute("aria-selected").catch(() => null)) ?? "").toLowerCase();
+  if (selected === "true") return true;
+  const aria = ((await locator.getAttribute("aria-checked").catch(() => null)) ?? "").toLowerCase();
+  if (aria === "true") return true;
+  try {
+    if (await locator.isChecked({ timeout: 400 })) return true;
+  } catch {
+    // not a native checkbox/radio
+  }
+  return false;
+}
+
+async function clickAndConfirmChoice(locator: Locator): Promise<boolean> {
+  const first = locator.first();
+  if ((await first.count()) === 0) return false;
+  await first.scrollIntoViewIfNeeded().catch(() => undefined);
+  await first.click({ timeout: 3_000 }).catch(() => first.click({ timeout: 2_000, force: true }));
+  await first.page().waitForTimeout(140);
+  const toggle = first
+    .locator("xpath=ancestor-or-self::*[@role='radio' or @role='checkbox' or @role='option' or @aria-checked or @aria-selected][1]")
+    .first();
+  const target = (await toggle.count()) > 0 ? toggle : first;
+  if (await locatorIsChecked(target)) return true;
+  const label = first.locator(".aDTYNe, .docssharedWizToggleLabeledLabelText, .ulDsOb, .Od2TWd").first();
+  if ((await label.count()) > 0) {
+    await label.click({ timeout: 2_000, force: true }).catch(() => undefined);
+    await first.page().waitForTimeout(140);
+  }
+  return locatorIsChecked(target) || locatorIsChecked(first);
+}
+
+async function listboxShowsValue(scope: Locator, value: string): Promise<boolean> {
+  const shown = ((await scope.getByRole("listbox").innerText().catch(() => "")) || "").trim().toLowerCase();
+  const need = value.trim().toLowerCase();
+  if (!need || !shown) return false;
+  if (/^(choose|select|pick)\b/i.test(shown)) return false;
+  return shown.includes(need);
 }
 
 /** Click radios / selects from saved headless memory — Google Forms often ignores DOM-only clicks. */
@@ -135,7 +200,7 @@ async function clickGoogleChoice(
   value: string,
 ): Promise<boolean> {
   const exact = new RegExp(`^\\s*${escapeRegExp(value)}\\s*$`, "i");
-  const fuzzy = new RegExp(escapeRegExp(value), "i");
+  const fuzzy = new RegExp(`^\\s*${escapeRegExp(value)}`, "i");
 
   if (type === "select") {
     const native = scope.locator("select").first();
@@ -153,21 +218,46 @@ async function clickGoogleChoice(
     if ((await listbox.count()) > 0) {
       await listbox.scrollIntoViewIfNeeded().catch(() => undefined);
       await listbox.click({ timeout: 3_000 }).catch(() => undefined);
-      await page.waitForTimeout(200);
+      const optionVisible = page.getByRole("option").first();
+      await optionVisible.waitFor({ state: "visible", timeout: 4_000 }).catch(() => undefined);
+      if ((await optionVisible.count()) === 0) {
+        await listbox.locator(".vRMGwf, .MocG8c, .eBLNLd").first().click({ timeout: 2_000 }).catch(() => undefined);
+        await optionVisible.waitFor({ state: "visible", timeout: 3_000 }).catch(() => undefined);
+      }
+      const option = page.getByRole("option", { name: exact }).first();
+      const fallback = page.getByRole("option", { name: fuzzy }).first();
+      const pick = (await option.count()) > 0 ? option : fallback;
+      if ((await pick.count()) > 0) {
+        await pick.click({ timeout: 3_000 }).catch(() => undefined);
+        await page.waitForTimeout(150);
+        if (await listboxShowsValue(scope, value)) return true;
+      }
+      await page.keyboard.type(value, { delay: 18 });
+      await page.keyboard.press("Enter").catch(() => undefined);
+      await page.waitForTimeout(150);
+      if (await listboxShowsValue(scope, value)) return true;
+    }
+  }
+
+  if (type === "checkbox") {
+    const boxes = scope.getByRole("checkbox");
+    if ((await boxes.count()) === 1 && /^(yes|true|1|checked|on|confirm)$/i.test(value.trim())) {
+      const box = boxes.first();
+      if (await locatorIsChecked(box)) return true;
+      return clickAndConfirmChoice(box);
     }
   }
 
   const role = type === "checkbox" ? "checkbox" : type === "select" ? "option" : "radio";
+  const labelHit = scope
+    .locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd")
+    .filter({ hasText: exact });
   const candidates: Locator[] = [
+    labelHit,
     scope.getByRole(role, { name: exact }),
-    scope.getByLabel(exact),
-    scope.locator(`[data-value="${value}"]`),
-    scope.locator(`[aria-label="${value}"]`),
-    scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: exact }),
-    scope.getByText(exact),
+    scope.locator(`[role="${role}"][data-value="${value}"]`),
+    scope.locator(`[role="${role}"][aria-label="${value}"]`),
     scope.getByRole(role, { name: fuzzy }),
-    scope.locator(".docssharedWizToggleLabeledLabelText, .ulDsOb, .aDTYNe, .Od2TWd").filter({ hasText: fuzzy }),
-    scope.getByText(fuzzy),
   ];
   if (type === "select") {
     candidates.unshift(page.getByRole("option", { name: exact }), page.getByRole("option", { name: fuzzy }));
@@ -175,16 +265,27 @@ async function clickGoogleChoice(
 
   for (const locator of candidates) {
     try {
-      const first = locator.first();
-      if ((await first.count()) === 0) continue;
-      await first.scrollIntoViewIfNeeded().catch(() => undefined);
-      await first.click({ timeout: 3_000 });
-      return true;
+      if (await clickAndConfirmChoice(locator)) return true;
+      if (type === "select" && (await listboxShowsValue(scope, value))) return true;
     } catch {
       // try next candidate
     }
   }
   return false;
+}
+
+function splitCheckboxValues(value: string, options?: string[]): string[] {
+  const byLine = value
+    .split(/\n|;/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (byLine.length > 1) return byLine;
+  if (options && options.length > 0) {
+    const lower = value.toLowerCase();
+    const hits = options.filter((option) => option.trim() && lower.includes(option.trim().toLowerCase()));
+    if (hits.length > 0) return hits;
+  }
+  return [value.trim()];
 }
 
 async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
@@ -208,10 +309,7 @@ async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntr
               ? "checkbox"
               : null;
     if (!inferred || (inferred !== "radio" && inferred !== "select" && inferred !== "checkbox")) continue;
-    const parts =
-      inferred === "checkbox"
-        ? value.split(/\n|;/).map((part) => part.trim()).filter(Boolean)
-        : [value];
+    const parts = inferred === "checkbox" ? splitCheckboxValues(value, entry.options) : [value];
     try {
       let ok = false;
       for (const part of parts) {
@@ -225,6 +323,64 @@ async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntr
   return filled;
 }
 
+const GOOGLE_TEXT_CONTROL =
+  'input.whsOnd, textarea.whsOnd, input[jsname="YPqjbf"], textarea[jsname="YPqjbf"], [contenteditable="true"], input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]):not([type=button]):not([type=submit]), textarea';
+
+function valuesMatch(current: string, wanted: string): boolean {
+  const have = current.replace(/\s+/g, " ").trim().toLowerCase();
+  const need = wanted.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!need) return Boolean(have);
+  if (have === need) return true;
+  if (have.includes(need) || need.includes(have)) return have.length > 0;
+  return false;
+}
+
+async function readControlValue(control: Locator): Promise<string> {
+  const value = await control.inputValue().catch(() => "");
+  if (value.trim()) return value;
+  return ((await control.textContent().catch(() => "")) ?? "").trim();
+}
+
+async function typeIntoHostControl(page: Page, control: Locator, value: string): Promise<boolean> {
+  await control.scrollIntoViewIfNeeded().catch(() => undefined);
+  await control.click({ timeout: 3_000 }).catch(() => control.click({ timeout: 2_000, force: true }));
+  await page.waitForTimeout(80);
+  const focused = await control
+    .evaluate((el) => {
+      const active = document.activeElement;
+      return el === active || Boolean(active && el.contains(active));
+    })
+    .catch(() => false);
+  if (!focused) await control.focus().catch(() => undefined);
+  const canReplace = await control
+    .evaluate((el) => {
+      const active = document.activeElement;
+      return el === active || Boolean(active && el.contains(active));
+    })
+    .catch(() => false);
+  if (canReplace) {
+    await page.keyboard.press("Control+A").catch(() => undefined);
+    await page.keyboard.press("Backspace").catch(() => undefined);
+  }
+  const delay = Math.min(22, Math.max(8, Math.floor(360 / Math.max(value.length, 1))));
+  await page.keyboard.type(value, { delay });
+  await page.keyboard.press("Tab").catch(() => undefined);
+  await page.waitForTimeout(80);
+  if (valuesMatch(await readControlValue(control), value)) return true;
+
+  await control.click({ timeout: 2_000, force: true }).catch(() => undefined);
+  try {
+    await control.pressSequentially(value, {
+      delay: 12,
+      timeout: Math.min(45_000, 2_500 + value.length * 35),
+    });
+  } catch {
+    await control.fill(value, { timeout: 3_000, force: true }).catch(() => undefined);
+  }
+  await page.keyboard.press("Tab").catch(() => undefined);
+  return valuesMatch(await readControlValue(control), value);
+}
+
 async function fillDateWithPlaywright(page: Page, scope: Locator, raw: string): Promise<boolean> {
   const iso = toHtmlDateValue(raw);
   if (!iso) return false;
@@ -233,12 +389,8 @@ async function fillDateWithPlaywright(page: Page, scope: Locator, raw: string): 
 
   const native = scope.locator('input[type="date"], input[type="datetime-local"], input[type="month"]').first();
   if ((await native.count()) > 0) {
-    try {
-      await native.fill(iso, { timeout: 4_000 });
-      return true;
-    } catch {
-      await native.fill(`${year}-${month}`, { timeout: 2_000 }).catch(() => undefined);
-    }
+    if (await typeIntoHostControl(page, native, iso)) return true;
+    await native.fill(iso, { timeout: 2_000 }).catch(() => undefined);
   }
 
   const monthName = MONTH_NAMES[Number(month) - 1];
@@ -248,24 +400,32 @@ async function fillDateWithPlaywright(page: Page, scope: Locator, raw: string): 
       await monthBox.click({ timeout: 2_000 }).catch(() => undefined);
       const option = page.getByRole("option", { name: new RegExp(`^\\s*${monthName}\\s*$`, "i") }).first();
       if ((await option.count()) > 0) await option.click({ timeout: 2_000 }).catch(() => undefined);
-      else await monthBox.fill(month, { timeout: 2_000 }).catch(() => undefined);
+      else await typeIntoHostControl(page, monthBox, month);
     }
   }
 
-  const dayBox = scope.getByLabel(/^day$/i).or(scope.locator('input[placeholder="DD"]')).first();
-  const yearBox = scope.getByLabel(/^year$/i).or(scope.locator('input[placeholder="YYYY"]')).first();
-  if ((await dayBox.count()) > 0) await dayBox.fill(String(Number(day)), { timeout: 2_000 }).catch(() => undefined);
-  if ((await yearBox.count()) > 0) await yearBox.fill(year, { timeout: 2_000 }).catch(() => undefined);
+  const dayBox = scope.getByLabel(/day/i).or(scope.locator('input[placeholder="DD"]')).first();
+  const yearBox = scope.getByLabel(/year/i).or(scope.locator('input[placeholder="YYYY"]')).first();
+  if ((await dayBox.count()) > 0) await typeIntoHostControl(page, dayBox, String(Number(day)));
+  if ((await yearBox.count()) > 0) await typeIntoHostControl(page, yearBox, year);
 
   const inputs = scope.locator(
-    'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), [role="textbox"]',
+    'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox])',
   );
   if ((await inputs.count()) >= 3 && (await dayBox.count()) === 0) {
-    await inputs.nth(0).fill(month, { timeout: 2_000 }).catch(() => undefined);
-    await inputs.nth(1).fill(day, { timeout: 2_000 }).catch(() => undefined);
-    await inputs.nth(2).fill(year, { timeout: 2_000 }).catch(() => undefined);
+    await typeIntoHostControl(page, inputs.nth(0), month);
+    await typeIntoHostControl(page, inputs.nth(1), day);
+    await typeIntoHostControl(page, inputs.nth(2), year);
   }
-  return true;
+  const typedInputs = scope.locator(
+    'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox])',
+  );
+  const count = await typedInputs.count();
+  for (let i = 0; i < count; i += 1) {
+    const current = await readControlValue(typedInputs.nth(i));
+    if (current && (current.includes(year) || current.includes(day) || current.includes(month))) return true;
+  }
+  return false;
 }
 
 async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
@@ -280,78 +440,74 @@ async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): 
     const scope = await findHostFieldScope(page, entry);
     if (!scope) continue;
 
-    if (entry.type === "date") {
+    const looksLikeDate = entry.type === "date" || (await scope.getByLabel(/^month$/i).count()) > 0;
+    if (looksLikeDate) {
       if (await fillDateWithPlaywright(page, scope, value)) filled += 1;
       continue;
     }
 
-    const control = scope
-      .locator(
-        'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea, [contenteditable="true"], [role="textbox"]',
-      )
+    const preferred = scope
+      .locator('input.whsOnd, textarea.whsOnd, input[jsname="YPqjbf"], textarea[jsname="YPqjbf"]')
       .first();
+    const control = (await preferred.count()) > 0 ? preferred : scope.locator(GOOGLE_TEXT_CONTROL).first();
     if ((await control.count()) === 0) continue;
-
-    try {
-      await control.scrollIntoViewIfNeeded().catch(() => undefined);
-      await control.click({ timeout: 2_000 }).catch(() => undefined);
-      await control.fill(value, { timeout: 4_000 });
-      // Some Google Forms widgets need an Enter/Tab to commit.
-      await control.press("Tab").catch(() => undefined);
-      filled += 1;
-    } catch {
-      try {
-        await control.evaluate((node, nextValue) => {
-          const el = node as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
-          el.focus();
-          if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-            const proto =
-              el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-            Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, nextValue);
-            if (el.value !== nextValue) el.value = nextValue;
-          } else {
-            el.textContent = nextValue;
-          }
-          el.dispatchEvent(
-            new InputEvent("input", {
-              bubbles: true,
-              cancelable: true,
-              composed: true,
-              inputType: "insertFromPaste",
-              data: nextValue,
-            }),
-          );
-          el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-          el.blur();
-        }, value);
-        filled += 1;
-      } catch {
-        // leave for validation gate
-      }
+    const answerBox = scope.locator(".Xb9hP, .AgroKb, .Whvsme").first();
+    if ((await answerBox.count()) > 0) {
+      await answerBox.click({ timeout: 2_000 }).catch(() => undefined);
     }
+    if (await typeIntoHostControl(page, control, value)) filled += 1;
   }
   return filled;
 }
 
-async function plannedTextStillEmpty(page: Page, entries: FillPlanEntry[]): Promise<string[]> {
+async function hostEntryLooksFilled(page: Page, entry: FillPlanEntry): Promise<boolean> {
+  if (entry.status !== "filled") return true;
+  const scope = await findHostFieldScope(page, entry);
+  if (!scope) return false;
+  if (isHostFileUploadEntry(entry)) {
+    const text = ((await scope.innerText().catch(() => "")) || "").toLowerCase();
+    if (/uploaded|selected|attached|remove file|1 file/.test(text)) return true;
+    const fileInput = scope.locator('input[type="file"]').first();
+    if ((await fileInput.count()) > 0) {
+      const count = await fileInput
+        .evaluate((el) => (el as HTMLInputElement).files?.length ?? 0)
+        .catch(() => 0);
+      if (count > 0) return true;
+    }
+    return false;
+  }
+  const value = entry.value?.trim() ?? "";
+  if (
+    entry.type === "radio" ||
+    entry.type === "checkbox" ||
+    entry.type === "select" ||
+    (await scope.locator('[role="radio"], [role="checkbox"], [role="listbox"], select').count()) > 0
+  ) {
+    if ((await scope.locator('[aria-checked="true"], input:checked, [aria-selected="true"]').count()) > 0) {
+      return true;
+    }
+    const listbox = ((await scope.getByRole("listbox").innerText().catch(() => "")) || "").toLowerCase();
+    if (value && listbox.includes(value.toLowerCase()) && !/^(choose|select)/i.test(listbox.trim())) return true;
+    return false;
+  }
+  if (!value) return false;
+  const preferred = scope
+    .locator('input.whsOnd, textarea.whsOnd, input[jsname="YPqjbf"], textarea[jsname="YPqjbf"]')
+    .first();
+  const control = (await preferred.count()) > 0 ? preferred : scope.locator(GOOGLE_TEXT_CONTROL).first();
+  if ((await control.count()) === 0) return false;
+  return valuesMatch(await readControlValue(control), value);
+}
+
+async function plannedHostFieldsStillEmpty(page: Page, entries: FillPlanEntry[]): Promise<string[]> {
   const planned = entries.filter(
-    (entry) =>
-      entry.status === "filled" &&
-      Boolean(entry.value?.trim()) &&
-      entry.type !== "file" &&
-      entry.type !== "radio" &&
-      entry.type !== "checkbox" &&
-      entry.type !== "select" &&
-      !isHostFileUploadEntry(entry),
+    (entry) => entry.status === "filled" && (Boolean(entry.value?.trim()) || Boolean(entry.documentVersionId)),
   );
-  if (planned.length === 0) return [];
-  const reads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
-    page,
-    "read",
-    planned,
-  );
-  const emptyIds = new Set(reads.filter((row) => row.empty).map((row) => row.fieldId));
-  return planned.filter((entry) => emptyIds.has(entry.fieldId)).map((entry) => entry.fieldId);
+  const empty: string[] = [];
+  for (const entry of planned) {
+    if (!(await hostEntryLooksFilled(page, entry))) empty.push(entry.fieldId);
+  }
+  return empty;
 }
 
 function fillPlanEntriesFromCapture(
@@ -384,6 +540,7 @@ function fillPlanEntriesFromCapture(
       documentVersionId,
       type,
       label: captured?.label,
+      options: captured?.options,
     };
   });
 }
@@ -397,51 +554,17 @@ async function applyFillPlanToHostPage(input: {
   const { page, entries } = input;
   let filled = 0;
 
-  const applyResult = await evaluateFormDom<{ filled: number; skipped: number }>(page, "apply", entries);
-  filled += applyResult.filled;
+  await evaluateFormDom(page, "capture");
 
+  // Playwright pointer/keyboard first — Google Forms ignores in-page value setters.
   filled += await fillEntriesWithPlaywright(page, entries);
   filled += await fillChoiceEntriesWithPlaywright(page, entries);
 
-  const choiceEntries = entries.filter(
-    (entry) =>
-      entry.status === "filled" &&
-      Boolean(entry.value?.trim()) &&
-      (entry.type === "radio" || entry.type === "select" || entry.type === "checkbox"),
-  );
-  if (choiceEntries.length > 0) {
-    const choiceReads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
-      page,
-      "read",
-      choiceEntries,
-    );
-    const stillOpen = new Set((choiceReads ?? []).filter((row) => row.empty).map((row) => row.fieldId));
-    if (stillOpen.size > 0) {
-      const retry = choiceEntries.filter((entry) => stillOpen.has(entry.fieldId));
-      await evaluateFormDom(page, "apply", retry);
-      filled += await fillChoiceEntriesWithPlaywright(page, retry);
-    }
-  }
-
-  let stillEmpty = await plannedTextStillEmpty(page, entries);
-  if (stillEmpty.length > 0) {
-    await evaluateFormDom(
-      page,
-      "apply",
-      entries.filter((entry) => stillEmpty.includes(entry.fieldId)),
-    );
-    await fillEntriesWithPlaywright(
-      page,
-      entries.filter((entry) => stillEmpty.includes(entry.fieldId)),
-    );
-    stillEmpty = await plannedTextStillEmpty(page, entries);
-  }
-
+  const loaded = new Map<string, DocumentVersionUpload>();
   const versionIds = [
     ...new Set(entries.map((entry) => entry.documentVersionId).filter((id): id is string => Boolean(id))),
   ];
   if (versionIds.length > 0) {
-    const loaded = new Map<string, DocumentVersionUpload>();
     await Promise.all(
       versionIds.slice(0, 20).map(async (versionId) => {
         const upload = await loadDocumentVersionUpload({
@@ -457,7 +580,18 @@ async function applyFillPlanToHostPage(input: {
     }
   }
 
-  await page.waitForTimeout(600);
+  const stillEmpty = await plannedHostFieldsStillEmpty(page, entries);
+  if (stillEmpty.length > 0) {
+    const retry = entries.filter((entry) => stillEmpty.includes(entry.fieldId));
+    await evaluateFormDom(page, "apply", retry);
+    filled += await fillEntriesWithPlaywright(page, retry);
+    filled += await fillChoiceEntriesWithPlaywright(page, retry);
+    if (loaded.size > 0) {
+      filled += await applyHostFileUploads(page, retry, loaded);
+    }
+  }
+
+  await page.waitForTimeout(400);
   return filled;
 }
 
@@ -541,9 +675,11 @@ async function runPlaywrightHostSession(input: {
       });
 
     for (let step = 0; step < MAX_STEPS; step += 1) {
+      await harvestGoogleListboxOptions(page);
       let capture = await evaluateFormDom<CapturedFormPage>(page, "capture");
       if (capture.fields.length === 0) {
         await waitForPageReady(page);
+        await harvestGoogleListboxOptions(page);
         capture = await evaluateFormDom<CapturedFormPage>(page, "capture");
       }
 
@@ -581,6 +717,7 @@ async function runPlaywrightHostSession(input: {
         });
 
         // LLM planning can take long enough for Google Forms to re-render and drop stamps.
+        await harvestGoogleListboxOptions(page);
         const recapture = await evaluateFormDom<CapturedFormPage>(page, "capture");
         let liveCapture = recapture.fields.length > 0 ? recapture : capture;
         let livePlan = plan;
@@ -627,6 +764,34 @@ async function runPlaywrightHostSession(input: {
             filledFields: totalFilled,
             pausedForNeedsYou: true,
             missingRequired,
+          };
+        }
+
+        const requiredEmptyOnHost = async () => {
+          const requiredIds = new Set(
+            liveCapture.fields.filter((field) => field.required).map((field) => field.fieldId),
+          );
+          const empty = await plannedHostFieldsStillEmpty(page, entries);
+          return empty.filter((id) => requiredIds.has(id));
+        };
+        let blockedIds = await requiredEmptyOnHost();
+        if (blockedIds.length > 0) {
+          totalFilled += await applyFillPlanToHostPage({
+            page,
+            supabase: input.supabase,
+            userId: input.actor.userId,
+            entries: entries.filter((entry) => blockedIds.includes(entry.fieldId)),
+          });
+          blockedIds = await requiredEmptyOnHost();
+        }
+        if (blockedIds.length > 0) {
+          const labels = liveCapture.fields
+            .filter((field) => blockedIds.includes(field.fieldId))
+            .map((field) => field.label.trim() || field.fieldId);
+          await context.close();
+          return {
+            ok: false,
+            error: `Required host questions are still empty after fill, so Next/Submit would be rejected: ${labels.join("; ")}`,
           };
         }
       }

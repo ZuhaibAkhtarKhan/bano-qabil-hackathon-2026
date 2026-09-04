@@ -35,6 +35,7 @@ export type FillPlanEntry = {
   value?: string;
   type?: string;
   label?: string;
+  options?: string[];
   documentVersionId?: string;
 };
 
@@ -345,7 +346,21 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
         );
       } else if (item.querySelector('[role="listbox"]')) {
         type = "select";
-        options = uniqueOptionLabels(Array.from(item.querySelectorAll('[role="option"]')));
+        let stamped: string[] | undefined;
+        try {
+          const raw = item.getAttribute("data-1apply-options");
+          if (raw) {
+            const parsed = JSON.parse(raw) as unknown;
+            if (Array.isArray(parsed)) {
+              stamped = parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+            }
+          }
+        } catch {
+          stamped = undefined;
+        }
+        options =
+          (stamped && stamped.length > 0 ? stamped : undefined) ||
+          uniqueOptionLabels(Array.from(item.querySelectorAll('[role="option"]')));
       } else if (item.querySelector("select")) {
         type = "select";
         options = uniqueOptionLabels(
@@ -547,7 +562,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
         ) as HTMLElement | null;
         if (labelEl) activateToggle(labelEl);
       }
-      return isChecked(el) || isChecked(row) || true;
+      return isChecked(el) || isChecked(row);
     }
     return false;
   }
