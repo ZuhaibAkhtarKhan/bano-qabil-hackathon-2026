@@ -133,23 +133,27 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
     return value.trim() || null;
   }
 
-  function looksLikeFileField(item: Element, label: string): boolean {
+  function looksLikeFileField(item: Element): boolean {
     if (item.querySelector('input[type="file"]')) return true;
-    const text = `${label} ${item.textContent ?? ""}`.toLowerCase();
-    return /add file|upload file|attach|resume|cv|cover letter|portfolio|transcript|browse|choose (a )?file|drop files|google drive|photo|headshot|image upload/i.test(
-      text,
-    );
+    const buttons = Array.from(item.querySelectorAll('button, [role="button"], input[type="button"]'));
+    return buttons.some((btn) => {
+      if (!visible(btn)) return false;
+      const text = controlSignal(btn);
+      return /\b(add file|upload file|choose file|browse files|attach file|select file|drop files here)\b/i.test(
+        text,
+      );
+    });
   }
 
-  function looksLikeDateField(item: Element, label: string): boolean {
+  function looksLikeDateField(item: Element): boolean {
     if (item.querySelector('input[type="date"], input[type="datetime-local"], input[type="month"], input[type="week"]')) {
       return true;
     }
-    const text = `${label} ${item.textContent ?? ""}`.toLowerCase();
-    const hasParts =
-      Boolean(item.querySelector('[aria-label*="Month" i], [aria-label*="Day" i], [aria-label*="Year" i]')) ||
-      Boolean(item.querySelector('input[placeholder="MM"], input[placeholder="DD"], input[placeholder="YYYY"]'));
-    return hasParts || /\b(date of birth|birthdate|start date|end date|mm\/dd\/yyyy)\b/i.test(text);
+    const month = item.querySelector('[aria-label*="Month" i], input[placeholder="MM"]');
+    const day = item.querySelector('[aria-label*="Day" i], input[placeholder="DD"]');
+    const year = item.querySelector('[aria-label*="Year" i], input[placeholder="YYYY"]');
+    // Require a real date widget — not the word "year" in a radio or essay prompt.
+    return Boolean(month && (day || year));
   }
 
   function classifyButton(el: Element): "next" | "submit" | "other" {
@@ -304,11 +308,11 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
         options = Array.from(item.querySelectorAll('[role="option"]'))
           .map((node) => (node.getAttribute("aria-label") ?? node.textContent ?? "").trim())
           .filter(Boolean);
-      } else if (item.querySelector('input[type="file"]') || looksLikeFileField(item, label)) {
+      } else if (item.querySelector('input[type="file"]') || looksLikeFileField(item)) {
         type = "file";
       } else if (item.querySelector("textarea")) {
         type = "textarea";
-      } else if (looksLikeDateField(item, label)) {
+      } else if (looksLikeDateField(item)) {
         type = "date";
       } else {
         const native = item.querySelector("input") as HTMLInputElement | null;
@@ -527,9 +531,10 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
   function applyField(item: HTMLElement, entry: FillPlanEntry): boolean {
     if (entry.status !== "filled") return false;
     const type = entry.type ?? "text";
-    if (type === "file" || entry.documentVersionId) return false;
-
     const value = entry.value?.trim() ?? "";
+    const looksLikeUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    if (entry.documentVersionId || (type === "file" && (!value || looksLikeUuid))) return false;
     if (!value) return false;
 
     if (type === "radio" || item.querySelector('[role="radio"]')) {

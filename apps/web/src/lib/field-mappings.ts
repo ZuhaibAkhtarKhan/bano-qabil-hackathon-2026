@@ -53,10 +53,19 @@ export function fieldMappingFillScore(row: FieldMappingLike): number {
   return score;
 }
 
+/** Strip Need You / hash prefixes so host slugs match saved answers. */
+export function mappingKeyComparable(raw: string): string {
+  const stripped = String(raw ?? "")
+    .trim()
+    .replace(/^needs_you:/i, "")
+    .replace(/^f_[a-f0-9]{6,}$/i, "");
+  return normalizeMappingIdentity(stripped);
+}
+
 function mappingIdentity(row: FieldMappingLike): string {
   const fromLabel = normalizeMappingIdentity(String(row.label ?? ""));
   if (fromLabel.length >= 2) return `label:${fromLabel}`;
-  const fromKey = normalizeMappingIdentity(String(row.field_key ?? "").replace(/^f_[a-f0-9]+$/i, ""));
+  const fromKey = mappingKeyComparable(String(row.field_key ?? ""));
   if (fromKey.length >= 2) return `key:${fromKey}`;
   return `key:${String(row.field_key ?? "").trim().toLowerCase()}`;
 }
@@ -90,7 +99,17 @@ export function dedupeFieldMappings<T extends FieldMappingLike>(rows: T[]): T[] 
     }
   }
   // Still collapse exact field_key dupes among winners.
-  return dedupeFieldMappingsByKey([...byIdentity.values()]);
+  const byKey = dedupeFieldMappingsByKey([...byIdentity.values()]);
+  const bySlug = new Map<string, T>();
+  for (const row of byKey) {
+    const slug = mappingKeyComparable(String(row.field_key ?? "")) || normalizeMappingIdentity(String(row.label ?? ""));
+    const identity = slug.length >= 4 ? `slug:${slug}` : mappingIdentity(row);
+    const prev = bySlug.get(identity);
+    if (!prev || fieldMappingFillScore(row) > fieldMappingFillScore(prev)) {
+      bySlug.set(identity, row);
+    }
+  }
+  return [...bySlug.values()];
 }
 
 /** @deprecated Prefer dedupeFieldMappings — kept for call sites that only need key collapse. */
@@ -112,6 +131,22 @@ export function isUserConfirmedFieldMappingSource(source: string | null | undefi
   );
 }
 
+export function mappingHasStoredValue(row: Pick<FieldMappingLike, "value">): boolean {
+  return Boolean(String(row.value ?? "").trim());
+}
+
+/** Page recapture / empty batch_fill must not wipe a filled Need You answer. */
+export function shouldPreserveUserFieldMapping(prior: FieldMappingLike, incoming: FieldMappingLike): boolean {
+  if (!mappingHasStoredValue(prior)) return false;
+  if (
+    isUserConfirmedFieldMappingSource(prior.source) &&
+    (!isUserConfirmedFieldMappingSource(incoming.source) || !mappingHasStoredValue(incoming))
+  ) {
+    return true;
+  }
+  return fieldMappingFillScore(prior) >= fieldMappingFillScore(incoming) && !mappingHasStoredValue(incoming);
+}
+
 /** Find the best stored mapping for a live host field label/key. */
 export function matchStoredMappingForHostField<T extends FieldMappingLike>(
   stored: T[],
@@ -120,6 +155,7 @@ export function matchStoredMappingForHostField<T extends FieldMappingLike>(
   const hostKey = String(host.fieldKey ?? "").trim();
   const hostId = String(host.fieldId ?? "").trim();
   const hostLabel = normalizeMappingIdentity(String(host.label ?? ""));
+  const hostSlug = mappingKeyComparable(hostKey) || mappingKeyComparable(hostId) || hostLabel;
 
   let best: T | null = null;
   let bestScore = -1;
@@ -127,15 +163,25 @@ export function matchStoredMappingForHostField<T extends FieldMappingLike>(
   for (const row of stored) {
     const key = String(row.field_key ?? "").trim();
     const label = normalizeMappingIdentity(String(row.label ?? ""));
+    const rowSlug = mappingKeyComparable(key) || label;
     const exactKey = Boolean(hostKey && key === hostKey) || Boolean(hostId && key === hostId);
+    const slugKey = Boolean(hostSlug && rowSlug) && hostSlug.length >= 4 && hostSlug === rowSlug;
     const exactLabel = Boolean(hostLabel && label && hostLabel === label);
     const looseLabel =
       Boolean(hostLabel && label) && (hostLabel.includes(label) || label.includes(hostLabel)) && hostLabel.length >= 3;
-    if (!exactKey && !exactLabel && !looseLabel) continue;
+    const looseSlug =
+      Boolean(hostSlug && rowSlug) &&
+      hostSlug.length >= 8 &&
+      rowSlug.length >= 8 &&
+      hostSlug !== rowSlug &&
+      (hostSlug.includes(rowSlug) || rowSlug.includes(hostSlug));
+    if (!exactKey && !slugKey && !exactLabel && !looseLabel && !looseSlug) continue;
     let score = fieldMappingFillScore(row);
     if (exactKey) score += 80;
+    if (slugKey && !exactKey) score += 70;
     if (exactLabel) score += 60;
     if (looseLabel && !exactLabel) score += 20;
+    if (looseSlug) score += 15;
     if (score > bestScore) {
       best = row;
       bestScore = score;

@@ -56,15 +56,15 @@ export async function persistFormPageCapture(
       hostOptions: field.options ?? [],
       mappingOptionValues: field.options ?? [],
     });
-    const value = String(field.currentValue ?? "").slice(0, 4000);
     const fieldKey = String(field.fieldKey || field.fieldId).slice(0, 180);
     return {
       field_key: fieldKey,
       label: field.label.slice(0, 180),
-      value,
+      // Inventory only — live widget text must not clobber Need You / memory answers.
+      value: "",
       source: "page_capture",
-      confidence: value ? 0.95 : 0.1,
-      excluded_by_default: !value,
+      confidence: 0.1,
+      excluded_by_default: true,
       sensitive: false,
       field_type: field.type,
       options: choiceValues,

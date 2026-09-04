@@ -164,6 +164,14 @@ describe("batch fill uses Application Memory instead of uncited LLM output", () 
         source: "Needs You",
       }),
     ).toMatchObject({ status: "filled", value: "Amina Khan" });
+    expect(
+      storedMappingToFillResult({
+        fieldId: "f_portfolio",
+        fieldType: "file",
+        value: "https://example.com/portfolio",
+        source: "Needs You (this application only)",
+      }),
+    ).toMatchObject({ status: "filled", value: "https://example.com/portfolio" });
   });
 
   it("fills radio and checkbox choices from Application Memory even when the option text is short", () => {

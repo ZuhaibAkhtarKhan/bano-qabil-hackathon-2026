@@ -51,3 +51,20 @@ export function mappingBlocksPageAdvance(row: {
   // Inventory rows (page_capture) with no required flag are optional until proven otherwise.
   return !Boolean(row.excluded_by_default);
 }
+
+const VERSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Real file uploads are skipped by the text/choice fillers.
+ * Questions misclassified as `file` but holding Need You text must still type.
+ */
+export function isHostFileUploadEntry(entry: {
+  type?: string | null;
+  documentVersionId?: string | null;
+  value?: string | null;
+}): boolean {
+  if (entry.documentVersionId) return true;
+  if (entry.type !== "file") return false;
+  const value = String(entry.value ?? "").trim();
+  return !value || VERSION_ID.test(value);
+}

@@ -7,7 +7,7 @@ import type { Actor } from "@/auth/actor";
 import { logError } from "@/lib/log";
 import { persistFormPageCapture } from "@/server/extension/persist-form-page-capture";
 import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
-import { requiredHostFieldsMissing } from "@/server/applications/host-page-fill";
+import { isHostFileUploadEntry, requiredHostFieldsMissing } from "@/server/applications/host-page-fill";
 
 import {
   executeFormDomInPage,
@@ -243,7 +243,7 @@ async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): 
   let filled = 0;
   for (const entry of entries) {
     if (entry.status !== "filled") continue;
-    if (entry.type === "file" || entry.documentVersionId) continue;
+    if (isHostFileUploadEntry(entry)) continue;
     const value = entry.value?.trim() ?? "";
     if (!value) continue;
     if (entry.type === "radio" || entry.type === "checkbox" || entry.type === "select") continue;
@@ -313,7 +313,7 @@ async function plannedTextStillEmpty(page: Page, entries: FillPlanEntry[]): Prom
       entry.type !== "radio" &&
       entry.type !== "checkbox" &&
       entry.type !== "select" &&
-      !entry.documentVersionId,
+      !isHostFileUploadEntry(entry),
   );
   if (planned.length === 0) return [];
   const reads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
@@ -323,6 +323,109 @@ async function plannedTextStillEmpty(page: Page, entries: FillPlanEntry[]): Prom
   );
   const emptyIds = new Set(reads.filter((row) => row.empty).map((row) => row.fieldId));
   return planned.filter((entry) => emptyIds.has(entry.fieldId)).map((entry) => entry.fieldId);
+}
+
+function fillPlanEntriesFromCapture(
+  capture: CapturedFormPage,
+  plan: {
+    fields: Array<{
+      fieldId: string;
+      status: string;
+      value?: string | null;
+      documentVersionId?: string | null;
+    }>;
+  },
+): FillPlanEntry[] {
+  return plan.fields.map((field) => {
+    const captured = capture.fields.find((item) => item.fieldId === field.fieldId);
+    const documentVersionId =
+      field.documentVersionId ||
+      (captured?.type === "file" && field.value && VERSION_ID.test(field.value) ? field.value : undefined);
+    const capturedType = captured?.type ?? (documentVersionId ? "file" : undefined);
+    const type =
+      capturedType === "file" && !documentVersionId && String(field.value ?? "").trim() ? "text" : capturedType;
+    return {
+      fieldId: field.fieldId,
+      status: field.status === "filled" ? "filled" : "need_you",
+      value: documentVersionId ? undefined : field.value ?? undefined,
+      documentVersionId,
+      type,
+      label: captured?.label,
+    };
+  });
+}
+
+async function applyFillPlanToHostPage(input: {
+  page: Page;
+  supabase: SupabaseClient;
+  userId: string;
+  entries: FillPlanEntry[];
+}): Promise<number> {
+  const { page, entries } = input;
+  let filled = 0;
+
+  const applyResult = await evaluateFormDom<{ filled: number; skipped: number }>(page, "apply", entries);
+  filled += applyResult.filled;
+
+  filled += await fillEntriesWithPlaywright(page, entries);
+  filled += await fillChoiceEntriesWithPlaywright(page, entries);
+
+  const choiceEntries = entries.filter(
+    (entry) =>
+      entry.status === "filled" &&
+      Boolean(entry.value?.trim()) &&
+      (entry.type === "radio" || entry.type === "select" || entry.type === "checkbox"),
+  );
+  if (choiceEntries.length > 0) {
+    const choiceReads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
+      page,
+      "read",
+      choiceEntries,
+    );
+    const stillOpen = new Set((choiceReads ?? []).filter((row) => row.empty).map((row) => row.fieldId));
+    if (stillOpen.size > 0) {
+      const retry = choiceEntries.filter((entry) => stillOpen.has(entry.fieldId));
+      await evaluateFormDom(page, "apply", retry);
+      filled += await fillChoiceEntriesWithPlaywright(page, retry);
+    }
+  }
+
+  let stillEmpty = await plannedTextStillEmpty(page, entries);
+  if (stillEmpty.length > 0) {
+    await evaluateFormDom(
+      page,
+      "apply",
+      entries.filter((entry) => stillEmpty.includes(entry.fieldId)),
+    );
+    await fillEntriesWithPlaywright(
+      page,
+      entries.filter((entry) => stillEmpty.includes(entry.fieldId)),
+    );
+    stillEmpty = await plannedTextStillEmpty(page, entries);
+  }
+
+  const versionIds = [
+    ...new Set(entries.map((entry) => entry.documentVersionId).filter((id): id is string => Boolean(id))),
+  ];
+  if (versionIds.length > 0) {
+    const loaded = new Map<string, DocumentVersionUpload>();
+    await Promise.all(
+      versionIds.slice(0, 20).map(async (versionId) => {
+        const upload = await loadDocumentVersionUpload({
+          supabase: input.supabase,
+          userId: input.userId,
+          versionId,
+        });
+        if (upload) loaded.set(versionId, upload);
+      }),
+    );
+    if (loaded.size > 0) {
+      filled += await applyHostFileUploads(page, entries, loaded);
+    }
+  }
+
+  await page.waitForTimeout(600);
+  return filled;
 }
 
 export async function runPlaywrightHostSubmit(input: {
@@ -436,6 +539,14 @@ async function runPlaywrightHostSession(input: {
           hostFieldKeyById,
         });
 
+        const entries = fillPlanEntriesFromCapture(capture, plan);
+        totalFilled += await applyFillPlanToHostPage({
+          page,
+          supabase: input.supabase,
+          userId: input.actor.userId,
+          entries,
+        });
+
         const missingRequired = requiredHostFieldsMissing(capture.fields, plan.fields);
         if (missingRequired.length > 0) {
           await context.close();
@@ -448,90 +559,6 @@ async function runPlaywrightHostSession(input: {
             missingRequired,
           };
         }
-
-        const entries: FillPlanEntry[] = plan.fields.map((field) => {
-          const captured = capture.fields.find((item) => item.fieldId === field.fieldId);
-          const documentVersionId =
-            field.documentVersionId ||
-            (captured?.type === "file" && field.value && VERSION_ID.test(field.value) ? field.value : undefined);
-          return {
-            fieldId: field.fieldId,
-            status: field.status,
-            value: documentVersionId ? undefined : field.value,
-            documentVersionId,
-            type: captured?.type ?? (documentVersionId ? "file" : undefined),
-            label: captured?.label,
-          };
-        });
-
-        const applyResult = await evaluateFormDom<{ filled: number; skipped: number }>(
-          page,
-          "apply",
-          entries,
-        );
-        totalFilled += applyResult.filled;
-
-        // Playwright fill is more reliable for Google Forms controlled inputs.
-        totalFilled += await fillEntriesWithPlaywright(page, entries);
-        totalFilled += await fillChoiceEntriesWithPlaywright(page, entries);
-
-        const choiceEntries = entries.filter(
-          (entry) =>
-            entry.status === "filled" &&
-            Boolean(entry.value?.trim()) &&
-            (entry.type === "radio" || entry.type === "select" || entry.type === "checkbox"),
-        );
-        if (choiceEntries.length > 0) {
-          const choiceReads = await evaluateFormDom<Array<{ fieldId: string; value: string; empty: boolean }>>(
-            page,
-            "read",
-            choiceEntries,
-          );
-          const stillOpen = new Set(
-            (choiceReads ?? []).filter((row) => row.empty).map((row) => row.fieldId),
-          );
-          if (stillOpen.size > 0) {
-            const retry = choiceEntries.filter((entry) => stillOpen.has(entry.fieldId));
-            await evaluateFormDom(page, "apply", retry);
-            totalFilled += await fillChoiceEntriesWithPlaywright(page, retry);
-          }
-        }
-
-        let stillEmpty = await plannedTextStillEmpty(page, entries);
-        if (stillEmpty.length > 0) {
-          await evaluateFormDom(page, "apply", entries.filter((entry) => stillEmpty.includes(entry.fieldId)));
-          await fillEntriesWithPlaywright(
-            page,
-            entries.filter((entry) => stillEmpty.includes(entry.fieldId)),
-          );
-          stillEmpty = await plannedTextStillEmpty(page, entries);
-        }
-
-        const versionIds = [
-          ...new Set(
-            entries
-              .map((entry) => entry.documentVersionId)
-              .filter((id): id is string => Boolean(id)),
-          ),
-        ];
-        if (versionIds.length > 0) {
-          const loaded = new Map<string, DocumentVersionUpload>();
-          await Promise.all(
-            versionIds.slice(0, 20).map(async (versionId) => {
-              const upload = await loadDocumentVersionUpload({
-                supabase: input.supabase,
-                userId: input.actor.userId,
-                versionId,
-              });
-              if (upload) loaded.set(versionId, upload);
-            }),
-          );
-          if (loaded.size > 0) {
-            totalFilled += await applyHostFileUploads(page, entries, loaded);
-          }
-        }
-
-        await page.waitForTimeout(600);
       }
 
       const advance = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "next");

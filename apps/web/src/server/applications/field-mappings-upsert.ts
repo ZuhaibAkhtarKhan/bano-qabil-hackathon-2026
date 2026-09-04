@@ -1,10 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  dedupeFieldMappings,
-  fieldMappingFillScore,
-  type FieldMappingLike,
-} from "@/lib/field-mappings";
+import { dedupeFieldMappings, fieldMappingFillScore, shouldPreserveUserFieldMapping } from "@/lib/field-mappings";
 
 export type FieldMappingWriteRow = {
   field_key: string;
@@ -61,11 +57,8 @@ export async function upsertApplicationFieldMappings(input: {
       ? priors.reduce((a, b) => (fieldMappingFillScore(b) > fieldMappingFillScore(a) ? b : a))
       : null;
 
-    const incomingScore = fieldMappingFillScore(incoming);
-    const priorScore = bestPrior ? fieldMappingFillScore(bestPrior) : -1;
-
-    // Do not let empty inventory clobber a filled answer.
-    if (bestPrior && priorScore >= incomingScore && mappingHasValue(bestPrior) && !mappingHasValue(incoming)) {
+    // Do not let page recapture / empty batch_fill clobber a filled Need You answer.
+    if (bestPrior && shouldPreserveUserFieldMapping(bestPrior, incoming)) {
       for (const prior of priors) {
         if (prior.id !== bestPrior.id) deleteIds.add(String(prior.id));
       }
@@ -115,10 +108,6 @@ export async function upsertApplicationFieldMappings(input: {
   await collapseDuplicateFieldMappings({ supabase, userId, applicationId });
 
   return written;
-}
-
-function mappingHasValue(row: FieldMappingLike): boolean {
-  return Boolean(String(row.value ?? "").trim());
 }
 
 /** Collapse duplicate field_keys and duplicate labels (filled wins). */

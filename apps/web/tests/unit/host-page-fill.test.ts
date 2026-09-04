@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isHostFileUploadEntry,
   mappingBlocksPageAdvance,
   requiredHostFieldsMissing,
 } from "@/server/applications/host-page-fill";
@@ -28,6 +29,32 @@ describe("requiredHostFieldsMissing", () => {
       [{ fieldId: "resume", status: "filled", documentVersionId: "11111111-1111-4111-8111-111111111111" }],
     );
     expect(missing).toEqual([]);
+  });
+});
+
+describe("isHostFileUploadEntry", () => {
+  it("treats Need You prose on a misclassified file field as text to type", () => {
+    expect(
+      isHostFileUploadEntry({
+        type: "file",
+        value: "I built a portfolio at example.com",
+      }),
+    ).toBe(false);
+  });
+
+  it("still treats document version ids as uploads", () => {
+    expect(
+      isHostFileUploadEntry({
+        type: "file",
+        value: "11111111-1111-4111-8111-111111111111",
+      }),
+    ).toBe(true);
+    expect(
+      isHostFileUploadEntry({
+        type: "text",
+        documentVersionId: "11111111-1111-4111-8111-111111111111",
+      }),
+    ).toBe(true);
   });
 });
 

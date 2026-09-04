@@ -5,6 +5,7 @@ import {
   isUserConfirmedFieldMappingSource,
   matchStoredMappingForHostField,
   normalizeMappingIdentity,
+  shouldPreserveUserFieldMapping,
 } from "@/lib/field-mappings";
 
 describe("field mapping identity", () => {
@@ -60,6 +61,26 @@ describe("field mapping identity", () => {
     );
   });
 
+  it("matches Need You answers stored under needs_you: slugs to live host fields", () => {
+    const stored = [
+      {
+        id: "ny",
+        field_key: "needs_you:rate_your_communication_skills",
+        label: "How would you rate your communication?",
+        value: "Excellent",
+        source: "Needs You (this application only)",
+        confidence: 1,
+        excluded_by_default: false,
+      },
+    ];
+    const match = matchStoredMappingForHostField(stored, {
+      fieldKey: "rate_your_communication_skills",
+      fieldId: "f_abc12345",
+      label: "Rate your communication skills",
+    });
+    expect(match?.value).toBe("Excellent");
+  });
+
   it("matches host Email to stored Email * mapping", () => {
     const stored = [
       {
@@ -77,6 +98,30 @@ describe("field mapping identity", () => {
       label: "Email",
     });
     expect(match?.value).toBe("zuhaib@example.com");
+  });
+
+  it("collapses needs_you: keys onto the same host slug", () => {
+    const rows = dedupeFieldMappings([
+      {
+        id: "empty",
+        field_key: "rate_your_communication_skills",
+        label: "Rate your communication skills",
+        value: "",
+        source: "page_capture",
+        confidence: 0.1,
+        excluded_by_default: true,
+      },
+      {
+        id: "filled",
+        field_key: "needs_you:rate_your_communication_skills",
+        label: "How would you rate your communication?",
+        value: "Excellent",
+        source: "Needs You (this application only)",
+        confidence: 1,
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("filled");
   });
 
   it("keeps a filled Need You answer over an empty recapture of the same question", () => {
@@ -112,5 +157,24 @@ describe("isUserConfirmedFieldMappingSource", () => {
     expect(isUserConfirmedFieldMappingSource("Application Memory (Needs You)")).toBe(true);
     expect(isUserConfirmedFieldMappingSource("batch_fill")).toBe(false);
     expect(isUserConfirmedFieldMappingSource("Your kit refresh - Application Memory")).toBe(false);
+  });
+
+  it("does not let page_capture option text replace a filled Need You answer", () => {
+    expect(
+      shouldPreserveUserFieldMapping(
+        {
+          field_key: "year_of_study",
+          value: "3rd",
+          source: "Needs You (this application only)",
+          confidence: 1,
+        },
+        {
+          field_key: "year_of_study",
+          value: "1st 2nd 3rd 4th",
+          source: "page_capture",
+          confidence: 0.95,
+        },
+      ),
+    ).toBe(true);
   });
 });
