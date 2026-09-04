@@ -287,7 +287,7 @@ export const loadNeedsYouRawContext = cache(async (): Promise<NeedsYouRawContext
     supabase
       .from("field_mappings")
       .select(
-        "id, application_id, field_key, label, value, confidence, excluded_by_default, sensitive, created_at, field_type, options, meta",
+        "id, application_id, field_key, label, value, source, confidence, excluded_by_default, sensitive, created_at, field_type, options, meta",
       )
       .eq("user_id", user.id)
       .in("application_id", appIds)

@@ -5,6 +5,7 @@ import { logError } from "@/lib/log";
 import { parseWorkspacePreferences } from "@/lib/workspace-preferences";
 
 import {
+  queueHostFillContinueJob,
   queueHostPrefillJob,
   scheduleHostSubmitJob,
   scheduleHostSubmitWhenFullyComplete,
@@ -84,17 +85,47 @@ export async function syncHostAutomationForApplication(input: {
   await kickHostSubmitWorkerIfEnabled();
 }
 
-/** After Need You edits, queue host submit when every field is filled and no deadline is set. */
-export async function tryNoDeadlineHostSubmitIfComplete(input: {
+/** After Need You edits, continue the page-loop when required fields are ready. */
+export async function tryContinueHostFillAfterNeedsYou(input: {
   supabase: SupabaseClient;
   actor: Actor;
   applicationId: string;
 }): Promise<void> {
   const prefs = parseWorkspacePreferences(input.actor.profile.preferences);
+  const { mappingBlocksPageAdvance } = await import("./host-page-fill");
+  const { dedupeFieldMappings } = await import("@/lib/field-mappings");
+
+  const { data: mappings } = await input.supabase
+    .from("field_mappings")
+    .select("id, field_key, label, value, source, confidence, excluded_by_default, meta")
+    .eq("application_id", input.applicationId)
+    .eq("user_id", input.actor.userId);
+
+  const blocking = dedupeFieldMappings(mappings ?? []).some((row) => mappingBlocksPageAdvance(row));
+  if (blocking) return;
+
+  const continued = await queueHostFillContinueJob({
+    ...input,
+    clickFinalSubmit: prefs.prepareAndSendIfSilent,
+  });
+  if (continued.ok) {
+    await kickHostSubmitWorkerIfEnabled();
+    return;
+  }
+
   if (!prefs.prepareAndSendIfSilent) return;
 
   const result = await scheduleHostSubmitWhenFullyComplete(input);
   if (result.ok) {
     await kickHostSubmitWorkerIfEnabled();
   }
+}
+
+/** After Need You edits, queue host submit when every field is filled and no deadline is set. */
+export async function tryNoDeadlineHostSubmitIfComplete(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+}): Promise<void> {
+  await tryContinueHostFillAfterNeedsYou(input);
 }

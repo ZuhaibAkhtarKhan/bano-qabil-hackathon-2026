@@ -5,6 +5,7 @@ import type { Actor } from "@/auth/actor";
 import { isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
 import { normalizeNeedsYouFieldType } from "@/lib/needs-you-field-kinds";
 import { dedupeFieldMappings } from "@/lib/field-mappings";
+import { mappingBlocksPageAdvance } from "@/server/applications/host-page-fill";
 
 const CLOSED_STATUSES = new Set(["submitted", "rejected", "withdrawn", "archived", "offer"]);
 
@@ -16,7 +17,7 @@ export type HostSubmitReadiness = {
   openCount?: number;
 };
 
-/** True when every host form field is filled (required + optional). Deadline Need You is ignored. */
+/** True when every required host form field is filled. Optional Need You items do not block. */
 export async function assessNoDeadlineHostSubmitReadiness(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -74,9 +75,7 @@ export async function assessNoDeadlineHostSubmitReadiness(input: {
   const uniqueMappings = dedupeFieldMappings(mappings ?? []);
 
   for (const mapping of uniqueMappings) {
-    const value = String(mapping.value ?? "").trim();
-    const confidence = Number(mapping.confidence ?? 0);
-    if (!value || confidence < 0.75 || Boolean(mapping.excluded_by_default)) {
+    if (mappingBlocksPageAdvance(mapping)) {
       openCount += 1;
     }
   }

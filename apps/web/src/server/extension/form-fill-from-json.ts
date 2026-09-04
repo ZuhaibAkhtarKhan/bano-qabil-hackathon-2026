@@ -111,8 +111,12 @@ export async function fillFormPageFromJson(input: {
   actor: Actor;
   applicationId: string;
   page: FormPageCapture;
+  hostFieldKeyById?: Record<string, string>;
 }) {
   const capture = FormPageCaptureSchema.parse(input.page);
+  const hostFieldKeyById =
+    input.hostFieldKeyById ??
+    Object.fromEntries(capture.fields.map((field) => [field.fieldId, field.fieldKey || field.fieldId]));
   const result = await runBatchFillPlan({
     supabase: input.supabase,
     actor: input.actor,
@@ -121,6 +125,7 @@ export async function fillFormPageFromJson(input: {
     fields: captureToBatchFields(capture),
     origin: capture.origin,
     hazards: capture.hazards,
+    hostFieldKeyById,
   });
 
   return FormFillPlanResponseSchema.parse({

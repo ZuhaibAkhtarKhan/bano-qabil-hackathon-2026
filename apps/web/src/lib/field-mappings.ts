@@ -101,6 +101,17 @@ export function mappingHasUsableFill(row: FieldMappingLike, minConfidence = 0.75
   return Boolean(value) && Number(row.confidence ?? 0) >= minConfidence && !row.excluded_by_default;
 }
 
+/** User-saved answers must survive kit rematch (including Fill just for this application). */
+export function isUserConfirmedFieldMappingSource(source: string | null | undefined): boolean {
+  const value = String(source ?? "").toLowerCase();
+  return (
+    value.includes("needs you") ||
+    value.includes("this application only") ||
+    value.includes("application tab edit") ||
+    value.includes("user (extension")
+  );
+}
+
 /** Find the best stored mapping for a live host field label/key. */
 export function matchStoredMappingForHostField<T extends FieldMappingLike>(
   stored: T[],

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   dedupeFieldMappings,
+  isUserConfirmedFieldMappingSource,
   matchStoredMappingForHostField,
   normalizeMappingIdentity,
 } from "@/lib/field-mappings";
@@ -76,5 +77,40 @@ describe("field mapping identity", () => {
       label: "Email",
     });
     expect(match?.value).toBe("zuhaib@example.com");
+  });
+
+  it("keeps a filled Need You answer over an empty recapture of the same question", () => {
+    const rows = dedupeFieldMappings([
+      {
+        id: "empty",
+        field_key: "f_new_session",
+        label: "Are you authorized to work in the United States?",
+        value: "",
+        source: "page_capture",
+        confidence: 0.1,
+        excluded_by_default: true,
+      },
+      {
+        id: "filled",
+        field_key: "are_you_authorized_to_work_in_the_united_states",
+        label: "Are you authorized to work in the United States?",
+        value: "Yes",
+        source: "Needs You (this application only)",
+        confidence: 1,
+        excluded_by_default: false,
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("filled");
+    expect(rows[0]?.value).toBe("Yes");
+  });
+});
+
+describe("isUserConfirmedFieldMappingSource", () => {
+  it("protects Need You and per-application answers from kit wipe", () => {
+    expect(isUserConfirmedFieldMappingSource("Needs You (this application only)")).toBe(true);
+    expect(isUserConfirmedFieldMappingSource("Application Memory (Needs You)")).toBe(true);
+    expect(isUserConfirmedFieldMappingSource("batch_fill")).toBe(false);
+    expect(isUserConfirmedFieldMappingSource("Your kit refresh - Application Memory")).toBe(false);
   });
 });

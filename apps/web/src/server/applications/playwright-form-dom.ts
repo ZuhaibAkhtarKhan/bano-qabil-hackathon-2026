@@ -270,7 +270,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
       const key = label.slice(0, 120);
       const fieldKey =
         key.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 80) || `field_${fields.length}`;
-      const fieldId = stableFieldId(fieldKey, fieldKey, String(fields.length));
+      const fieldId = stableFieldId(fieldKey, fieldKey, fieldKey);
 
       let type = "text";
       let options: string[] | undefined;
@@ -301,15 +301,34 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
       item.setAttribute(BATCH_ATTR, fieldId);
       if (seen.has(fieldId)) continue;
       seen.add(fieldId);
+      const requiredMarker = Boolean(
+        item.querySelector(
+          '[aria-required="true"], .freebirdFormviewerComponentsQuestionBaseRequiredAsterisk',
+        ),
+      );
+      const headingRequired = /\brequired\b/i.test(heading?.textContent ?? "");
+      const looksOptional = /\boptional\b/i.test(item.textContent ?? "");
+      const checkedChoice = item.querySelector(
+        '[role="radio"][aria-checked="true"], [role="checkbox"][aria-checked="true"], input:checked',
+      );
+      const nativeValue = (
+        item.querySelector("input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea") as
+          | HTMLInputElement
+          | HTMLTextAreaElement
+          | null
+      )?.value;
+      const currentValue =
+        (checkedChoice
+          ? (checkedChoice.getAttribute("aria-label") ?? checkedChoice.textContent ?? "").trim()
+          : nativeValue?.trim()) || undefined;
       fields.push({
         fieldId,
         fieldKey,
         type: normalizeBatchFieldType(type),
         label,
-        required:
-          /required|\*/i.test(item.textContent ?? "") ||
-          Boolean(item.querySelector('[aria-required="true"], .freebirdFormviewerComponentsQuestionBaseRequiredAsterisk')),
+        required: !looksOptional && (requiredMarker || headingRequired),
         options,
+        currentValue,
       });
     }
 

@@ -7,7 +7,7 @@ import {
 import { cache } from "react";
 
 import { sourceLabelFromOpportunity } from "@/lib/dashboard-display";
-import { fieldMappingFillScore } from "@/lib/field-mappings";
+import { dedupeFieldMappings, fieldMappingFillScore } from "@/lib/field-mappings";
 import {
   detectProfileMemoryField,
   isNeedsYouSystemNoise,
@@ -418,8 +418,23 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
       });
     }
 
-    const appMappings = (fieldMappings ?? [])
-      .filter((row) => String(row.application_id) === applicationId)
+    const appMappings = dedupeFieldMappings(
+      (fieldMappings ?? [])
+        .filter((row) => String(row.application_id) === applicationId)
+        .map((row) => ({
+          id: String(row.id ?? ""),
+          application_id: row.application_id,
+          field_key: String(row.field_key ?? ""),
+          label: (row.label as string | null) ?? null,
+          value: (row.value as string | null) ?? null,
+          source: (row.source as string | null) ?? null,
+          confidence: (row.confidence as number | null) ?? null,
+          excluded_by_default: (row.excluded_by_default as boolean | null) ?? null,
+          field_type: (row.field_type as string | null) ?? null,
+          options: row.options,
+          meta: row.meta,
+        })),
+    )
       .slice()
       .sort(
         (a, b) =>

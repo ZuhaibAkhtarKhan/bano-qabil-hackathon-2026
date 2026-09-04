@@ -56,13 +56,15 @@ export async function persistFormPageCapture(
       hostOptions: field.options ?? [],
       mappingOptionValues: field.options ?? [],
     });
+    const value = String(field.currentValue ?? "").slice(0, 4000);
+    const fieldKey = String(field.fieldKey || field.fieldId).slice(0, 180);
     return {
-      field_key: String(field.fieldId).slice(0, 180),
+      field_key: fieldKey,
       label: field.label.slice(0, 180),
-      value: String(field.currentValue ?? "").slice(0, 4000),
+      value,
       source: "page_capture",
-      confidence: 0.1,
-      excluded_by_default: true,
+      confidence: value ? 0.95 : 0.1,
+      excluded_by_default: !value,
       sensitive: false,
       field_type: field.type,
       options: choiceValues,

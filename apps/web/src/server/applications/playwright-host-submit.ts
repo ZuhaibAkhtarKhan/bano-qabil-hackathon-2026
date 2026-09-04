@@ -4,7 +4,9 @@ import type { Page } from "playwright";
 
 import type { Actor } from "@/auth/actor";
 import { logError } from "@/lib/log";
+import { persistFormPageCapture } from "@/server/extension/persist-form-page-capture";
 import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
+import { requiredHostFieldsMissing } from "@/server/applications/host-page-fill";
 
 import {
   executeFormDomInPage,
@@ -28,6 +30,14 @@ async function evaluateFormDom<T>(
 
 export type ServerHostSubmitResult =
   | { ok: true; submitted: boolean; hostSubmitClicked: boolean; filledFields: number }
+  | {
+      ok: true;
+      submitted: false;
+      hostSubmitClicked: false;
+      filledFields: number;
+      pausedForNeedsYou: true;
+      missingRequired: string[];
+    }
   | { ok: false; blockedReason: string; error?: string; hostSubmitClicked?: boolean }
   | { ok: false; error: string; blockedReason?: string; hostSubmitClicked?: boolean };
 
@@ -82,6 +92,35 @@ async function clickHostSubmitWithPlaywright(page: Page): Promise<boolean> {
  * Playwright's locator.fill() updates React/Google Forms state more reliably than
  * DOM property setters alone. Used after (or instead of) in-page apply.
  */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Click radios / selects from saved headless memory — Google Forms often ignores DOM-only clicks. */
+async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
+  let filled = 0;
+  for (const entry of entries) {
+    if (entry.status !== "filled") continue;
+    if (entry.type !== "radio" && entry.type !== "select" && entry.type !== "checkbox") continue;
+    const value = entry.value?.trim() ?? "";
+    if (!value) continue;
+    const scope = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
+    if ((await scope.count()) === 0) continue;
+    try {
+      const option = scope.getByRole(entry.type === "checkbox" ? "checkbox" : "radio", {
+        name: new RegExp(escapeRegExp(value), "i"),
+      }).first();
+      if ((await option.count()) === 0) continue;
+      await option.scrollIntoViewIfNeeded().catch(() => undefined);
+      await option.click({ timeout: 3_000 });
+      filled += 1;
+    } catch {
+      // leave for in-page apply / validation
+    }
+  }
+  return filled;
+}
+
 async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
   let filled = 0;
   for (const entry of entries) {
@@ -217,6 +256,14 @@ async function runPlaywrightHostSession(input: {
     let hostSubmitClicked = false;
     let lastNavigationReason = "no-navigation";
 
+    const { data: applicationRow } = await input.supabase
+      .from("applications")
+      .select("opportunity_id")
+      .eq("id", input.applicationId)
+      .eq("user_id", input.actor.userId)
+      .maybeSingle();
+    const opportunityId = applicationRow?.opportunity_id ? String(applicationRow.opportunity_id) : null;
+
     for (let step = 0; step < MAX_STEPS; step += 1) {
       const capture = (await evaluateFormDom<CapturedFormPage>(page, "capture"));
 
@@ -245,12 +292,39 @@ async function runPlaywrightHostSession(input: {
           })),
         });
 
+        if (opportunityId) {
+          await persistFormPageCapture(
+            input.supabase,
+            input.actor.userId,
+            input.applicationId,
+            opportunityId,
+            pageCapture,
+          );
+        }
+
+        const hostFieldKeyById = Object.fromEntries(
+          capture.fields.map((field) => [field.fieldId, field.fieldKey || field.fieldId]),
+        );
         const plan = await fillFormPageFromJson({
           supabase: input.supabase,
           actor: input.actor,
           applicationId: input.applicationId,
           page: pageCapture,
+          hostFieldKeyById,
         });
+
+        const missingRequired = requiredHostFieldsMissing(capture.fields, plan.fields);
+        if (missingRequired.length > 0) {
+          await context.close();
+          return {
+            ok: true,
+            submitted: false,
+            hostSubmitClicked: false,
+            filledFields: totalFilled,
+            pausedForNeedsYou: true,
+            missingRequired,
+          };
+        }
 
         const entries: FillPlanEntry[] = plan.fields.map((field) => ({
           fieldId: field.fieldId,
@@ -269,6 +343,7 @@ async function runPlaywrightHostSession(input: {
 
         // Playwright fill is more reliable for Google Forms controlled inputs.
         totalFilled += await fillEntriesWithPlaywright(page, entries);
+        totalFilled += await fillChoiceEntriesWithPlaywright(page, entries);
 
         let stillEmpty = await plannedTextStillEmpty(page, entries);
         if (stillEmpty.length > 0) {
@@ -305,28 +380,6 @@ async function runPlaywrightHostSession(input: {
         }
 
         await page.waitForTimeout(600);
-
-        const plannedFilled = entries.filter(
-          (entry) => entry.status === "filled" && (Boolean(entry.value?.trim()) || Boolean(entry.documentVersionId)),
-        );
-        if (input.clickFinalSubmit && capture.fields.length > 0 && plannedFilled.length === 0) {
-          return {
-            ok: false,
-            error:
-              "Host form has fields to fill, but Application Memory / Need You had no values ready. Complete Need You, then retry.",
-          };
-        }
-
-        if (input.clickFinalSubmit && stillEmpty.length > 0) {
-          const labels = capture.fields
-            .filter((field) => stillEmpty.includes(field.fieldId))
-            .map((field) => field.label)
-            .slice(0, 4);
-          return {
-            ok: false,
-            error: `Could not fill required host fields before submit${labels.length ? `: ${labels.join(", ")}` : ""}.`,
-          };
-        }
       }
 
       const advance = await evaluateFormDom<{ clicked: boolean; reason?: string }>(page, "next");

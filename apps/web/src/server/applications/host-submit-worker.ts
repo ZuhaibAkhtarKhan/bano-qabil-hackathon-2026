@@ -236,6 +236,19 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
           continue;
         }
 
+        if (result.ok && "pausedForNeedsYou" in result && result.pausedForNeedsYou) {
+          await completeHostPrefillJob({
+            supabase,
+            actor,
+            jobId: job.id,
+            filledFields: result.filledFields,
+            pausedForNeedsYou: true,
+            missingRequired: result.missingRequired,
+          });
+          blocked += 1;
+          continue;
+        }
+
         if (result.ok) {
           await completeHostPrefillJob({
             supabase,
@@ -276,6 +289,20 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         sourceUrl: job.source_url,
         clickFinalSubmit: true,
       });
+
+      if (result.ok && "pausedForNeedsYou" in result && result.pausedForNeedsYou) {
+        await completeHostSubmitJob({
+          supabase,
+          actor,
+          jobId: job.id,
+          submitted: false,
+          hostSubmitClicked: false,
+          pausedForNeedsYou: true,
+          missingRequired: result.missingRequired,
+        });
+        blocked += 1;
+        continue;
+      }
 
       if (result.ok && result.submitted && result.hostSubmitClicked) {
         await completeHostSubmitJob({

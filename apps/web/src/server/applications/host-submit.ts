@@ -78,6 +78,8 @@ async function upsertHostJob(input: {
   nextAction: string;
   eventTitle: string;
   eventBody: string;
+  /** Re-open a completed/failed job so page-loop can resume after Need You. */
+  reopenIfComplete?: boolean;
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const {
     supabase,
@@ -90,6 +92,7 @@ async function upsertHostJob(input: {
     nextAction,
     eventTitle,
     eventBody,
+    reopenIfComplete,
   } = input;
 
   const queue = createServiceRoleSupabaseClient();
@@ -101,12 +104,13 @@ async function upsertHostJob(input: {
     .maybeSingle();
 
   if (existing) {
-    const terminal = ["submitted", "completed", "blocked", "cancelled"];
+    const terminal = ["submitted", "blocked", "cancelled"];
+    if (!reopenIfComplete) terminal.push("completed");
     if (terminal.includes(String(existing.status))) {
       return { ok: true, jobId: String(existing.id) };
     }
     // Post-deadline is a single attempt — never reopen after failure.
-    if (String(existing.status) === "failed" && isPostDeadlineHostSubmitKey(idempotencyKey)) {
+    if (String(existing.status) === "failed" && isPostDeadlineHostSubmitKey(idempotencyKey) && !reopenIfComplete) {
       return { ok: true, jobId: String(existing.id) };
     }
     const { error: updateError } = await queue
@@ -414,6 +418,34 @@ export async function scheduleHostSubmitWhenFullyComplete(input: {
   });
 }
 
+/** Resume headless fill after Need You: replay filled pages, then Next or Submit. */
+export async function queueHostFillContinueJob(input: {
+  supabase: SupabaseClient;
+  actor: Actor;
+  applicationId: string;
+  clickFinalSubmit: boolean;
+}): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
+  const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
+  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+
+  return upsertHostJob({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+    sourceUrl: ctx.sourceUrl,
+    jobKind: input.clickFinalSubmit ? "submit" : "prefill",
+    dueAt: new Date(),
+    idempotencyKey: `${input.applicationId}:host_page_loop`,
+    reopenIfComplete: true,
+    nextAction: input.clickFinalSubmit
+      ? "Required fields are ready — filling the host form and continuing to Next or Submit."
+      : "Required fields are ready — filling the host form from saved answers.",
+    eventTitle: input.clickFinalSubmit ? "Host fill continuing" : "Host prefill continuing",
+    eventBody:
+      "1-Apply will open the form, fill this page from saved answers, then tap Next or Submit.",
+  });
+}
+
 export async function queueHostSubmitJob(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -446,8 +478,10 @@ export async function completeHostPrefillJob(input: {
   filledFields: number;
   error?: string | null;
   blockedReason?: string | null;
+  pausedForNeedsYou?: boolean;
+  missingRequired?: string[];
 }): Promise<{ ok: boolean }> {
-  const { supabase, actor, jobId, filledFields, error, blockedReason } = input;
+  const { supabase, actor, jobId, filledFields, error, blockedReason, pausedForNeedsYou, missingRequired } = input;
 
   const { data: job } = await supabase
     .from("host_submit_jobs")
@@ -477,18 +511,37 @@ export async function completeHostPrefillJob(input: {
     return { ok: true };
   }
 
+  const waitingLabels = (missingRequired ?? []).filter(Boolean).slice(0, 4).join(", ");
   await supabase
     .from("host_submit_jobs")
-    .update({ status: "completed", completed_at: now, last_error: null })
+    .update({
+      status: "completed",
+      completed_at: now,
+      last_error: pausedForNeedsYou ? "waiting_needs_you" : null,
+    })
     .eq("id", jobId);
 
   await supabase
     .from("applications")
     .update({
-      next_action: `Prefilled ${filledFields} field(s) from your profile. Review before auto-submit 1 hour before the deadline.`,
+      next_action: pausedForNeedsYou
+        ? waitingLabels
+          ? `Needs you — required fields on this page: ${waitingLabels}`
+          : "Needs you — missing fields Application Memory cannot answer yet"
+        : `Prefilled ${filledFields} field(s) from your profile. Review before auto-submit 1 hour before the deadline.`,
     })
     .eq("id", applicationId)
     .eq("user_id", actor.userId);
+
+  if (pausedForNeedsYou) {
+    await recordApplicationEvent(supabase, actor, applicationId, "application.host_prefilled", {
+      jobId,
+      filledFields,
+      pausedForNeedsYou: true,
+      missingRequired: missingRequired ?? [],
+    });
+    return { ok: true };
+  }
 
   await recordApplicationEvent(supabase, actor, applicationId, "application.host_prefilled", {
     jobId,
@@ -515,8 +568,11 @@ export async function completeHostSubmitJob(input: {
   hostSubmitClicked: boolean;
   error?: string | null;
   blockedReason?: string | null;
+  pausedForNeedsYou?: boolean;
+  missingRequired?: string[];
 }): Promise<{ ok: boolean }> {
-  const { supabase, actor, jobId, submitted, hostSubmitClicked, blockedReason } = input;
+  const { supabase, actor, jobId, submitted, hostSubmitClicked, blockedReason, pausedForNeedsYou, missingRequired } =
+    input;
   let error = input.error ?? null;
 
   const { data: job } = await supabase
@@ -552,6 +608,33 @@ export async function completeHostSubmitJob(input: {
         ? `After the deadline, submit was blocked: ${blockedReason}`
         : blockedReason,
       payload: { captcha: /captcha/i.test(blockedReason), postDeadline },
+    });
+    return { ok: true };
+  }
+
+  if (pausedForNeedsYou) {
+    const waitingLabels = (missingRequired ?? []).filter(Boolean).slice(0, 4).join(", ");
+    await supabase
+      .from("host_submit_jobs")
+      .update({
+        status: "completed",
+        completed_at: now,
+        last_error: "waiting_needs_you",
+      })
+      .eq("id", jobId);
+    await supabase
+      .from("applications")
+      .update({
+        next_action: waitingLabels
+          ? `Needs you — required fields on this page: ${waitingLabels}`
+          : "Needs you — missing fields Application Memory cannot answer yet",
+      })
+      .eq("id", applicationId)
+      .eq("user_id", actor.userId);
+    await recordApplicationEvent(supabase, actor, applicationId, "application.host_prefilled", {
+      jobId,
+      pausedForNeedsYou: true,
+      missingRequired: missingRequired ?? [],
     });
     return { ok: true };
   }

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Actor } from "@/auth/actor";
 import { logError, logInfo } from "@/lib/log";
+import { isUserConfirmedFieldMappingSource } from "@/lib/field-mappings";
 import { detectProfileMemoryField, isNeedsYouSystemNoise, isStructuredFormFieldPrompt } from "@/lib/needs-you";
 import { autoAttachKitAcrossOpenApplications } from "@/server/applications/attach-kit";
 import {
@@ -175,12 +176,14 @@ export async function refreshOpenApplicationsFromKit(
       .limit(120);
 
     // Clear unsafe Yes/No autofills (e.g. "No" from "Technology" substring match).
+    // Never wipe Need You / per-application answers — those are explicit user choices.
     for (const row of mappings ?? []) {
       const label = String(row.label ?? "").trim();
       const value = String(row.value ?? "").trim();
       if (!label || !value) continue;
       if (!isJudgmentYesNoQuestion(label)) continue;
       if (!/^(yes|y|no|n)$/i.test(value)) continue;
+      if (isUserConfirmedFieldMappingSource(row.source as string | null)) continue;
       await supabase
         .from("field_mappings")
         .update({

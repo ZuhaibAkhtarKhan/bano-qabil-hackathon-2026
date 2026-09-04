@@ -133,4 +133,11 @@ export async function applyValueToApplication(input: {
       });
     }
   }
+
+  const { collapseDuplicateFieldMappings } = await import("@/server/applications/field-mappings-upsert");
+  await collapseDuplicateFieldMappings({
+    supabase: input.supabase,
+    userId: input.userId,
+    applicationId: input.applicationId,
+  });
 }
