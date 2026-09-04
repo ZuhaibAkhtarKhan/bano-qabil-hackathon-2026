@@ -258,7 +258,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
                 String(a.due_at ?? "").localeCompare(String(b.due_at ?? "")) ||
                 String(a.id).localeCompare(String(b.id)),
             )[0];
-          if (String(chosen.id) !== job.id) continue;
+          if (!chosen || String(chosen.id) !== job.id) continue;
         }
       }
     }
