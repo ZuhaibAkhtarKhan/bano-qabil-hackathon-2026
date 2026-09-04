@@ -1,3 +1,4 @@
+import { toHtmlDateValue } from "@1apply/form-engine";
 import { FormPageCaptureSchema } from "@1apply/contracts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Page, Locator } from "playwright";
@@ -15,9 +16,25 @@ import {
   type FormDomAction,
 } from "./playwright-form-dom";
 import { applyHostFileUploads } from "./playwright-host-files";
+import { findHostFieldScope } from "./playwright-host-scope";
 import { loadDocumentVersionUpload, type DocumentVersionUpload } from "@/server/documents/download-version";
 
 const MAX_STEPS = 14;
+const VERSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 async function evaluateFormDom<T>(
   page: Page,
@@ -97,26 +114,6 @@ function escapeRegExp(value: string): string {
 }
 
 /** Click radios / selects from saved headless memory — Google Forms often ignores DOM-only clicks. */
-async function findChoiceScope(page: Page, entry: FillPlanEntry): Promise<Locator | null> {
-  const byId = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
-  if ((await byId.count()) > 0) return byId;
-  const label = entry.label?.replace(/\s+/g, " ").trim() ?? "";
-  if (label.length < 2) return null;
-  const items = page.locator('[role="listitem"]');
-  const count = await items.count();
-  const want = label.toLowerCase();
-  for (let index = 0; index < count; index += 1) {
-    const item = items.nth(index);
-    const heading = item.locator(
-      '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
-    ).first();
-    const text = ((await heading.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-    if (!text) continue;
-    if (text === want || text.includes(want) || want.includes(text)) return item;
-  }
-  return null;
-}
-
 async function clickGoogleChoice(
   page: Page,
   scope: Locator,
@@ -170,7 +167,7 @@ async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntr
     if (type && type !== "radio" && type !== "select" && type !== "checkbox") continue;
     const value = entry.value?.trim() ?? "";
     if (!value) continue;
-    const scope = await findChoiceScope(page, entry);
+    const scope = await findHostFieldScope(page, entry);
     if (!scope) continue;
     const inferred =
       type ??
@@ -182,13 +179,64 @@ async function fillChoiceEntriesWithPlaywright(page: Page, entries: FillPlanEntr
             ? "select"
             : null);
     if (!inferred || (inferred !== "radio" && inferred !== "select" && inferred !== "checkbox")) continue;
+    const parts =
+      inferred === "checkbox"
+        ? value.split(/\n|;/).map((part) => part.trim()).filter(Boolean)
+        : [value];
     try {
-      if (await clickGoogleChoice(page, scope, inferred, value)) filled += 1;
+      let ok = false;
+      for (const part of parts) {
+        if (await clickGoogleChoice(page, scope, inferred, part)) ok = true;
+      }
+      if (ok) filled += 1;
     } catch {
       // leave for in-page apply / validation
     }
   }
   return filled;
+}
+
+async function fillDateWithPlaywright(page: Page, scope: Locator, raw: string): Promise<boolean> {
+  const iso = toHtmlDateValue(raw);
+  if (!iso) return false;
+  const [year, month, day] = iso.split("-");
+  if (!year || !month || !day) return false;
+
+  const native = scope.locator('input[type="date"], input[type="datetime-local"], input[type="month"]').first();
+  if ((await native.count()) > 0) {
+    try {
+      await native.fill(iso, { timeout: 4_000 });
+      return true;
+    } catch {
+      await native.fill(`${year}-${month}`, { timeout: 2_000 }).catch(() => undefined);
+    }
+  }
+
+  const monthName = MONTH_NAMES[Number(month) - 1];
+  if (monthName) {
+    const monthBox = scope.getByLabel(/month/i).first();
+    if ((await monthBox.count()) > 0) {
+      await monthBox.click({ timeout: 2_000 }).catch(() => undefined);
+      const option = page.getByRole("option", { name: new RegExp(`^\\s*${monthName}\\s*$`, "i") }).first();
+      if ((await option.count()) > 0) await option.click({ timeout: 2_000 }).catch(() => undefined);
+      else await monthBox.fill(month, { timeout: 2_000 }).catch(() => undefined);
+    }
+  }
+
+  const dayBox = scope.getByLabel(/^day$/i).or(scope.locator('input[placeholder="DD"]')).first();
+  const yearBox = scope.getByLabel(/^year$/i).or(scope.locator('input[placeholder="YYYY"]')).first();
+  if ((await dayBox.count()) > 0) await dayBox.fill(String(Number(day)), { timeout: 2_000 }).catch(() => undefined);
+  if ((await yearBox.count()) > 0) await yearBox.fill(year, { timeout: 2_000 }).catch(() => undefined);
+
+  const inputs = scope.locator(
+    'input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), [role="textbox"]',
+  );
+  if ((await inputs.count()) >= 3 && (await dayBox.count()) === 0) {
+    await inputs.nth(0).fill(month, { timeout: 2_000 }).catch(() => undefined);
+    await inputs.nth(1).fill(day, { timeout: 2_000 }).catch(() => undefined);
+    await inputs.nth(2).fill(year, { timeout: 2_000 }).catch(() => undefined);
+  }
+  return true;
 }
 
 async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): Promise<number> {
@@ -200,8 +248,13 @@ async function fillEntriesWithPlaywright(page: Page, entries: FillPlanEntry[]): 
     if (!value) continue;
     if (entry.type === "radio" || entry.type === "checkbox" || entry.type === "select") continue;
 
-    const scope = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
-    if ((await scope.count()) === 0) continue;
+    const scope = await findHostFieldScope(page, entry);
+    if (!scope) continue;
+
+    if (entry.type === "date") {
+      if (await fillDateWithPlaywright(page, scope, value)) filled += 1;
+      continue;
+    }
 
     const control = scope
       .locator(
@@ -398,12 +451,15 @@ async function runPlaywrightHostSession(input: {
 
         const entries: FillPlanEntry[] = plan.fields.map((field) => {
           const captured = capture.fields.find((item) => item.fieldId === field.fieldId);
+          const documentVersionId =
+            field.documentVersionId ||
+            (captured?.type === "file" && field.value && VERSION_ID.test(field.value) ? field.value : undefined);
           return {
             fieldId: field.fieldId,
             status: field.status,
-            value: field.value,
-            documentVersionId: field.documentVersionId,
-            type: captured?.type,
+            value: documentVersionId ? undefined : field.value,
+            documentVersionId,
+            type: captured?.type ?? (documentVersionId ? "file" : undefined),
             label: captured?.label,
           };
         });
@@ -461,7 +517,7 @@ async function runPlaywrightHostSession(input: {
         if (versionIds.length > 0) {
           const loaded = new Map<string, DocumentVersionUpload>();
           await Promise.all(
-            versionIds.slice(0, 6).map(async (versionId) => {
+            versionIds.slice(0, 20).map(async (versionId) => {
               const upload = await loadDocumentVersionUpload({
                 supabase: input.supabase,
                 userId: input.actor.userId,

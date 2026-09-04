@@ -136,7 +136,20 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
   function looksLikeFileField(item: Element, label: string): boolean {
     if (item.querySelector('input[type="file"]')) return true;
     const text = `${label} ${item.textContent ?? ""}`.toLowerCase();
-    return /add file|upload file|attach|resume|cv|cover letter|portfolio|transcript|browse/i.test(text);
+    return /add file|upload file|attach|resume|cv|cover letter|portfolio|transcript|browse|choose (a )?file|drop files|google drive|photo|headshot|image upload/i.test(
+      text,
+    );
+  }
+
+  function looksLikeDateField(item: Element, label: string): boolean {
+    if (item.querySelector('input[type="date"], input[type="datetime-local"], input[type="month"], input[type="week"]')) {
+      return true;
+    }
+    const text = `${label} ${item.textContent ?? ""}`.toLowerCase();
+    const hasParts =
+      Boolean(item.querySelector('[aria-label*="Month" i], [aria-label*="Day" i], [aria-label*="Year" i]')) ||
+      Boolean(item.querySelector('input[placeholder="MM"], input[placeholder="DD"], input[placeholder="YYYY"]'));
+    return hasParts || /\b(date of birth|birthdate|start date|end date|mm\/dd\/yyyy)\b/i.test(text);
   }
 
   function classifyButton(el: Element): "next" | "submit" | "other" {
@@ -288,12 +301,15 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
           .filter(Boolean);
       } else if (item.querySelector('[role="listbox"]')) {
         type = "select";
-      } else if (item.querySelector('input[type="file"]')) {
+        options = Array.from(item.querySelectorAll('[role="option"]'))
+          .map((node) => (node.getAttribute("aria-label") ?? node.textContent ?? "").trim())
+          .filter(Boolean);
+      } else if (item.querySelector('input[type="file"]') || looksLikeFileField(item, label)) {
         type = "file";
       } else if (item.querySelector("textarea")) {
         type = "textarea";
-      } else if (looksLikeFileField(item, label)) {
-        type = "file";
+      } else if (looksLikeDateField(item, label)) {
+        type = "date";
       } else {
         const native = item.querySelector("input") as HTMLInputElement | null;
         // email/tel/search map to text via normalizeBatchFieldType

@@ -11,6 +11,7 @@ import {
   mappingsToBatchResults,
   preferFilledResults,
   sanitizeNativeFieldValues,
+  storedMappingToFillResult,
   type GroundingCatalog,
 } from "@/server/extension/batch-fill";
 
@@ -143,6 +144,26 @@ describe("batch fill uses Application Memory instead of uncited LLM output", () 
       catalog(),
     );
     expect(results[0]).toMatchObject({ status: "filled", documentVersionId: DOC });
+  });
+
+  it("turns a Need You document UUID into a file fill, not a typed text value", () => {
+    expect(
+      storedMappingToFillResult({
+        fieldId: "f_resume",
+        fieldType: "file",
+        value: DOC,
+        source: "Needs You document",
+        allowedDocumentVersionIds: [DOC],
+      }),
+    ).toMatchObject({ status: "filled", documentVersionId: DOC });
+    expect(
+      storedMappingToFillResult({
+        fieldId: "f_name",
+        fieldType: "text",
+        value: "Amina Khan",
+        source: "Needs You",
+      }),
+    ).toMatchObject({ status: "filled", value: "Amina Khan" });
   });
 
   it("fills radio and checkbox choices from Application Memory even when the option text is short", () => {

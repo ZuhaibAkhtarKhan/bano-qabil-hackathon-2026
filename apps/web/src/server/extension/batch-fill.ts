@@ -58,6 +58,34 @@ const llmResponseSchema = z.object({
 const SENSITIVE_KIT = /work.?auth|visa|citizenship|gender|race|ethnicity|disability|veteran|ssn|national.?id|passport|demographic/i;
 const VERSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Need You / saved mapping → fill plan. File fields store a document version UUID. */
+export function storedMappingToFillResult(input: {
+  fieldId: string;
+  fieldType?: string | null;
+  value: string;
+  source?: string | null;
+  allowedDocumentVersionIds?: string[];
+}): BatchFieldResult | null {
+  const value = input.value.trim();
+  if (!value) return null;
+  const looksLikeFile =
+    input.fieldType === "file" || /needs you (document|image)/i.test(String(input.source ?? ""));
+  if (looksLikeFile && VERSION_ID.test(value)) {
+    return {
+      fieldId: input.fieldId,
+      status: "filled",
+      documentVersionId: value,
+      reason: `Saved application value (${input.source ?? "mapping"})`,
+    };
+  }
+  return {
+    fieldId: input.fieldId,
+    status: "filled",
+    value,
+    reason: `Saved application value (${input.source ?? "mapping"})`,
+  };
+}
+
 export const batchFillRequestBodySchema = BatchFillRequestSchema.extend({
   origin: z.string().url().optional(),
 });
@@ -995,8 +1023,9 @@ export async function runBatchFillPlan(input: {
   const bestStored = dedupeFieldMappings(storedMappings ?? []).filter((row) =>
     mappingHasUsableFill(row, 0.5),
   );
+  let fromStored: BatchFieldResult[] = [];
   if (bestStored.length) {
-    const fromStored: BatchFieldResult[] = fields.flatMap((field) => {
+    fromStored = fields.flatMap((field) => {
       const hostKey = input.hostFieldKeyById?.[field.fieldId] ?? field.fieldId;
       const match = matchStoredMappingForHostField(bestStored, {
         fieldKey: hostKey,
@@ -1005,14 +1034,14 @@ export async function runBatchFillPlan(input: {
       });
       const value = String(match?.value ?? "").trim();
       if (!value) return [];
-      return [
-        {
-          fieldId: field.fieldId,
-          status: "filled" as const,
-          value,
-          reason: `Saved application value (${match?.source ?? "mapping"})`,
-        },
-      ];
+      const result = storedMappingToFillResult({
+        fieldId: field.fieldId,
+        fieldType: field.type,
+        value,
+        source: match?.source,
+        allowedDocumentVersionIds: catalog.allowedDocumentVersionIds,
+      });
+      return result ? [result] : [];
     });
     if (fromStored.length) {
       // Stored filled values win even over other filled plans (Need You edits beat stale kit).
@@ -1021,10 +1050,14 @@ export async function runBatchFillPlan(input: {
     }
   }
 
+  const storedDocIds = fromStored
+    .map((item) => item.documentVersionId)
+    .filter((id): id is string => Boolean(id));
+
   const grounded = groundBatchFillFields({
     fields: merged,
     allowedEvidenceIds: catalog.allowedEvidenceIds,
-    allowedDocumentVersionIds: catalog.allowedDocumentVersionIds,
+    allowedDocumentVersionIds: [...catalog.allowedDocumentVersionIds, ...storedDocIds],
     formRequirementFieldIds: [...fromMemory.formRequirementFieldIds, ...already.alreadyFilledFieldIds],
   });
   const parsed = BatchFillResponseSchema.parse({ fields: grounded });

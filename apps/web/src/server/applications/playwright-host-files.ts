@@ -3,6 +3,7 @@ import type { Page, Frame } from "playwright";
 import type { DocumentVersionUpload } from "@/server/documents/download-version";
 
 import type { FillPlanEntry } from "./playwright-form-dom";
+import { findHostFieldScope } from "./playwright-host-scope";
 
 function basename(filename: string): string {
   return filename.trim().toLowerCase().replace(/^.*[\\/]/, "");
@@ -14,9 +15,10 @@ async function fileAlreadyUploaded(scope: ReturnType<Page["locator"]>, filename:
 
   const inputCount = await scope.locator('input[type="file"]').count();
   for (let i = 0; i < inputCount; i += 1) {
-    const files = await scope.locator('input[type="file"]').nth(i).evaluate((el) =>
-      Array.from((el as HTMLInputElement).files ?? []).map((item) => item.name.toLowerCase()),
-    );
+    const files = await scope
+      .locator('input[type="file"]')
+      .nth(i)
+      .evaluate((el) => Array.from((el as HTMLInputElement).files ?? []).map((item) => item.name.toLowerCase()));
     if (files.some((name) => name === wanted || name.endsWith(wanted))) return true;
   }
 
@@ -25,10 +27,7 @@ async function fileAlreadyUploaded(scope: ReturnType<Page["locator"]>, filename:
   return false;
 }
 
-async function setFilesOnFrame(
-  frame: Frame,
-  file: DocumentVersionUpload,
-): Promise<boolean> {
+async function setFilesOnFrame(frame: Frame, file: DocumentVersionUpload): Promise<boolean> {
   const inputs = frame.locator('input[type="file"]');
   const count = await inputs.count();
   for (let i = 0; i < count; i += 1) {
@@ -55,6 +54,27 @@ async function setFilesOnFrame(
   return false;
 }
 
+async function attachViaChooser(
+  page: Page,
+  clickTarget: ReturnType<Page["locator"]>,
+  file: DocumentVersionUpload,
+): Promise<boolean> {
+  try {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: 4_000 }),
+      clickTarget.click({ timeout: 4_000 }),
+    ]);
+    await chooser.setFiles({
+      name: file.filename,
+      mimeType: file.mimeType,
+      buffer: file.buffer,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Attach vault documents to file inputs via Playwright (Node-side — not page.evaluate). */
 export async function applyHostFileUploads(
   page: Page,
@@ -64,12 +84,14 @@ export async function applyHostFileUploads(
   let filled = 0;
 
   for (const entry of entries) {
-    if (entry.status !== "filled" || entry.type !== "file" || !entry.documentVersionId) continue;
-    const file = files.get(entry.documentVersionId);
+    if (entry.status !== "filled") continue;
+    const versionId = entry.documentVersionId;
+    if (!versionId) continue;
+    if (entry.type && entry.type !== "file") continue;
+    const file = files.get(versionId);
     if (!file) continue;
 
-    const container = page.locator(`[data-1apply-batch-id="${entry.fieldId}"]`).first();
-    if ((await container.count()) === 0) continue;
+    const container = (await findHostFieldScope(page, entry)) ?? page.locator("body");
     if (await fileAlreadyUploaded(container, file.filename)) {
       filled += 1;
       continue;
@@ -79,10 +101,12 @@ export async function applyHostFileUploads(
     for (let attempt = 0; attempt < 8 && !attached; attempt += 1) {
       if (attempt > 0) await page.waitForTimeout(350);
 
-      const addBtn = container
-        .locator('button, [role="button"], span[role="link"], a')
-        .filter({ hasText: /add file|upload file|browse|choose file|attach/i });
+      const addBtn = container.locator('button, [role="button"], span[role="link"], a').filter({
+        hasText: /add file|upload file|browse|choose file|attach|upload/i,
+      });
       if ((await addBtn.count()) > 0) {
+        attached = await attachViaChooser(page, addBtn.first(), file);
+        if (attached) break;
         await addBtn.first().click().catch(() => undefined);
         await page.waitForTimeout(500);
       }
@@ -97,7 +121,7 @@ export async function applyHostFileUploads(
           });
           attached = (await scopedInput.evaluate((el) => (el as HTMLInputElement).files?.length ?? 0)) > 0;
         } catch {
-          attached = false;
+          attached = await attachViaChooser(page, scopedInput, file);
         }
       }
 
