@@ -135,28 +135,39 @@ export async function freezeApplicationPacket(input: {
 
   if (error || !snapshotRow) return { ok: false, reason: error?.message ?? "snapshot" };
 
-  await supabase
-    .from("applications")
-    .update({
-      status: "submitted",
-      submitted_at: snapshot.submittedAt,
-      next_action: hostSubmitClicked
-        ? "Submitted to the host before the deadline."
-        : source === "silence"
-          ? "Packet frozen at deadline because you did not edit."
-          : "Track the host process. 1-Apply did not send this application.",
-    })
-    .eq("id", applicationId);
+  // Status "submitted" is reserved for a confirmed host Submit click.
+  if (hostSubmitClicked) {
+    await supabase
+      .from("applications")
+      .update({
+        status: "submitted",
+        submitted_at: snapshot.submittedAt,
+        next_action: "Submitted to the host before the deadline.",
+      })
+      .eq("id", applicationId);
+  } else {
+    await supabase
+      .from("applications")
+      .update({
+        next_action:
+          source === "silence"
+            ? "Packet frozen at deadline — host form was not submitted."
+            : "Packet frozen. 1-Apply has not submitted the host form.",
+      })
+      .eq("id", applicationId)
+      .neq("status", "submitted");
+  }
 
   await recordApplicationEvent(supabase, actor, applicationId, "application.submitted_snapshot", {
     answers: snapshot.answerManifest.length,
     documents: snapshot.documentManifest.length,
     source,
+    hostSubmitClicked,
   });
 
   if (emitNotification) {
     await emitDomainEvent(supabase, {
-      name: "submission.completed",
+      name: hostSubmitClicked ? "submission.completed" : "intelligence.updated",
       userId: actor.userId,
       applicationId,
       subjectId: `${applicationId}:packet:${source}`,
@@ -168,8 +179,8 @@ export async function freezeApplicationPacket(input: {
       body: hostSubmitClicked
         ? "1-Apply filled and clicked Submit on the host form."
         : source === "silence"
-          ? "The current packet was frozen because you did not edit before the deadline."
-          : "Approved answers and attached document versions were recorded. You still submit to the host yourself.",
+          ? "The packet was frozen. The host form was not submitted."
+          : "Answers and documents were recorded in 1-Apply. The host form was not submitted.",
     });
   }
 

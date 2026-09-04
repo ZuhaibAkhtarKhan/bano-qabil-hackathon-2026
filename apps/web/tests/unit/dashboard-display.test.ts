@@ -13,6 +13,15 @@ describe("applicationTableMeta", () => {
     expect(meta.statusTone).toBe("mint");
   });
 
+  it("does not treat a frozen packet as Submitted without a host submit", () => {
+    const meta = applicationTableMeta(
+      "in_progress",
+      "Packet frozen. 1-Apply has not submitted the host form.",
+      { needsYouCount: 0 },
+    );
+    expect(meta.statusLabel).not.toBe("Submitted");
+  });
+
   it("does not show Need you when queue count is zero and only review_required remains", () => {
     const meta = applicationTableMeta("review_required", APPLICATION_LIFECYCLE_ACTIONS.ANALYZED, {
       needsYouCount: 0,
