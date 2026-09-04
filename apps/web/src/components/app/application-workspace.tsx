@@ -118,6 +118,7 @@ function buildSubmissionGuardInput(data: Workspace): SubmissionInput {
 
 export function ApplicationWorkspace({ data, notice, error }: { data: Workspace; notice?: string; error?: string }) {
   const { application, opportunity, questions, documents, attached, snapshots } = data;
+  const hostUrl = opportunity?.canonical_url || opportunity?.source_url || null;
   const normalizedStatus = normalizeApplicationStatus(application.status);
   const statusOptions = [normalizedStatus, ...allowedTransitions(application.status)].filter(
     (value, index, list) => list.indexOf(value) === index && applicationStatusSchema.options.includes(value),
@@ -581,7 +582,7 @@ export function ApplicationWorkspace({ data, notice, error }: { data: Workspace;
                 {packetFrozen ? "Snapshot already frozen" : "Freeze submission snapshot"}
             </SubmitButton>
           </form>
-          {application.source_url ? (
+          {hostUrl ? (
             <form action={resubmitApplication}>
               <input type="hidden" name="applicationId" value={application.id} />
               <SubmitButton variant="secondary" title="Queue an immediate server auto-submit to the host form. Works even after the deadline.">

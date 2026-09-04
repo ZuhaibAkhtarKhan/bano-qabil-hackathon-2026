@@ -468,14 +468,23 @@ export async function loadApplicationWorkspace(applicationId: string) {
     }
   });
 
-  const { data: application } = await supabase
+  const { data: application, error: applicationError } = await supabase
     .from("applications")
     .select(
-      "id, status, deadline_at, deadline_timezone, next_action, submitted_at, persona, opportunity_id, source_url, created_at, updated_at",
+      "id, status, deadline_at, deadline_timezone, next_action, submitted_at, persona, opportunity_id, created_at, updated_at",
     )
     .eq("id", applicationId)
     .eq("user_id", user.id)
     .maybeSingle();
+
+  if (applicationError) {
+    logError("application.workspace_load_failed", {
+      applicationId,
+      code: applicationError.code,
+      message: applicationError.message,
+    });
+    return null;
+  }
 
   if (!application) return null;
 

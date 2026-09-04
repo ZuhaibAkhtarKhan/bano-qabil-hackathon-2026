@@ -942,18 +942,15 @@ export async function resubmitApplication(formData: FormData) {
 
   const { data: application } = await supabase
     .from("applications")
-    .select("id, status, source_url")
+    .select("id, status")
     .eq("id", applicationId)
     .eq("user_id", user.id)
     .maybeSingle();
   if (!application) {
     redirectWith("/app/applications", { error: "not_found" });
   }
-  if (!application.source_url) {
-    redirectWith(applicationPath(applicationId), { error: "no_source_url" }, "submission");
-  }
 
-  // Queue an immediate submit job (dueAt = now).
+  // Queue an immediate submit job (dueAt = now). Host URL comes from the opportunity.
   const { queueManualHostSubmitJob } = await import("@/server/applications/host-submit");
   const result = await queueManualHostSubmitJob({
     supabase,
@@ -961,7 +958,11 @@ export async function resubmitApplication(formData: FormData) {
     applicationId,
   });
   if (!result.ok) {
-    redirectWith(applicationPath(applicationId), { error: "save" }, "submission");
+    redirectWith(
+      applicationPath(applicationId),
+      { error: result.reason === "no_source_url" ? "no_source_url" : "save" },
+      "submission",
+    );
   }
 
   await recordApplicationEvent(supabase, actor, applicationId, "application.resubmit_queued", {
