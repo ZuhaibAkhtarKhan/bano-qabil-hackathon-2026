@@ -25,7 +25,8 @@
     "@tailwindcss/oxide@4.1.12": true,
     "sharp@0.34.5": true,
     "esbuild@0.25.5": true,
-    "esbuild@0.27.3": true
+    "esbuild@0.27.3": true,
+    "puppeteer@24.43.1": true
   },
   "dependencies": {
     "approve": "^0.0.12",

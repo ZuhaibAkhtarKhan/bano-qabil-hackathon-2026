@@ -86,7 +86,32 @@ describe("host submit attempt policy", () => {
     ).toBe(true);
     expect(
       shouldSkipClaimedSubmitJob({ state: paused, postDeadline: false, manual: false }),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("runs a due submit job even if an earlier Need You pause row is still on file", () => {
+    const mixed = summarizeHostSubmitJobs(
+      [
+        {
+          status: "completed",
+          job_kind: "submit",
+          host_submit_clicked: false,
+          last_error: "waiting_needs_you",
+          idempotency_key: "app-1:host_page_loop",
+        },
+        {
+          status: "pending",
+          job_kind: "submit",
+          host_submit_clicked: false,
+          idempotency_key: "app-1:host_submit:2026-09-04T20:00:00.000Z",
+        },
+      ],
+      { status: "in_progress" },
+    );
+    expect(mixed.waitingNeedsYou).toBe(true);
+    expect(shouldSkipClaimedSubmitJob({ state: mixed, postDeadline: false, manual: false })).toBe(
+      false,
+    );
   });
 
   it("does not queue a second auto-submit key while a page-loop submit job exists", () => {

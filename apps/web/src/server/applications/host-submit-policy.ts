@@ -105,16 +105,31 @@ export function shouldQueuePostDeadlineRetry(state: HostSubmitAttemptState): boo
 }
 
 /** Claimed submit jobs that must not run (already submitted, extra auto attempt, or post-deadline too early). */
+export function claimedSubmitSkipReason(input: {
+  state: HostSubmitAttemptState;
+  postDeadline: boolean;
+  manual: boolean;
+}): "already_submitted" | "post_deadline_not_ready" | "submit_already_attempted" | null {
+  // Manual Resubmit is the recovery path after a false "submitted" (Next → /formResponse).
+  if (input.manual) return null;
+  if (input.state.hostSubmitSucceeded || input.state.applicationSubmitted) return "already_submitted";
+  if (input.postDeadline) {
+    return shouldQueuePostDeadlineRetry(input.state) ? null : "post_deadline_not_ready";
+  }
+  // A stale waiting_needs_you row must not block a due submit job. If fields are
+  // still missing, the runner pauses again; if they are filled, submit proceeds.
+  if (input.state.hostSubmitClicked || input.state.firstSubmitAttemptFinished) {
+    return "submit_already_attempted";
+  }
+  return null;
+}
+
 export function shouldSkipClaimedSubmitJob(input: {
   state: HostSubmitAttemptState;
   postDeadline: boolean;
   manual: boolean;
 }): boolean {
-  if (input.state.hostSubmitSucceeded || input.state.applicationSubmitted) return true;
-  if (input.manual) return false;
-  if (input.postDeadline) return !shouldQueuePostDeadlineRetry(input.state);
-  if (input.state.waitingNeedsYou) return true;
-  return input.state.hostSubmitClicked || input.state.firstSubmitAttemptFinished;
+  return claimedSubmitSkipReason(input) !== null;
 }
 
 /**

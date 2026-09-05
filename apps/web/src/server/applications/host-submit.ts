@@ -49,6 +49,8 @@ function publicFormUrl(raw: string | null | undefined): string | null {
   }
 }
 
+const CLOSED_APPLICATION_STATUSES = new Set(["submitted", "rejected", "withdrawn", "archived", "offer"]);
+
 async function loadApplicationContext(
   supabase: SupabaseClient,
   actor: Actor,
@@ -62,9 +64,6 @@ async function loadApplicationContext(
     .maybeSingle();
 
   if (!application) return null;
-  if (["submitted", "rejected", "withdrawn", "archived", "offer"].includes(String(application.status))) {
-    return null;
-  }
 
   const opportunity = Array.isArray(application.opportunities)
     ? application.opportunities[0]
@@ -73,7 +72,22 @@ async function loadApplicationContext(
     publicFormUrl((opportunity as { canonical_url?: string | null } | null)?.canonical_url) ??
     publicFormUrl((opportunity as { source_url?: string | null } | null)?.source_url);
 
-  return { application, opportunity, sourceUrl };
+  return {
+    application,
+    opportunity,
+    sourceUrl,
+    closed: CLOSED_APPLICATION_STATUSES.has(String(application.status)),
+  };
+}
+
+function hostContextUnavailableReason(
+  ctx: Awaited<ReturnType<typeof loadApplicationContext>>,
+  opts?: { allowClosed?: boolean },
+): "not_found" | "already_submitted" | "no_source_url" | null {
+  if (!ctx) return "not_found";
+  if (ctx.closed && !opts?.allowClosed) return "already_submitted";
+  if (!ctx.sourceUrl) return "no_source_url";
+  return null;
 }
 
 export async function loadHostSubmitAttemptState(
@@ -128,7 +142,7 @@ async function upsertHostJob(input: {
 
   const { data: existing } = await queue
     .from("host_submit_jobs")
-    .select("id, status, last_error, host_submit_clicked, attempt_count")
+    .select("id, status, last_error, host_submit_clicked, attempt_count, due_at")
     .eq("idempotency_key", idempotencyKey)
     .maybeSingle();
 
@@ -152,7 +166,14 @@ async function upsertHostJob(input: {
       return { ok: true, jobId: String(existing.id) };
     }
 
-    const reopeningNeedsYou = reopenIfComplete && waitingNeedsYou;
+    const reopeningNeedsYou = Boolean(reopenIfComplete && waitingNeedsYou);
+    if (status === "pending" && !reopeningNeedsYou && !forceManual) {
+      const existingDue = Date.parse(String(existing.due_at ?? ""));
+      // Already queued at least as soon as requested — dashboard sync must not bump due_at.
+      if (!Number.isNaN(existingDue) && existingDue <= dueAt.getTime() + 1000) {
+        return { ok: true, jobId: String(existing.id) };
+      }
+    }
     const { error: updateError } = await queue
       .from("host_submit_jobs")
       .update({
@@ -376,7 +397,9 @@ export async function queueHostPrefillJob(input: {
   applicationId: string;
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
-  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+  const blocked = hostContextUnavailableReason(ctx);
+  if (blocked) return { ok: false, reason: blocked };
+  if (!ctx?.sourceUrl) return { ok: false, reason: "not_found" };
 
   return upsertHostJob({
     supabase: input.supabase,
@@ -399,7 +422,9 @@ export async function scheduleHostSubmitJob(input: {
   applicationId: string;
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
-  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+  const blocked = hostContextUnavailableReason(ctx);
+  if (blocked) return { ok: false, reason: blocked };
+  if (!ctx?.sourceUrl) return { ok: false, reason: "not_found" };
 
   const deadlineAt = (ctx.application.deadline_at as string | null) ?? null;
   if (!deadlineAt) return { ok: false, reason: "no_deadline" };
@@ -467,7 +492,9 @@ export async function scheduleHostSubmitWhenFullyComplete(input: {
   if (!readiness.ready) return { ok: false, reason: readiness.reason ?? "not_ready" };
 
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
-  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+  const blocked = hostContextUnavailableReason(ctx);
+  if (blocked) return { ok: false, reason: blocked };
+  if (!ctx?.sourceUrl) return { ok: false, reason: "not_found" };
 
   const noDeadlineState = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
     status: String(ctx.application.status),
@@ -502,7 +529,9 @@ export async function queueHostFillContinueJob(input: {
   clickFinalSubmit: boolean;
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
-  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+  const blocked = hostContextUnavailableReason(ctx);
+  if (blocked) return { ok: false, reason: blocked };
+  if (!ctx?.sourceUrl) return { ok: false, reason: "not_found" };
 
   const continueState = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
     status: String(ctx.application.status),
@@ -538,7 +567,9 @@ export async function queueHostSubmitJob(input: {
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   if (input.dueAt) {
     const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
-    if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+    const blocked = hostContextUnavailableReason(ctx);
+    if (blocked) return { ok: false, reason: blocked };
+    if (!ctx?.sourceUrl) return { ok: false, reason: "not_found" };
     const state = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
       status: String(ctx.application.status),
       submitted_at: null,
@@ -569,10 +600,23 @@ export async function queueManualHostSubmitJob(input: {
   applicationId: string;
 }): Promise<{ ok: true; jobId: string } | { ok: false; reason: string }> {
   const ctx = await loadApplicationContext(input.supabase, input.actor, input.applicationId);
-  if (!ctx?.sourceUrl) return { ok: false, reason: ctx ? "no_source_url" : "not_found" };
+  const blocked = hostContextUnavailableReason(ctx, { allowClosed: true });
+  if (blocked) return { ok: false, reason: blocked };
+  if (!ctx?.sourceUrl) return { ok: false, reason: "not_found" };
 
   const now = new Date();
   const queue = createServiceRoleSupabaseClient();
+  if (ctx.closed) {
+    await queue
+      .from("applications")
+      .update({
+        status: "in_progress",
+        submitted_at: null,
+        next_action: "Resubmit queued — filling and submitting the host form now.",
+      })
+      .eq("id", input.applicationId)
+      .eq("user_id", input.actor.userId);
+  }
   await queue
     .from("host_submit_jobs")
     .update({

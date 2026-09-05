@@ -89,6 +89,14 @@ export async function syncHostAutomationForApplication(input: {
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
   });
 
+  // Dashboard/reminder sync never saved Need You answers, so resume the page-loop here
+  // once required mappings are filled.
+  await tryContinueHostFillAfterNeedsYou({
+    supabase: input.supabase,
+    actor: input.actor,
+    applicationId: input.applicationId,
+  });
+
   // Run worker immediately when jobs are due — do not rely on after() alone.
   await kickHostSubmitWorkerIfEnabled();
 }

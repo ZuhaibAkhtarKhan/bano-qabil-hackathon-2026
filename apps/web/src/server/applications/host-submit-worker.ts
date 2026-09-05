@@ -16,8 +16,8 @@ import {
 } from "./host-submit";
 import {
   isManualHostSubmitKey,
+  claimedSubmitSkipReason,
   shouldCancelAfterSiblingSubmitClick,
-  shouldSkipClaimedSubmitJob,
 } from "./host-submit-policy";
 import {
   isServerHostSubmitEnabled,
@@ -78,22 +78,22 @@ export async function listClaimableHostJobs(
       .lte("due_at", nowIso)
       .lt("attempt_count", MAX_ATTEMPTS);
 
-  const submitLimit = Math.min(SUBMIT_JOB_RESERVE, limit);
-  const { data: submitRows } = await baseQuery()
-    .eq("job_kind", "submit")
+  const { data: prefillRows } = await baseQuery()
+    .eq("job_kind", "prefill")
     .order("due_at", { ascending: true })
-    .limit(submitLimit);
+    .limit(limit);
 
-  const remaining = limit - (submitRows?.length ?? 0);
-  const { data: prefillRows } =
-    remaining > 0
+  const remaining = limit - (prefillRows?.length ?? 0);
+  const submitLimit = Math.min(SUBMIT_JOB_RESERVE, remaining);
+  const { data: submitRows } =
+    submitLimit > 0
       ? await baseQuery()
-          .eq("job_kind", "prefill")
+          .eq("job_kind", "submit")
           .order("due_at", { ascending: true })
-          .limit(remaining)
+          .limit(submitLimit)
       : { data: [] };
 
-  return [...(submitRows ?? []), ...(prefillRows ?? [])].map((row) => ({
+  return [...(prefillRows ?? []), ...(submitRows ?? [])].map((row) => ({
     id: String(row.id),
     user_id: String(row.user_id),
     application_id: String(row.application_id),
@@ -197,7 +197,7 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
         .eq("id", job.application_id)
         .maybeSingle();
       const state = await loadHostSubmitAttemptState(supabase, job.application_id, application ?? undefined);
-      if (state.hostSubmitSucceeded || state.applicationSubmitted) {
+      if (!manual && (state.hostSubmitSucceeded || state.applicationSubmitted)) {
         await supabase
           .from("host_submit_jobs")
           .update({
@@ -208,7 +208,13 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
           .eq("id", job.id);
         continue;
       }
-      if (shouldSkipClaimedSubmitJob({ state, postDeadline, manual })) {
+      const skipReason = claimedSubmitSkipReason({ state, postDeadline, manual });
+      if (skipReason) {
+        logInfo("host_submit.worker_skipped", {
+          jobId: job.id,
+          applicationId: job.application_id,
+          reason: skipReason,
+        });
         if (
           !postDeadline &&
           !manual &&
@@ -274,6 +280,12 @@ export async function runServerHostSubmitWorker(supabase: SupabaseClient): Promi
     if (!claimed) continue;
 
     processed += 1;
+    logInfo("host_submit.worker_running", {
+      jobId: job.id,
+      jobKind: job.job_kind,
+      applicationId: job.application_id,
+      attempt: job.attempt_count + 1,
+    });
     const actor = await loadActorForUser(supabase, job.user_id);
     if (!actor) {
       failed += 1;

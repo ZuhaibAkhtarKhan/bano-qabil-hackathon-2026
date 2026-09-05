@@ -1,7 +1,8 @@
 import { toHtmlDateValue } from "@1apply/form-engine";
 import { FormPageCaptureSchema } from "@1apply/contracts";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Page, Locator } from "playwright";
+import type { Page, Locator } from "./host-page";
+import { launchHostBrowser } from "./host-page";
 
 import type { Actor } from "@/auth/actor";
 import { logError } from "@/lib/log";
@@ -9,6 +10,7 @@ import { snapToHostOption } from "@/lib/needs-you-field-kinds";
 import { persistFormPageCapture } from "@/server/extension/persist-form-page-capture";
 import { fillFormPageFromJson } from "@/server/extension/form-fill-from-json";
 import { isHostFileUploadEntry, requiredHostFieldsMissing } from "@/server/applications/host-page-fill";
+import { isHostSubmissionConfirmed } from "@/server/applications/host-submit-confirm";
 
 import {
   executeFormDomInPage,
@@ -110,13 +112,22 @@ async function waitForHostConfirmation(page: Page): Promise<boolean> {
 
 async function hostLooksConfirmed(page: Page): Promise<boolean> {
   if (await evaluateFormDom<boolean>(page, "confirm")) return true;
-  const href = page.url().toLowerCase();
-  if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
-  const confirmation = page
-    .locator(".freebirdFormviewerViewResponseConfirmationMessage, .vHW8K")
-    .or(page.getByText(/your response has been recorded|response has been recorded/i))
-    .or(page.getByText(/submit another response/i));
-  return confirmation.first().isVisible().catch(() => false);
+  const href = page.url();
+  if (/viewform|editform/i.test(href)) return false;
+  const pageText = ((await page.locator("body").innerText().catch(() => "")) || "").trim();
+  return isHostSubmissionConfirmed({ href, pageText });
+}
+
+/** Google Next/Submit POSTs to /formResponse; wait to land back on the form or a real thank-you page. */
+async function settleAfterHostNavigation(page: Page): Promise<void> {
+  await page.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => undefined);
+  const deadline = Date.now() + 6_000;
+  while (Date.now() < deadline) {
+    const href = page.url().toLowerCase();
+    if (/viewform|editform/.test(href)) return;
+    if (await hostLooksConfirmed(page)) return;
+    await page.waitForTimeout(250);
+  }
 }
 
 async function hostSubmitButtonStillVisible(page: Page): Promise<boolean> {
@@ -357,8 +368,46 @@ async function readControlValue(control: Locator): Promise<string> {
   return ((await control.textContent().catch(() => "")) ?? "").trim();
 }
 
+async function writeHostControlValue(control: Locator, value: string): Promise<boolean> {
+  const written = await control
+    .evaluate((el, next) => {
+      const node = el as HTMLInputElement | HTMLTextAreaElement;
+      if ("disabled" in node) node.disabled = false;
+      if ("readOnly" in node) node.readOnly = false;
+      const box = node.closest(".Xb9hP, .AgroKb, .Whvsme, .rFrNMe") as HTMLElement | null;
+      box?.click();
+      node.focus();
+      const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      if (setter) setter.call(node, String(next));
+      if (node.value !== String(next)) node.value = String(next);
+      node.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          inputType: "insertFromPaste",
+          data: String(next),
+        }),
+      );
+      node.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      return node.value;
+    }, value)
+    .catch(() => "");
+  return valuesMatch(written, value);
+}
+
 async function typeIntoHostControl(page: Page, control: Locator, value: string): Promise<boolean> {
   await control.scrollIntoViewIfNeeded().catch(() => undefined);
+  if (await writeHostControlValue(control, value)) return true;
+
+  await control
+    .evaluate((el) => {
+      const node = el as HTMLInputElement | HTMLTextAreaElement;
+      if ("disabled" in node) node.disabled = false;
+      if ("readOnly" in node) node.readOnly = false;
+    })
+    .catch(() => undefined);
   await control.click({ timeout: 3_000 }).catch(() => control.click({ timeout: 2_000, force: true }));
   await page.waitForTimeout(80);
   const focused = await control
@@ -383,18 +432,7 @@ async function typeIntoHostControl(page: Page, control: Locator, value: string):
   await page.keyboard.press("Tab").catch(() => undefined);
   await page.waitForTimeout(80);
   if (valuesMatch(await readControlValue(control), value)) return true;
-
-  await control.click({ timeout: 2_000, force: true }).catch(() => undefined);
-  try {
-    await control.pressSequentially(value, {
-      delay: 12,
-      timeout: Math.min(45_000, 2_500 + value.length * 35),
-    });
-  } catch {
-    await control.fill(value, { timeout: 3_000, force: true }).catch(() => undefined);
-  }
-  await page.keyboard.press("Tab").catch(() => undefined);
-  return valuesMatch(await readControlValue(control), value);
+  return writeHostControlValue(control, value);
 }
 
 async function fillDateWithPlaywright(page: Page, scope: Locator, raw: string): Promise<boolean> {
@@ -643,20 +681,12 @@ async function runPlaywrightHostSession(input: {
   sourceUrl: string;
   clickFinalSubmit: boolean;
 }): Promise<ServerHostSubmitResult> {
-  let browser: Awaited<ReturnType<(typeof import("playwright"))["chromium"]["launch"]>> | null = null;
+  let browser: Awaited<ReturnType<typeof launchHostBrowser>>["browser"] | null = null;
 
   try {
-    const { chromium } = await import("playwright");
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 1280, height: 900 },
-    });
-    const page = await context.newPage();
+    const launched = await launchHostBrowser();
+    browser = launched.browser;
+    const page = launched.page;
 
     await page.goto(input.sourceUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await waitForPageReady(page);
@@ -772,7 +802,7 @@ async function runPlaywrightHostSession(input: {
 
         const missingRequired = requiredHostFieldsMissing(liveCapture.fields, livePlan.fields);
         if (missingRequired.length > 0) {
-          await context.close();
+          await page.close();
           return {
             ok: true,
             submitted: false,
@@ -798,6 +828,21 @@ async function runPlaywrightHostSession(input: {
             userId: input.actor.userId,
             entries: entries.filter((entry) => blockedIds.includes(entry.fieldId)),
           });
+          blockedIds = await requiredEmptyOnHost();
+        }
+        if (blockedIds.length > 0) {
+          const missing = liveCapture.fields
+            .filter((field) => blockedIds.includes(field.fieldId))
+            .map((field) => field.label.trim() || field.fieldId);
+          await page.close();
+          return {
+            ok: true,
+            submitted: false,
+            hostSubmitClicked: false,
+            filledFields: totalFilled,
+            pausedForNeedsYou: true,
+            missingRequired: missing.length ? missing : blockedIds,
+          };
         }
       }
 
@@ -817,6 +862,7 @@ async function runPlaywrightHostSession(input: {
       }
 
       if (advanced) {
+        await settleAfterHostNavigation(page);
         await waitForPageReady(page);
         if (!(await pageUnchanged())) {
           continue;
@@ -833,13 +879,26 @@ async function runPlaywrightHostSession(input: {
             (await clickHostNextWithPlaywright(page)) ||
             (await evaluateFormDom<{ clicked: boolean }>(page, "next")).clicked;
           if (retried) {
+            await settleAfterHostNavigation(page);
             await waitForPageReady(page);
             if (!(await pageUnchanged())) continue;
           }
         }
       }
 
-      if (input.clickFinalSubmit) {
+      const strandedOnEmptyResponse =
+        /formresponse/i.test(page.url()) && !(await hostLooksConfirmed(page));
+      if (strandedOnEmptyResponse) {
+        await page.close();
+        return {
+          ok: false,
+          error:
+            "Host Next landed on an empty response page. The host did not confirm a submission — open the form and submit manually, or tap Resubmit.",
+          hostSubmitClicked: false,
+        };
+      }
+
+      if (input.clickFinalSubmit && (capture.fields.length > 0 || totalFilled > 0)) {
         // Prefer Playwright pointer click for Google Forms; fall back to in-page .click().
         let submitClicked = await clickHostSubmitWithPlaywright(page);
         if (!submitClicked) {
@@ -852,6 +911,7 @@ async function runPlaywrightHostSession(input: {
 
         if (submitClicked) {
           hostSubmitClicked = true;
+          await settleAfterHostNavigation(page);
           let confirmed = await waitForHostConfirmation(page);
           if (!confirmed && !(await evaluateFormDom<boolean>(page, "validation"))) {
             // Retry only while the original Submit control is still on this page.
@@ -862,7 +922,7 @@ async function runPlaywrightHostSession(input: {
             }
           }
           if (confirmed || (await hostLooksConfirmed(page))) {
-            await context.close();
+            await page.close();
             return {
               ok: true,
               submitted: true,
@@ -871,8 +931,18 @@ async function runPlaywrightHostSession(input: {
             };
           }
 
+          const bodyText = ((await page.locator("body").innerText().catch(() => "")) || "").toLowerCase();
+          if (/to fill out this form, you must be signed in|you must be signed in to (fill|continue|submit)/i.test(bodyText)) {
+            await page.close();
+            return {
+              ok: false,
+              blockedReason: "This host form requires Google sign-in before submit. Open the form, sign in, and use Resubmit to host.",
+              hostSubmitClicked: true,
+            };
+          }
+
           const validationBlocked = await evaluateFormDom<boolean>(page, "validation");
-          await context.close();
+          await page.close();
           return {
             ok: false,
             error: validationBlocked
@@ -882,7 +952,11 @@ async function runPlaywrightHostSession(input: {
           };
         }
       } else if (capture.hazards.hasSubmitControl) {
-        await context.close();
+        if (capture.fields.length === 0 && totalFilled === 0) {
+          await page.close();
+          return { ok: false, error: "No fillable fields found on this page." };
+        }
+        await page.close();
         return {
           ok: true,
           submitted: false,
@@ -891,7 +965,7 @@ async function runPlaywrightHostSession(input: {
         };
       }
 
-      if (capture.fields.length === 0 && !capture.hazards.hasSubmitControl) {
+      if (capture.fields.length === 0) {
         return { ok: false, error: "No fillable fields found on this page." };
       }
 

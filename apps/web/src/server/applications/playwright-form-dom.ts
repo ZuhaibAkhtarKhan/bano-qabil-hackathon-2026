@@ -234,7 +234,13 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
   function visible(el: Element): boolean {
     const node = el as HTMLElement;
-    if ((node as HTMLButtonElement).disabled) return false;
+    const tag = node.tagName.toLowerCase();
+    const inputType = tag === "input" ? ((node as HTMLInputElement).type || "text").toLowerCase() : "";
+    // Google Forms leaves text inputs `disabled` until the card is focused.
+    // Those questions still must be captured — only skip inert buttons.
+    const isActionButton =
+      tag === "button" || (tag === "input" && (inputType === "button" || inputType === "submit" || inputType === "reset"));
+    if (isActionButton && (node as HTMLButtonElement).disabled) return false;
     try {
       const style = getComputedStyle(node);
       if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
@@ -340,7 +346,8 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
       const heading = item.querySelector(
         '[role="heading"], .M7eMe, .freebirdFormviewerComponentsQuestionBaseTitle',
       );
-      const label = (heading?.textContent ?? item.getAttribute("aria-label") ?? "")
+      const headingRaw = heading?.textContent ?? item.getAttribute("aria-label") ?? "";
+      const label = headingRaw
         .replace(/\s+/g, " ")
         .replace(/\bYour answer\b/gi, " ")
         .replace(/\s*\*\s*/g, " ")
@@ -410,7 +417,7 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
           '[aria-required="true"], .freebirdFormviewerComponentsQuestionBaseRequiredAsterisk',
         ),
       );
-      const headingRequired = /\brequired\b/i.test(heading?.textContent ?? "");
+      const headingRequired = /\brequired\b/i.test(headingRaw) || /\*/.test(headingRaw);
       const looksOptional = /\boptional\b/i.test(item.textContent ?? "");
       const checkedChoice = item.querySelector(
         '[role="radio"][aria-checked="true"], [role="checkbox"][aria-checked="true"], input:checked',
@@ -800,25 +807,32 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
   }
 
   function detectSubmissionConfirmation(): boolean {
-    const text = (document.body?.innerText ?? "").toLowerCase();
+    // Keep in sync with isHostSubmissionConfirmed in host-submit-confirm.ts.
+    const text = (document.body?.innerText ?? "").replace(/\s+/g, " ").trim();
     const href = location.href.toLowerCase();
-    // Google Forms confirmation heading / message
-    if (/your response has been recorded|response has been recorded|response recorded|تم تسجيل إجابتك/i.test(text)) {
+    if (/your response has been recorded|response has been recorded|تم تسجيل إجابتك/i.test(text)) {
       return true;
     }
-    if (/submit another response|submit another form/i.test(text)) return true;
-    if (document.querySelector(".freebirdFormviewerViewResponseConfirmationMessage, .vHW8K")) return true;
-    if (/formresponse/.test(href) && !/viewform|editform/.test(href)) return true;
-    return /thank you for (your )?(response|submission)|submission received|successfully submitted|application received|we have received your|تم إرسال/i.test(
-      text,
-    );
+    const confirmMessage = document.querySelector(".freebirdFormviewerViewResponseConfirmationMessage");
+    if (confirmMessage && (confirmMessage.textContent ?? "").trim().length > 0) return true;
+    const heading = document.querySelector(".vHW8K");
+    const headingText = (heading?.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (headingText && /recorded|thank you|submitted/i.test(headingText)) return true;
+    // Google POSTs Next/Submit to /formResponse; an empty page is not a recorded answer.
+    if (/submit another response|submit another form/i.test(text) && /formresponse/.test(href)) {
+      return true;
+    }
+    return false;
   }
 
   function detectRequiredFieldErrors(): boolean {
+    const alerts = Array.from(document.querySelectorAll('[role="alert"], .Rq5Gcb, [jsname="RCqYHf"]'));
+    if (alerts.some((el) => visible(el) && /required|fill out|enter a/i.test(el.textContent ?? ""))) {
+      return true;
+    }
     const text = (document.body?.innerText ?? "").toLowerCase();
-    return /this is a required question|required question|please fill out this field|please enter a|must be filled|is required\b/i.test(
-      text,
-    );
+    // Do not match the Google Forms legend "* Indicates required question".
+    return /this is a required question|please fill out this field|please enter a valid|must be filled/i.test(text);
   }
 
   if (action === "capture") return captureFormPage();

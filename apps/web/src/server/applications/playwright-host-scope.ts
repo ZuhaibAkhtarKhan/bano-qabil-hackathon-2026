@@ -1,4 +1,4 @@
-import type { Locator, Page } from "playwright";
+import type { Locator, Page } from "./host-page";
 
 function normalizeHostHeading(text: string): string {
   return text

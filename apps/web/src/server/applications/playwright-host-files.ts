@@ -1,4 +1,4 @@
-import type { Page, Frame, Locator } from "playwright";
+import type { Page, Frame, Locator } from "./host-page";
 
 import type { DocumentVersionUpload } from "@/server/documents/download-version";
 

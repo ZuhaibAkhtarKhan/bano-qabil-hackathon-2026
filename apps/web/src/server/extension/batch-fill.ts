@@ -1034,30 +1034,8 @@ export async function runBatchFillPlan(input: {
     fromCustom,
   );
 
-  const remaining = fields.filter((field) => merged.find((item) => item.fieldId === field.fieldId)?.status !== "filled");
-
-  const llmFields = remaining.length ? await llmFormFillFromMemory(remaining, catalog) : [];
-  if (llmFields?.length) {
-    merged = preferFilledResults(merged, attachCatalogCitations(ensureEveryField(remaining, llmFields), catalog, remaining));
-  }
-
-  if (llmFields === null && remaining.length) {
-    const drafts = await draftRemainingNarrative({
-      supabase: input.supabase,
-      actor: input.actor,
-      applicationId: input.applicationId,
-      fields,
-      results: merged,
-      mappings: withAi,
-      catalog,
-    });
-    if (drafts.length) merged = preferFilledResults(merged, drafts);
-  }
-
-  merged = sanitizeNativeFieldValues(fields, ensureEveryField(fields, merged));
-  merged = annotateFieldResolutions(fields, merged, withAi);
-
-  // Prefer values already saved on this application (Need You / memory / kit) over fresh empty plans.
+  // This application's fill memory (Need You + prior kit/AI writes) wins and
+  // skips the LLM for questions already answered on this packet.
   const { data: storedMappings } = await input.supabase
     .from("field_mappings")
     .select("field_key, label, value, source, confidence, excluded_by_default")
@@ -1094,11 +1072,33 @@ export async function runBatchFillPlan(input: {
       return result ? [result] : [];
     });
     if (fromStored.length) {
-      // Stored filled values win even over other filled plans (Need You edits beat stale kit).
       const over = new Map(fromStored.map((item) => [item.fieldId, item]));
       merged = merged.map((item) => over.get(item.fieldId) ?? item);
     }
   }
+
+  const remaining = fields.filter((field) => merged.find((item) => item.fieldId === field.fieldId)?.status !== "filled");
+
+  const llmFields = remaining.length ? await llmFormFillFromMemory(remaining, catalog) : [];
+  if (llmFields?.length) {
+    merged = preferFilledResults(merged, attachCatalogCitations(ensureEveryField(remaining, llmFields), catalog, remaining));
+  }
+
+  if (llmFields === null && remaining.length) {
+    const drafts = await draftRemainingNarrative({
+      supabase: input.supabase,
+      actor: input.actor,
+      applicationId: input.applicationId,
+      fields,
+      results: merged,
+      mappings: withAi,
+      catalog,
+    });
+    if (drafts.length) merged = preferFilledResults(merged, drafts);
+  }
+
+  merged = sanitizeNativeFieldValues(fields, ensureEveryField(fields, merged));
+  merged = annotateFieldResolutions(fields, merged, withAi);
 
   const storedDocIds = fromStored
     .map((item) => item.documentVersionId)
