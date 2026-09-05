@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AsyncButton, SubmitButton } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { authErrorFromSearchParams, ACCOUNT_EXISTS_MESSAGE, mapAuthError, safeNextPath } from "@/lib/auth-errors";
+import { DEMO_ACCOUNT } from "@/lib/demo-account";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
@@ -26,9 +27,10 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     }),
   );
   const [passwordPending, setPasswordPending] = useState(false);
+  const [demoPending, setDemoPending] = useState(false);
   const configured = isSupabaseConfigured();
   const nextPath = safeNextPath(searchParams.get("next"), mode === "sign-up" ? "/app/onboarding/consent" : "/app");
-  const busy = passwordPending;
+  const busy = passwordPending || demoPending;
 
   async function onPasswordSubmit(event: FormEvent) {
     event.preventDefault();
@@ -84,6 +86,37 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         ),
       );
       setPasswordPending(false);
+    }
+  }
+
+  async function onDemoSignIn() {
+    setError(null);
+    setMessage(null);
+    if (!configured) {
+      setError("Supabase is not configured on this environment.");
+      return;
+    }
+    setEmail(DEMO_ACCOUNT.email);
+    setPassword(DEMO_ACCOUNT.password);
+    setDemoPending(true);
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: DEMO_ACCOUNT.email,
+        password: DEMO_ACCOUNT.password,
+      });
+      if (signInError) throw signInError;
+      router.push("/app?afterAuth=1");
+      router.refresh();
+    } catch (caught) {
+      setError(
+        mapAuthError(
+          caught instanceof Error
+            ? { message: caught.message, code: "code" in caught ? String((caught as { code?: string }).code ?? "") : "" }
+            : { message: String(caught) },
+        ),
+      );
+      setDemoPending(false);
     }
   }
 
@@ -190,6 +223,31 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         {mode === "sign-up" ? "Create account" : "Sign in"}
         <span aria-hidden="true">→</span>
       </SubmitButton>
+
+      {mode === "sign-in" ? (
+        <div className="rounded-xl border border-line bg-[#fafbf8] px-3 py-3">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted">Hackathon demo</p>
+          <p className="mt-1 text-xs leading-5 text-ink-muted">
+            Pre-filled kit, Need You gaps, a deadline freeze packet, a host CAPTCHA wall, and a frozen submission.
+          </p>
+          <p className="mt-2 font-mono text-[11px] text-ink">
+            {DEMO_ACCOUNT.email}
+            <span className="text-ink-muted"> / </span>
+            {DEMO_ACCOUNT.password}
+          </p>
+          <AsyncButton
+            type="button"
+            variant="secondary"
+            className="mt-3 w-full"
+            disabled={busy}
+            pending={demoPending}
+            pendingText="Opening demo…"
+            onClick={() => onDemoSignIn()}
+          >
+            Use demo account
+          </AsyncButton>
+        </div>
+      ) : null}
 
       <div className="relative py-1">
         <div className="absolute inset-0 flex items-center" aria-hidden="true">
