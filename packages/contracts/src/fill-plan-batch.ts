@@ -47,6 +47,8 @@ export const BatchFillRequestSchema = z.object({
   applicationId: uuidSchema,
   pageIndex: z.number().int().nonnegative(),
   fields: z.array(BatchFieldInputSchema),
+  /** Host extension continue: memory + saved Need You only — skip slow LLM drafts. */
+  skipAi: z.boolean().optional(),
 });
 
 export const BatchFieldResultSchema = z.object({

@@ -95,14 +95,14 @@ export async function syncHostAutomationForApplication(input: {
   }
 }
 
-/** After Need You edits, continue the page-loop when required fields are ready. */
+/** After Need You edits, continue the page-loop when the current host page is ready. */
 export async function tryContinueHostFillAfterNeedsYou(input: {
   supabase: SupabaseClient;
   actor: Actor;
   applicationId: string;
 }): Promise<void> {
   const prefs = parseWorkspacePreferences(input.actor.profile.preferences);
-  const { mappingBlocksPageAdvance } = await import("./host-page-fill");
+  const { mappingBlocksHostPageContinue } = await import("./host-page-fill");
   const { dedupeFieldMappings } = await import("@/lib/field-mappings");
 
   const { data: mappings } = await input.supabase
@@ -111,7 +111,8 @@ export async function tryContinueHostFillAfterNeedsYou(input: {
     .eq("application_id", input.applicationId)
     .eq("user_id", input.actor.userId);
 
-  const blocking = dedupeFieldMappings(mappings ?? []).some((row) => mappingBlocksPageAdvance(row));
+  // Only host-page form gaps block continue — not Application deadline / kit-only empties.
+  const blocking = dedupeFieldMappings(mappings ?? []).some((row) => mappingBlocksHostPageContinue(row));
   if (blocking) return;
 
   const { data: application } = await input.supabase

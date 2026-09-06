@@ -81,7 +81,7 @@ export function toBatchFieldInputs(
     };
     if (field.name) input.name = field.name;
     if (field.options.length) input.options = field.options;
-    if (field.required) input.required = true;
+    input.required = Boolean(field.required);
     if (extras.maxLength && extras.maxLength > 0) input.maxLength = extras.maxLength;
     if (extras.currentValue?.trim()) input.currentValue = extras.currentValue.trim();
     if (field.nearbyText?.trim()) input.nearbyText = field.nearbyText.trim().slice(0, 240);

@@ -993,6 +993,8 @@ export async function runBatchFillPlan(input: {
   origin?: string;
   hazards?: Record<string, unknown>;
   hostFieldKeyById?: Record<string, string>;
+  /** Prefer saved Need You / memory; skip LLM enrichment (host extension continue). */
+  skipAi?: boolean;
 }): Promise<
   BatchFillResponse & {
     fillSessionId: string | null;
@@ -1015,18 +1017,12 @@ export async function runBatchFillPlan(input: {
   );
   const withDocs = await enrichDocumentAttachments(input.supabase, input.actor.userId, mapped);
   const withYesNo = await enrichYesNoEligibilityMappings(input.supabase, input.actor, withDocs);
-  const withJudgment = await enrichJudgmentYesNoMappings(
-    input.supabase,
-    input.actor,
-    input.applicationId,
-    withYesNo,
-  );
-  const withAi = await enrichAiAnswerableMappings(
-    input.supabase,
-    input.actor,
-    input.applicationId,
-    withJudgment,
-  );
+  const withJudgment = input.skipAi
+    ? withYesNo
+    : await enrichJudgmentYesNoMappings(input.supabase, input.actor, input.applicationId, withYesNo);
+  const withAi = input.skipAi
+    ? withJudgment
+    : await enrichAiAnswerableMappings(input.supabase, input.actor, input.applicationId, withJudgment);
 
   for (const mapping of withAi) {
     const versionId = mapping.attachment?.versionId;
@@ -1052,24 +1048,26 @@ export async function runBatchFillPlan(input: {
     fromCustom,
   );
 
-  const remaining = fields.filter((field) => merged.find((item) => item.fieldId === field.fieldId)?.status !== "filled");
+  if (!input.skipAi) {
+    const remaining = fields.filter((field) => merged.find((item) => item.fieldId === field.fieldId)?.status !== "filled");
 
-  const llmFields = remaining.length ? await llmFormFillFromMemory(remaining, catalog) : [];
-  if (llmFields?.length) {
-    merged = preferFilledResults(merged, attachCatalogCitations(ensureEveryField(remaining, llmFields), catalog, remaining));
-  }
+    const llmFields = remaining.length ? await llmFormFillFromMemory(remaining, catalog) : [];
+    if (llmFields?.length) {
+      merged = preferFilledResults(merged, attachCatalogCitations(ensureEveryField(remaining, llmFields), catalog, remaining));
+    }
 
-  if (llmFields === null && remaining.length) {
-    const drafts = await draftRemainingNarrative({
-      supabase: input.supabase,
-      actor: input.actor,
-      applicationId: input.applicationId,
-      fields,
-      results: merged,
-      mappings: withAi,
-      catalog,
-    });
-    if (drafts.length) merged = preferFilledResults(merged, drafts);
+    if (llmFields === null && remaining.length) {
+      const drafts = await draftRemainingNarrative({
+        supabase: input.supabase,
+        actor: input.actor,
+        applicationId: input.applicationId,
+        fields,
+        results: merged,
+        mappings: withAi,
+        catalog,
+      });
+      if (drafts.length) merged = preferFilledResults(merged, drafts);
+    }
   }
 
   merged = sanitizeNativeFieldValues(fields, ensureEveryField(fields, merged));
@@ -1173,7 +1171,9 @@ export async function runBatchFillPlan(input: {
     filledCount: parsed.fields.filter((item) => item.status === "filled").length,
   });
   await markFillStarted(input.supabase, input.actor, input.applicationId);
-  scheduleRefreshOpenApplicationsFromKit(input.supabase, input.actor);
+  if (!input.skipAi) {
+    scheduleRefreshOpenApplicationsFromKit(input.supabase, input.actor);
+  }
 
   return { ...parsed, fillSessionId: session.fillSessionId, expiresAt: session.expiresAt, mappings: legacyMappings };
 }

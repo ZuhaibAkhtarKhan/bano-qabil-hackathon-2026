@@ -780,13 +780,17 @@ export async function resolveNeedsYouDeadline(formData: FormData): Promise<Needs
     source: "needs_you",
   });
 
-  const { syncHostAutomationForApplication } = await import("@/server/applications/host-automation-schedule");
+  const { syncHostAutomationForApplication, tryContinueHostFillAfterNeedsYou } = await import(
+    "@/server/applications/host-automation-schedule"
+  );
   await syncHostAutomationForApplication({
     supabase,
     actor,
     applicationId,
     queuePrefill: false,
   });
+  // Deadline must not gate the page-loop — resume fill when host-page fields are already ready.
+  await tryContinueHostFillAfterNeedsYou({ supabase, actor, applicationId });
 
   revalidateNeedsYou(applicationId);
   return { ok: true, notice: "saved" };

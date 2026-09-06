@@ -1,5 +1,9 @@
 /** Page-loop helpers: capture → headless memory → pause on required gaps → Next/Submit. */
 
+import { isCaptchaChallengeCopy, isFormBuilderChromeLabel, isMachineFieldToken } from "@1apply/form-engine";
+
+import { isNeedsYouSystemNoise } from "@/lib/needs-you";
+
 export function planFillsField(plan: {
   status?: string | null;
   value?: string | null;
@@ -53,6 +57,63 @@ export function mappingBlocksPageAdvance(row: {
 export function mappingMetaSkipped(meta: unknown): boolean {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
   return Boolean((meta as { skipped?: unknown }).skipped);
+}
+
+/**
+ * True when this mapping came from (or was answered for) a live host form page.
+ * Kit-only / ingest empties and platform Need You items (deadline, eligibility) must not
+ * gate advancing to the next form page.
+ */
+export function mappingFromHostFormPage(row: {
+  label?: string | null;
+  field_key?: string | null;
+  source?: string | null;
+  meta?: unknown;
+}): boolean {
+  const label = String(row.label ?? "").trim();
+  const key = String(row.field_key ?? "").trim();
+  if (
+    isCaptchaChallengeCopy(label) ||
+    isCaptchaChallengeCopy(key) ||
+    isNeedsYouSystemNoise(label) ||
+    isNeedsYouSystemNoise(key) ||
+    isFormBuilderChromeLabel(label) ||
+    isFormBuilderChromeLabel(key)
+  ) {
+    return false;
+  }
+  if (isMachineFieldToken(label) && isMachineFieldToken(key)) return false;
+
+  const source = String(row.source ?? "").toLowerCase();
+  if (
+    source === "page_capture" ||
+    source.includes("batch_fill") ||
+    source.includes("needs you") ||
+    source.includes("user (extension") ||
+    source.includes("application tab edit")
+  ) {
+    return true;
+  }
+  // Page inventory always stamps meta.required on host fields.
+  return mappingMetaRequired(row.meta) !== null;
+}
+
+/**
+ * Gate for queueing host_page_loop after Need You edits.
+ * Only unanswered host-page fields (or unskipped optionals) block; Application deadline
+ * and other non-page Need You items do not.
+ */
+export function mappingBlocksHostPageContinue(row: {
+  label?: string | null;
+  field_key?: string | null;
+  value?: string | null;
+  confidence?: number | null;
+  excluded_by_default?: boolean | null;
+  source?: string | null;
+  meta?: unknown;
+}): boolean {
+  if (!mappingFromHostFormPage(row)) return false;
+  return mappingBlocksPageAdvance(row);
 }
 
 const VERSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

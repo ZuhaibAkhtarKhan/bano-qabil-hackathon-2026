@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   isHostFileUploadEntry,
+  mappingBlocksHostPageContinue,
   mappingBlocksPageAdvance,
+  mappingFromHostFormPage,
   requiredHostFieldsMissing,
 } from "@/server/applications/host-page-fill";
 
@@ -99,6 +101,58 @@ describe("mappingBlocksPageAdvance", () => {
         confidence: 1,
         excluded_by_default: false,
         meta: { required: true },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("mappingBlocksHostPageContinue", () => {
+  it("ignores kit-only empties that were never on a host page", () => {
+    expect(
+      mappingFromHostFormPage({
+        label: "Preferred name",
+        field_key: "preferred_name",
+        source: "Your kit",
+        meta: {},
+      }),
+    ).toBe(false);
+    expect(
+      mappingBlocksHostPageContinue({
+        label: "Preferred name",
+        field_key: "preferred_name",
+        value: "",
+        confidence: 0.1,
+        excluded_by_default: true,
+        source: "Your kit",
+        meta: {},
+      }),
+    ).toBe(false);
+  });
+
+  it("blocks unanswered host-page fields from page capture / Need You", () => {
+    expect(
+      mappingBlocksHostPageContinue({
+        label: "Full name",
+        field_key: "full_name",
+        value: "",
+        confidence: 0.2,
+        excluded_by_default: true,
+        source: "page_capture",
+        meta: { required: true },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat form-builder chrome as a page-continue blocker", () => {
+    expect(
+      mappingBlocksHostPageContinue({
+        label: "Add option",
+        field_key: "add_option",
+        value: "",
+        confidence: 0,
+        excluded_by_default: true,
+        source: "page_capture",
+        meta: { required: false },
       }),
     ).toBe(false);
   });

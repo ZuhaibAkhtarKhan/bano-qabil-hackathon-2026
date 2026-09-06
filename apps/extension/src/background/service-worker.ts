@@ -74,7 +74,10 @@ type FillSession = {
 };
 
 const FILL_SESSION_KEY = "fillSession";
+const AWAITING_HOST_CONTINUE_KEY = "awaitingHostContinueUntil";
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
+const FAST_HOST_POLL_ALARM = "fast-poll-host-submit";
+const HOST_SUBMIT_ALARM = "poll-host-submit-jobs";
 /** Bumped on Stop so in-flight work aborts cleanly. */
 let fillHaltGeneration = 0;
 
@@ -320,8 +323,8 @@ async function runBatchFillOnTab(input: {
     url?: string;
     title?: string;
   } | null = null;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    if (attempt > 0) await sleep(600 * attempt);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt > 0) await sleep(350 * attempt);
     try {
       inventory = await sendToTab(input.tabId, { type: "INVENTORY_BATCH" });
     } catch {
@@ -333,8 +336,8 @@ async function runBatchFillOnTab(input: {
     throw new Error("no-fields");
   }
 
-  // Let Google Forms / ATS widgets finish hydrating before we plan fills.
-  await sleep(900);
+  // Brief settle for Google Forms widgets after inventory.
+  await sleep(350);
 
   const hazards = inventory.hazards as
     | {
@@ -355,15 +358,14 @@ async function runBatchFillOnTab(input: {
     });
   }
 
+  // Host jobs prefer saved Need You / kit — skip slow LLM drafting on every page.
   const plan = await createBatchFillPlan({
     applicationId: input.applicationId,
     pageIndex: input.pageIndex,
     origin: input.origin,
     fields: inventory.fields ?? [],
+    skipAi: true,
   });
-
-  // Batch plan persistence is what surfaces gaps in Need You — give the API a beat.
-  await sleep(400);
 
   const files = await loadBatchFiles(plan.fields);
   const typeById = new Map(
@@ -391,7 +393,7 @@ async function runBatchFillOnTab(input: {
   };
 
   // Widgets (radios / listboxes) often need a moment after click before Next is enabled.
-  await sleep(1200);
+  await sleep(450);
 
   const needYouFields = plan.fields.filter((item) => item.status === "need_you");
   // Required and optional both block Next until filled or explicitly skipped in Need You.
@@ -427,17 +429,15 @@ async function getPageStepState(tabId: number): Promise<{
 }
 
 /**
- * fillUntilSubmit: scan → fill from memory → pause on any Need You gap → recheck → Next,
- * until the Submit page (do not click Submit). Never advances while fields are unverified.
- * submitPageOnly: click Next through earlier pages without re-verifying them; fill/verify
- * only the final Submit page.
+ * Every page: inventory → fill from memory → pause on any Need You gap (required or optional)
+ * → recheck → only then Next. Never advances past unverified fields.
+ * Does not click Submit; caller does that when clickFinalSubmit is allowed.
  */
 async function walkHostFormPages(input: {
   tabId: number;
   origin: string;
   applicationId: string;
   hostSubmitAllowed: boolean;
-  mode?: "fillUntilSubmit" | "submitPageOnly";
   maxSteps?: number;
 }): Promise<{
   totalFilled: number;
@@ -445,8 +445,8 @@ async function walkHostFormPages(input: {
   stuckHighlighted: number;
   pagesVisited: number;
   reachedSubmitPage: boolean;
+  pageComplete: boolean;
 }> {
-  const mode = input.mode ?? "fillUntilSubmit";
   let pageIndex = 0;
   let totalFilled = 0;
   const needYouLabels: string[] = [];
@@ -455,24 +455,6 @@ async function walkHostFormPages(input: {
   const maxSteps = input.maxSteps ?? 14;
 
   for (let step = 0; step < maxSteps; step += 1) {
-    const stepState = await getPageStepState(input.tabId);
-    const onSubmitPage = stepState.hasSubmit && !stepState.hasNext;
-
-    if (mode === "submitPageOnly" && !onSubmitPage && stepState.hasNext) {
-      const advance = (await sendToTab<{ clicked: boolean; reason?: string }>(input.tabId, {
-        type: "FORCE_STEP_ADVANCE",
-      }).catch(() => ({ clicked: false, reason: "error" }))) as {
-        clicked: boolean;
-        reason?: string;
-      };
-      if (advance.clicked && advance.reason !== "no-change") {
-        pageIndex += 1;
-        await sleep(1800);
-        continue;
-      }
-      // Fall through to a fill pass if Next is stuck.
-    }
-
     let result = await runBatchFillOnTab({
       tabId: input.tabId,
       origin: input.origin,
@@ -484,9 +466,9 @@ async function walkHostFormPages(input: {
     });
     totalFilled += result.filledCount;
 
-    // Recheck the same page from memory / Need You before advancing.
+    // Recheck only when something is still empty / Need You.
     if (result.highlighted > 0 || result.needYouCount > 0) {
-      await sleep(1500);
+      await sleep(500);
       const retry = await runBatchFillOnTab({
         tabId: input.tabId,
         origin: input.origin,
@@ -505,36 +487,34 @@ async function walkHostFormPages(input: {
     }
     stuckHighlighted = result.highlighted;
 
-    const afterFill = await getPageStepState(input.tabId);
-    if (afterFill.hasSubmit && !afterFill.hasNext) {
-      reachedSubmitPage = true;
-      // Still pause if the Submit page itself has unverified fields.
-      if (result.needYouCount > 0 || result.highlighted > 0) {
-        return {
-          totalFilled,
-          needYouLabels: needYouLabels.slice(0, 8),
-          stuckHighlighted,
-          pagesVisited: pageIndex + 1,
-          reachedSubmitPage,
-        };
-      }
+    const pageAudit = await auditPageFields(input.tabId);
+    const gaps = Math.max(result.needYouCount, result.highlighted, pageAudit.emptyCount);
+    const currentGapLabels =
+      result.needYouLabels.length > 0 ? result.needYouLabels : pageAudit.emptyLabels;
+
+    const stepState = await getPageStepState(input.tabId);
+    reachedSubmitPage = stepState.hasSubmit && !stepState.hasNext;
+
+    // Any empty / Need You field (including optional) blocks advance.
+    if (gaps > 0) {
       return {
         totalFilled,
-        needYouLabels: needYouLabels.slice(0, 8),
-        stuckHighlighted,
+        needYouLabels: currentGapLabels.slice(0, 8),
+        stuckHighlighted: Math.max(stuckHighlighted, pageAudit.emptyCount),
         pagesVisited: pageIndex + 1,
         reachedSubmitPage,
+        pageComplete: false,
       };
     }
 
-    // Any remaining Need You gap (required or optional) or empty highlight blocks Next.
-    if (result.needYouCount > 0 || result.highlighted > 0) {
+    if (reachedSubmitPage || !stepState.hasNext) {
       return {
         totalFilled,
-        needYouLabels: needYouLabels.slice(0, 8),
-        stuckHighlighted,
+        needYouLabels: [],
+        stuckHighlighted: 0,
         pagesVisited: pageIndex + 1,
-        reachedSubmitPage,
+        reachedSubmitPage: reachedSubmitPage || stepState.hasSubmit,
+        pageComplete: true,
       };
     }
 
@@ -547,18 +527,17 @@ async function walkHostFormPages(input: {
 
     if (advance.clicked && advance.reason !== "no-change") {
       pageIndex += 1;
-      await sleep(2200);
+      await sleep(900);
       continue;
     }
 
-    const finalState = await getPageStepState(input.tabId);
-    reachedSubmitPage = finalState.hasSubmit && !finalState.hasNext;
     return {
       totalFilled,
-      needYouLabels: needYouLabels.slice(0, 8),
-      stuckHighlighted,
+      needYouLabels: currentGapLabels.slice(0, 8),
+      stuckHighlighted: Math.max(stuckHighlighted, pageAudit.emptyCount),
       pagesVisited: pageIndex + 1,
-      reachedSubmitPage,
+      reachedSubmitPage: (await getPageStepState(input.tabId)).hasSubmit,
+      pageComplete: advance.reason === "no-next",
     };
   }
 
@@ -568,7 +547,20 @@ async function walkHostFormPages(input: {
     stuckHighlighted,
     pagesVisited: pageIndex + 1,
     reachedSubmitPage,
+    pageComplete: false,
   };
+}
+
+/** Count empty inventoried fields on the current page (required and optional). */
+async function auditPageFields(tabId: number): Promise<{ emptyCount: number; emptyLabels: string[] }> {
+  try {
+    return (await sendToTab(tabId, { type: "AUDIT_PAGE_FIELDS" })) as {
+      emptyCount: number;
+      emptyLabels: string[];
+    };
+  } catch {
+    return { emptyCount: 0, emptyLabels: [] };
+  }
 }
 
 async function waitForTabComplete(tabId: number, timeoutMs = 45000): Promise<void> {
@@ -624,7 +616,7 @@ async function openOrReuseFormTab(
   const tab = await chrome.tabs.create({ url: sourceUrl, active: false });
   if (!tab.id) throw new Error("Could not open host form tab in the background.");
   await waitForTabComplete(tab.id);
-  await sleep(2500);
+  await sleep(1200);
   return { tabId: tab.id, origin, reused: false };
 }
 
@@ -657,61 +649,44 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       tabId,
     });
 
-    if (!job.clickFinalSubmit) {
-      const fillPass = await walkHostFormPages({
-        tabId,
-        origin: opened.origin,
-        applicationId: job.applicationId,
-        hostSubmitAllowed: false,
-        mode: "fillUntilSubmit",
-      });
-
-      if (fillPass.needYouLabels.length > 0 || fillPass.stuckHighlighted > 0) {
-        await sleep(3000);
-        await completeHostSubmitJob({
-          jobId: job.jobId,
-          filledFields: fillPass.totalFilled,
-          pausedForNeedsYou: true,
-          missingRequired: fillPass.needYouLabels,
-        });
-        keepTabOpen = true;
-        return;
-      }
-
-      await sleep(2500);
-      await completeHostSubmitJob({
-        jobId: job.jobId,
-        filledFields: fillPass.totalFilled,
-      });
-      // Prefill done / waiting for deadline window — keep tab for later Submit.
-      keepTabOpen = true;
-      return;
-    }
-
-    // Submit path: do not re-verify earlier pages — advance to Submit, verify that page, click.
+    // Always fill page-by-page (memory → Need You). Submit click only when allowed.
     const stillAllowed = await beginHostSubmitJob(job.jobId);
     if (!stillAllowed.ok) {
       keepTabOpen = true;
       return;
     }
 
-    const submitPass = await walkHostFormPages({
+    const fillPass = await walkHostFormPages({
       tabId,
       origin: opened.origin,
       applicationId: job.applicationId,
       hostSubmitAllowed: false,
-      mode: "submitPageOnly",
     });
 
-    if (submitPass.needYouLabels.length > 0 || submitPass.stuckHighlighted > 0) {
-      await sleep(3000);
+    if (!fillPass.pageComplete || fillPass.needYouLabels.length > 0 || fillPass.stuckHighlighted > 0) {
+      await sleep(600);
       await completeHostSubmitJob({
         jobId: job.jobId,
-        filledFields: submitPass.totalFilled,
+        filledFields: fillPass.totalFilled,
         pausedForNeedsYou: true,
-        missingRequired: submitPass.needYouLabels,
+        missingRequired: fillPass.needYouLabels.length
+          ? fillPass.needYouLabels
+          : ["Unanswered fields on this page"],
       });
       keepTabOpen = true;
+      await markAwaitingHostContinue();
+      return;
+    }
+
+    if (!job.clickFinalSubmit) {
+      await sleep(400);
+      await completeHostSubmitJob({
+        jobId: job.jobId,
+        filledFields: fillPass.totalFilled,
+      });
+      // Prefill done / waiting for deadline window — keep tab for later Submit.
+      keepTabOpen = true;
+      await clearAwaitingHostContinue();
       return;
     }
 
@@ -721,13 +696,13 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       return;
     }
 
-    await sleep(2000);
+    await sleep(800);
     const submit = await clickHostSubmitAndConfirm(tabId);
 
-    await sleep(1200);
+    await sleep(600);
     await completeHostSubmitJob({
       jobId: job.jobId,
-      filledFields: submitPass.totalFilled,
+      filledFields: fillPass.totalFilled,
       submitted: Boolean(submit.confirmed),
       hostSubmitClicked: Boolean(submit.clicked),
       error: submit.confirmed
@@ -738,6 +713,7 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
     });
     // Close after a terminal submit attempt (success or confirmed click).
     keepTabOpen = false;
+    await clearAwaitingHostContinue();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Host job failed.";
     const code = error && typeof error === "object" && "code" in error ? String((error as { code: string }).code) : "";
@@ -757,7 +733,7 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       // Leave the form tab open for Need You continue / deadline Submit.
       return;
     }
-    await sleep(2500);
+    await sleep(800);
     await closeBackgroundTab(tabId);
     await chrome.storage.local.remove(FILL_SESSION_KEY).catch(() => undefined);
   }
@@ -765,11 +741,52 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
 
 let hostJobPollRunning = false;
 
+async function markAwaitingHostContinue(): Promise<void> {
+  // Keep polling for ~3 minutes after Need You pause so answers resume quickly.
+  await chrome.storage.local.set({ [AWAITING_HOST_CONTINUE_KEY]: Date.now() + 3 * 60 * 1000 });
+  scheduleFastHostPoll(0.05);
+  // Ensure Need You tabs can wake the poll via postMessage → bridge.
+  try {
+    const { resolveAppBaseUrl } = await import("../shared/app-url");
+    const origin = new URL(await resolveAppBaseUrl()).origin;
+    const tabs = await chrome.tabs.query({ url: `${origin}/*` });
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (!tab.id) return;
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["bridge.js"] }).catch(() => undefined);
+      }),
+    );
+  } catch {
+    // Best-effort.
+  }
+}
+
+async function clearAwaitingHostContinue(): Promise<void> {
+  await chrome.storage.local.remove(AWAITING_HOST_CONTINUE_KEY);
+  await chrome.alarms.clear(FAST_HOST_POLL_ALARM).catch(() => undefined);
+}
+
+async function isAwaitingHostContinue(): Promise<boolean> {
+  const data = await chrome.storage.local.get([AWAITING_HOST_CONTINUE_KEY]);
+  const until = Number(data[AWAITING_HOST_CONTINUE_KEY] ?? 0);
+  if (!until) return false;
+  if (Date.now() > until) {
+    await clearAwaitingHostContinue();
+    return false;
+  }
+  return true;
+}
+
+function scheduleFastHostPoll(delayInMinutes: number): void {
+  chrome.alarms.create(FAST_HOST_POLL_ALARM, { delayInMinutes: Math.max(0.05, delayInMinutes) });
+}
+
 async function pollAndRunHostSubmitJobs(): Promise<void> {
   if (hostJobPollRunning) return;
   hostJobPollRunning = true;
   try {
     const jobs = await fetchPendingHostSubmitJobs();
+    if (jobs.length) await clearAwaitingHostContinue();
     for (const job of jobs) {
       await runHostSubmitJob(job);
     }
@@ -777,13 +794,14 @@ async function pollAndRunHostSubmitJobs(): Promise<void> {
     // Not signed in / API unreachable — try again on next alarm.
   } finally {
     hostJobPollRunning = false;
+    if (await isAwaitingHostContinue()) {
+      scheduleFastHostPoll(0.08);
+    }
   }
 }
 
-const HOST_SUBMIT_ALARM = "poll-host-submit-jobs";
-
 function ensureHostSubmitAlarm(): void {
-  chrome.alarms.create(HOST_SUBMIT_ALARM, { periodInMinutes: 1, delayInMinutes: 0.2 });
+  chrome.alarms.create(HOST_SUBMIT_ALARM, { periodInMinutes: 1, delayInMinutes: 0.15 });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -793,7 +811,7 @@ chrome.runtime.onInstalled.addListener(() => {
 ensureHostSubmitAlarm();
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === HOST_SUBMIT_ALARM) {
+  if (alarm.name === HOST_SUBMIT_ALARM || alarm.name === FAST_HOST_POLL_ALARM) {
     void pollAndRunHostSubmitJobs();
   }
 });

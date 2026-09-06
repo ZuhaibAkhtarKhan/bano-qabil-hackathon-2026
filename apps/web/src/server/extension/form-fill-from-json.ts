@@ -105,13 +105,14 @@ export function batchResultsToFormFillPlan(input: {
   }));
 }
 
-/** JSON in → memory + LLM → JSON out. Shared fill engine for server Playwright and optional manual extension fill. */
+/** JSON in → memory (+ optional LLM) → JSON out. Shared fill engine for server Playwright and extension fill. */
 export async function fillFormPageFromJson(input: {
   supabase: SupabaseClient;
   actor: Actor;
   applicationId: string;
   page: FormPageCapture;
   hostFieldKeyById?: Record<string, string>;
+  skipAi?: boolean;
 }) {
   const capture = FormPageCaptureSchema.parse(input.page);
   const hostFieldKeyById =
@@ -126,6 +127,7 @@ export async function fillFormPageFromJson(input: {
     origin: capture.origin,
     hazards: capture.hazards,
     hostFieldKeyById,
+    skipAi: input.skipAi,
   });
 
   return FormFillPlanResponseSchema.parse({

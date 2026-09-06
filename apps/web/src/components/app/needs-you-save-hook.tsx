@@ -47,6 +47,12 @@ export function useNeedsYouSave(options: {
 
         setFeedback({ tone: "mint", message: messageForResult(result) ?? "Saved." });
         options.onSuccess?.();
+        // Wake the extension host-fill poll immediately when the bridge is present.
+        try {
+          window.postMessage({ source: "1apply-web", type: "HOST_SUBMIT_POLL" }, window.location.origin);
+        } catch {
+          // Ignore — extension may not be installed on this browser.
+        }
         router.refresh();
       });
     },

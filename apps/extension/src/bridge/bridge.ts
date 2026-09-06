@@ -38,13 +38,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const data = event.data as { source?: string; type?: string } | null;
-  if (!data || data.source !== "1apply-web" || data.type !== "EXTENSION_DETECT") return;
-  window.postMessage(
-    {
-      source: "1apply-extension",
-      type: "EXTENSION_PRESENT",
-      extensionId: chrome.runtime.id,
-    },
-    window.location.origin,
-  );
+  if (!data || data.source !== "1apply-web") return;
+
+  if (data.type === "EXTENSION_DETECT") {
+    window.postMessage(
+      {
+        source: "1apply-extension",
+        type: "EXTENSION_PRESENT",
+        extensionId: chrome.runtime.id,
+      },
+      window.location.origin,
+    );
+    return;
+  }
+
+  // Need You save → wake the host fill poll immediately instead of waiting for the 1-minute alarm.
+  if (data.type === "HOST_SUBMIT_POLL") {
+    void chrome.runtime.sendMessage({ type: "POLL_HOST_SUBMIT_JOBS" }).catch(() => undefined);
+  }
 });

@@ -1372,6 +1372,27 @@ if (!root.__1APPLY_LISTENERS) {
       return false;
     }
 
+    if (message?.type === "AUDIT_PAGE_FIELDS") {
+      const fields = fieldsEligibleForBatch(inventoryFromDocument(document));
+      stampBatchFieldIds(document, fields);
+      const emptyLabels: string[] = [];
+      for (const field of fields) {
+        const el = findControl(field.key);
+        if (!el) {
+          emptyLabels.push(field.label || field.key);
+          continue;
+        }
+        if (!isControlFilled(field.key, el)) {
+          emptyLabels.push(field.label || field.key);
+        }
+      }
+      sendResponse({
+        emptyCount: emptyLabels.length,
+        emptyLabels: emptyLabels.slice(0, 12),
+      });
+      return false;
+    }
+
     if (message?.type === "FORCE_STEP_ADVANCE") {
       void (async () => {
         const empty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;

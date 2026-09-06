@@ -102,6 +102,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     supabase: session.supabase,
     actor: session.actor,
     applicationId: parsedId.data,
+    skipAi: Boolean(parsed.data.skipAi),
     page: FormPageCaptureSchema.parse({
       pageIndex: parsed.data.pageIndex,
       origin: parsed.data.origin,

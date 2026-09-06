@@ -283,6 +283,8 @@ export function createBatchFillPlan(input: {
   pageIndex: number;
   origin?: string;
   fields: unknown[];
+  /** Host continue: skip LLM drafts — use memory + Need You answers only. */
+  skipAi?: boolean;
 }) {
   return request<{
     fields: Array<{
@@ -302,6 +304,7 @@ export function createBatchFillPlan(input: {
       pageIndex: input.pageIndex,
       origin: input.origin,
       fields: input.fields,
+      skipAi: Boolean(input.skipAi),
     }),
   });
 }
