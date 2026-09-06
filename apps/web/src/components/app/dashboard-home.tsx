@@ -192,6 +192,28 @@ export function DashboardHome({
       </header>
 
       <div className="space-y-8 px-4 py-6 sm:px-6 lg:px-8">
+        <section
+          className="rounded-2xl border border-line bg-[#f7f8f4] px-5 py-4"
+          aria-labelledby="extension-requirement-heading"
+          data-tour="dashboard-extension-requirement"
+        >
+          <h2 id="extension-requirement-heading" className="text-sm font-semibold tracking-tight text-ink">
+            Chrome + 1-Apply extension required for auto-submit
+          </h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
+            Deadline fill and Submit run in your browser through the 1-Apply Chrome extension — not on the server.
+            Keep Google Chrome running on this computer and keep the 1-Apply extension enabled and connected. Stay
+            signed into host sites (Google Forms, Jotform, etc.) so jobs can use your session. If Chrome is closed or
+            the extension is off, scheduled auto-submit will wait until both are available again.
+          </p>
+          <p className="mt-2 text-sm text-ink-muted">
+            <Link href="/app/settings" className="font-medium text-ink underline-offset-2 hover:underline">
+              Open Settings
+            </Link>{" "}
+            to connect the extension and confirm auto-submit is on.
+          </p>
+        </section>
+
         {kit?.showCard ? (
           <section className="rounded-2xl border border-amber-200/80 bg-[#faf6e8] p-5" aria-labelledby="kit-heading">
             <p className="text-[11px] font-medium uppercase tracking-wider text-ink-muted">Your kit</p>
@@ -231,7 +253,7 @@ export function DashboardHome({
                 <dd className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{lanes.sendsAtDeadline}</dd>
                 <p className="mt-1 text-xs text-ink-muted">
                   {lanes.prepareAndSendIfSilent
-                    ? "Silence will auto-submit"
+                    ? "Chrome + extension must stay on"
                     : "Turn on in Settings to auto-submit"}
                 </p>
               </div>
