@@ -642,29 +642,37 @@ export async function completeHostPrefillJob(input: {
     return { ok: true };
   }
 
-  const waitingLabels = (missingRequired ?? []).filter(Boolean).slice(0, 4).join(", ");
-  await supabase
-    .from("host_submit_jobs")
-    .update({
-      status: "completed",
-      completed_at: now,
-      last_error: pausedForNeedsYou ? "waiting_needs_you" : null,
-    })
-    .eq("id", jobId);
-
-  await supabase
-    .from("applications")
-    .update({
-      next_action: pausedForNeedsYou
-        ? waitingLabels
-          ? `Needs you — required fields on this page: ${waitingLabels}`
-          : "Needs you — missing fields Application Memory cannot answer yet"
-        : `Prefilled ${filledFields} field(s) from your profile and Need You. Review before auto-submit 2 hours before the deadline.`,
-    })
-    .eq("id", applicationId)
-    .eq("user_id", actor.userId);
-
   if (pausedForNeedsYou) {
+    const waitingLabels = (missingRequired ?? []).filter(Boolean).slice(0, 4).join(", ");
+    await supabase
+      .from("host_submit_jobs")
+      .update({
+        status: "completed",
+        completed_at: now,
+        last_error: "waiting_needs_you",
+      })
+      .eq("id", jobId);
+
+    if ((missingRequired ?? []).length) {
+      const { reopenMappingsForHostApplyFailures } = await import("./host-page-fill");
+      await reopenMappingsForHostApplyFailures({
+        supabase,
+        userId: actor.userId,
+        applicationId,
+        labels: missingRequired ?? [],
+      });
+    }
+
+    await supabase
+      .from("applications")
+      .update({
+        next_action: waitingLabels
+          ? `Needs you — required fields on this page: ${waitingLabels}`
+          : "Needs you — missing fields Application Memory cannot answer yet",
+      })
+      .eq("id", applicationId)
+      .eq("user_id", actor.userId);
+
     await recordApplicationEvent(supabase, actor, applicationId, "application.host_prefilled", {
       jobId,
       filledFields,
@@ -673,6 +681,23 @@ export async function completeHostPrefillJob(input: {
     });
     return { ok: true };
   }
+
+  await supabase
+    .from("host_submit_jobs")
+    .update({
+      status: "completed",
+      completed_at: now,
+      last_error: null,
+    })
+    .eq("id", jobId);
+
+  await supabase
+    .from("applications")
+    .update({
+      next_action: `Prefilled ${filledFields} field(s) from your profile and Need You. Review before auto-submit 2 hours before the deadline.`,
+    })
+    .eq("id", applicationId)
+    .eq("user_id", actor.userId);
 
   await recordApplicationEvent(supabase, actor, applicationId, "application.host_prefilled", {
     jobId,
@@ -782,6 +807,17 @@ export async function completeHostSubmitJob(input: {
         last_error: "waiting_needs_you",
       })
       .eq("id", jobId);
+
+    if ((missingRequired ?? []).length) {
+      const { reopenMappingsForHostApplyFailures } = await import("./host-page-fill");
+      await reopenMappingsForHostApplyFailures({
+        supabase,
+        userId: actor.userId,
+        applicationId,
+        labels: missingRequired ?? [],
+      });
+    }
+
     await supabase
       .from("applications")
       .update({

@@ -1,7 +1,9 @@
 /** Page-loop helpers: capture → headless memory → pause on required gaps → Next/Submit. */
 
 import { isCaptchaChallengeCopy, isFormBuilderChromeLabel, isMachineFieldToken } from "@1apply/form-engine";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { normalizeMappingIdentity } from "@/lib/field-mappings";
 import { isNeedsYouSystemNoise } from "@/lib/needs-you";
 
 export function planFillsField(plan: {
@@ -131,4 +133,66 @@ export function isHostFileUploadEntry(entry: {
   if (entry.type !== "file") return false;
   const value = String(entry.value ?? "").trim();
   return !value || VERSION_ID.test(value);
+}
+
+/**
+ * When the extension cannot click a saved Need You / memory answer onto the host page,
+ * reopen those mappings in Need You (keep the value, mark pending) so the loop is not stuck.
+ */
+export async function reopenMappingsForHostApplyFailures(input: {
+  supabase: SupabaseClient;
+  userId: string;
+  applicationId: string;
+  labels: string[];
+}): Promise<number> {
+  const wanted = [
+    ...new Set(
+      input.labels
+        .map((label) => normalizeMappingIdentity(label))
+        .filter((label) => label.length >= 2),
+    ),
+  ];
+  if (!wanted.length) return 0;
+
+  const { data: rows } = await input.supabase
+    .from("field_mappings")
+    .select("id, label, field_key, value, meta, excluded_by_default, confidence")
+    .eq("application_id", input.applicationId)
+    .eq("user_id", input.userId);
+
+  let updated = 0;
+  for (const row of rows ?? []) {
+    const label = normalizeMappingIdentity(String(row.label ?? ""));
+    const key = normalizeMappingIdentity(String(row.field_key ?? ""));
+    const hit = wanted.some(
+      (item) =>
+        label === item ||
+        key === item ||
+        (label.length >= 4 && (label.includes(item) || item.includes(label))) ||
+        (key.length >= 4 && (key.includes(item) || item.includes(key))),
+    );
+    if (!hit) continue;
+    if (!String(row.value ?? "").trim() && row.excluded_by_default) continue;
+
+    const priorMeta =
+      row.meta && typeof row.meta === "object" && !Array.isArray(row.meta)
+        ? (row.meta as Record<string, unknown>)
+        : {};
+    if (priorMeta.skipped) continue;
+
+    const { error } = await input.supabase
+      .from("field_mappings")
+      .update({
+        excluded_by_default: true,
+        confidence: Math.min(Number(row.confidence ?? 0.9), 0.7),
+        meta: {
+          ...priorMeta,
+          hostApplyFailed: true,
+        },
+      })
+      .eq("id", row.id)
+      .eq("user_id", input.userId);
+    if (!error) updated += 1;
+  }
+  return updated;
 }

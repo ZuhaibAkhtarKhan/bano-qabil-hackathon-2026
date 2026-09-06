@@ -61,6 +61,7 @@ const root = globalThis as {
   __1APPLY_PENDING_TIMERS?: number[];
   /** Set only for claimed host-submit jobs — allows final Submit click. */
   __1APPLY_HOST_SUBMIT_ALLOWED?: boolean;
+  __1APPLY_PAGE_OBSERVER?: MutationObserver | null;
 };
 if (!root.__1APPLY_LISTENERS) {
   root.__1APPLY_LISTENERS = true;
@@ -91,6 +92,97 @@ if (!root.__1APPLY_LISTENERS) {
 
   function isFillActive() {
     return Boolean(root.__1APPLY_AUTO_CONTINUE) && !root.__1APPLY_STOPPED;
+  }
+
+  /** True until the extension is reloaded/updated while this content script is still alive. */
+  function isExtensionContextValid(): boolean {
+    try {
+      const id = chrome.runtime?.id;
+      return typeof id === "string" && id.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  function stopFillQuietly() {
+    root.__1APPLY_AUTO_CONTINUE = false;
+    root.__1APPLY_STOPPED = true;
+    clearPendingTimers();
+    try {
+      root.__1APPLY_PAGE_OBSERVER?.disconnect();
+    } catch {
+      // Ignore.
+    }
+    root.__1APPLY_PAGE_OBSERVER = null;
+  }
+
+  function isInvalidatedRuntimeError(error: unknown): boolean {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : error && typeof error === "object" && "message" in error
+            ? String((error as { message?: unknown }).message ?? "")
+            : String(error ?? "");
+    return /extension context invalidated|context invalidated/i.test(message);
+  }
+
+  /** Google Forms thank-you / response page — never keep auto-continue alive here. */
+  function isHostFormTerminalPage(): boolean {
+    return /\/formresponse\b/i.test(`${location.pathname}${location.search}`);
+  }
+
+  /**
+   * Prefer promise-style messaging. Never touch chrome.runtime.lastError in callers —
+   * that access throws again after reload and shows up as Uncaught on the Errors page.
+   */
+  function sendRuntimeMessage(
+    message: unknown,
+    callback?: (response: unknown, lastError: string | null) => void,
+  ): void {
+    if (!isExtensionContextValid()) {
+      stopFillQuietly();
+      callback?.(undefined, "Extension context invalidated.");
+      return;
+    }
+
+    const finish = (response: unknown, lastError: string | null) => {
+      try {
+        if (lastError && isInvalidatedRuntimeError(lastError)) {
+          stopFillQuietly();
+        }
+        callback?.(response, lastError);
+      } catch {
+        // Never surface host-page errors from messaging callbacks.
+      }
+    };
+
+    try {
+      const send = chrome.runtime.sendMessage as {
+        (message: unknown): Promise<unknown>;
+        (message: unknown, response: (value: unknown) => void): void;
+      };
+
+      // Promise form: invalidated context rejects instead of leaving a stale lastError read.
+      void Promise.resolve()
+        .then(() => send(message))
+        .then(
+          (response) => finish(response, null),
+          (error) => {
+            const messageText =
+              error instanceof Error ? error.message : String(error ?? "Extension messaging failed.");
+            if (isInvalidatedRuntimeError(messageText)) stopFillQuietly();
+            finish(undefined, messageText);
+          },
+        );
+    } catch (error) {
+      if (isInvalidatedRuntimeError(error)) stopFillQuietly();
+      finish(
+        undefined,
+        error instanceof Error ? error.message : "Extension messaging failed.",
+      );
+    }
   }
 
   function pageFingerprint(): string {
@@ -132,14 +224,23 @@ if (!root.__1APPLY_LISTENERS) {
 
   function requestAutoContinue(force = false) {
     if (!isFillActive() || root.__1APPLY_FILLING) return;
+    if (isHostFormTerminalPage()) {
+      stopFillQuietly();
+      return;
+    }
+    if (!isExtensionContextValid()) {
+      stopFillQuietly();
+      return;
+    }
     const fp = pageFingerprint();
     if (!fp) return;
     if (!force && fp === root.__1APPLY_LAST_PAGE_FP) return;
 
     const pendingFp = fp;
-    chrome.runtime.sendMessage({ type: "AUTO_CONTINUE_FILL", url: location.href, fingerprint: pendingFp }, (response) => {
+    sendRuntimeMessage({ type: "AUTO_CONTINUE_FILL", url: location.href, fingerprint: pendingFp }, (response, lastError) => {
       if (!isFillActive()) return;
-      if (chrome.runtime.lastError) {
+      if (lastError) {
+        if (isInvalidatedRuntimeError(lastError)) return;
         // Service worker may be waking — retry without locking the fingerprint.
         root.__1APPLY_CONTINUE_TRIES = (root.__1APPLY_CONTINUE_TRIES ?? 0) + 1;
         if ((root.__1APPLY_CONTINUE_TRIES ?? 0) <= 4) {
@@ -171,9 +272,7 @@ if (!root.__1APPLY_LISTENERS) {
 
       // Hard failures (no session / origin mismatch / stopped) — stop quietly.
       if (reason === "no-session" || reason === "origin-mismatch" || reason === "stopped") {
-        root.__1APPLY_AUTO_CONTINUE = false;
-        root.__1APPLY_STOPPED = true;
-        clearPendingTimers();
+        stopFillQuietly();
       }
     });
   }
@@ -251,13 +350,24 @@ if (!root.__1APPLY_LISTENERS) {
 
   function enableAutoContinueWatch() {
     if (root.__1APPLY_STOPPED) return;
+    if (isHostFormTerminalPage()) {
+      stopFillQuietly();
+      return;
+    }
     const wasActive = root.__1APPLY_AUTO_CONTINUE;
     root.__1APPLY_AUTO_CONTINUE = true;
     if (!wasActive) root.__1APPLY_STEPS = 0;
     if (root.__1APPLY_PAGE_WATCH) return;
     root.__1APPLY_PAGE_WATCH = true;
 
-    const observer = new MutationObserver(() => scheduleAutoContinue(1000));
+    const observer = new MutationObserver(() => {
+      if (!isFillActive() || !isExtensionContextValid()) {
+        stopFillQuietly();
+        return;
+      }
+      scheduleAutoContinue(1000);
+    });
+    root.__1APPLY_PAGE_OBSERVER = observer;
     if (document.body) {
       observer.observe(document.body, {
         childList: true,
@@ -267,6 +377,7 @@ if (!root.__1APPLY_LISTENERS) {
       });
     } else {
       document.addEventListener("DOMContentLoaded", () => {
+        if (!isFillActive()) return;
         observer.observe(document.body, {
           childList: true,
           subtree: true,
@@ -336,16 +447,37 @@ if (!root.__1APPLY_LISTENERS) {
     root.__1APPLY_STEPS = 0;
     root.__1APPLY_ADVANCE_LOCK = false;
     clearPendingTimers();
+    try {
+      root.__1APPLY_PAGE_OBSERVER?.disconnect();
+    } catch {
+      // Ignore.
+    }
+    root.__1APPLY_PAGE_OBSERVER = null;
   }
 
   // If a fill session is already active for this origin, resume watching after reinjection / reload.
-  void chrome.storage.local.get(["fillSession"]).then((data) => {
-    const session = data.fillSession as { enabled?: boolean; origin?: string } | undefined;
-    if (!session?.enabled || session.origin !== location.origin) return;
-    if (root.__1APPLY_STOPPED) return;
-    enableAutoContinueWatch();
-    scheduleAutoContinue(900, true);
-  });
+  try {
+    if (isExtensionContextValid()) {
+      void chrome.storage.local
+        .get(["fillSession"])
+        .then((data) => {
+          try {
+            const session = data.fillSession as { enabled?: boolean; origin?: string } | undefined;
+            if (!session?.enabled || session.origin !== location.origin) return;
+            if (root.__1APPLY_STOPPED || isHostFormTerminalPage()) return;
+            enableAutoContinueWatch();
+            scheduleAutoContinue(900, true);
+          } catch {
+            // Stale content script after extension reload.
+          }
+        })
+        .catch(() => {
+          stopFillQuietly();
+        });
+    }
+  } catch {
+    stopFillQuietly();
+  }
 
   function cssEscape(value: string): string {
     if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
@@ -477,15 +609,53 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   function optionText(node: Element): string {
-    return (
-      node.getAttribute("aria-label") ||
-      node.getAttribute("data-value") ||
-      node.querySelector("span")?.textContent ||
-      node.textContent ||
-      ""
-    )
-      .trim()
-      .replace(/\s+/g, " ");
+    const span = node.querySelector(
+      ".docssharedWizToggleLabeledLabelText, .exportLabel, span[dir='auto'], span[dir='ltr'], label span",
+    );
+    const spanText = (span?.textContent ?? "").trim().replace(/\s+/g, " ");
+    const aria = (node.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ");
+    const dataValue = (node.getAttribute("data-value") || "").trim();
+    // Prefer the short visible label when aria-label repeats the whole question + option.
+    if (spanText && spanText.length >= 1 && spanText.length <= 100) {
+      if (
+        !aria ||
+        aria.toLowerCase() === spanText.toLowerCase() ||
+        aria.toLowerCase().endsWith(spanText.toLowerCase()) ||
+        aria.length > spanText.length + 12
+      ) {
+        return spanText;
+      }
+    }
+    if (aria) return aria;
+    if (dataValue) return dataValue;
+    return (node.textContent || "").trim().replace(/\s+/g, " ");
+  }
+
+  /** Normalize choice labels so "Full-time" matches "Full time" / "fulltime". */
+  function normalizeChoiceText(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/[–—−]/g, "-")
+      .replace(/[_/\\|]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function choiceTextsMatch(optionLabel: string, wanted: string): boolean {
+    const left = normalizeChoiceText(optionLabel);
+    const right = normalizeChoiceText(wanted);
+    if (!left || !right) return false;
+    if (left === right) return true;
+    const leftCompact = left.replace(/[^a-z0-9]+/g, "");
+    const rightCompact = right.replace(/[^a-z0-9]+/g, "");
+    if (leftCompact && rightCompact && leftCompact === rightCompact) return true;
+    if (left.endsWith(right) || right.endsWith(left)) return true;
+    if (left.includes(right) || right.includes(left)) {
+      return Math.min(left.length, right.length) / Math.max(left.length, right.length) >= 0.45;
+    }
+    const split = left.match(/^(.{1,80}?)\s*(?:[-–—,]|:)\s*(.{1,80})$/);
+    if (split?.[2] && choiceTextsMatch(split[2], wanted)) return true;
+    return false;
   }
 
   function setNativeTextValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
@@ -569,11 +739,11 @@ if (!root.__1APPLY_LISTENERS) {
     const versionId = mapping.file?.versionId || mapping.value;
     if (!versionId) return null;
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "FETCH_DOCUMENT", versionId }, (response) => {
+      sendRuntimeMessage({ type: "FETCH_DOCUMENT", versionId }, (response, lastError) => {
         const payload = response as
           | { error?: string; versionId?: string; filename?: string; mimeType?: string; base64?: string }
           | undefined;
-        if (chrome.runtime.lastError || !payload || payload.error || !payload.base64) {
+        if (lastError || !payload || payload.error || !payload.base64) {
           resolve(null);
           return;
         }
@@ -593,18 +763,14 @@ if (!root.__1APPLY_LISTENERS) {
       card.querySelector<HTMLElement>('[role="listbox"]') ||
       (findTagged(card.getAttribute(APPLY_FIELD_ATTR) || "") as HTMLElement | null);
     if (!listbox) return false;
-    listbox.click();
+    activateToggle(listbox);
     await sleep(250);
     const options = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'));
-    const target = value.trim().toLowerCase();
     const match =
-      options.find((option) => optionText(option).toLowerCase() === target) ||
+      options.find((option) => choiceTextsMatch(optionText(option), value)) ||
       options.find((option) => {
         const text = optionText(option).toLowerCase();
-        return text.includes(target) || target.includes(text);
-      }) ||
-      options.find((option) => {
-        const text = optionText(option).toLowerCase();
+        const target = value.trim().toLowerCase();
         if (target.includes("delhi") && text.includes("delhi")) return true;
         const tTokens = target.split(/[^a-z0-9]+/).filter((t) => t.length > 2);
         return tTokens.some((token) => text.includes(token));
@@ -613,9 +779,10 @@ if (!root.__1APPLY_LISTENERS) {
       listbox.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       return false;
     }
-    match.click();
-    await sleep(100);
-    return true;
+    activateToggle(match);
+    await sleep(120);
+    const selected = listbox.querySelector('[role="option"][aria-selected="true"]');
+    return Boolean(selected && choiceTextsMatch(optionText(selected), value));
   }
 
   async function applyRoleRadios(card: HTMLElement, value: string, fieldKey?: string): Promise<boolean> {
@@ -628,31 +795,33 @@ if (!root.__1APPLY_LISTENERS) {
         const tagged = findTagged(fieldKey);
         const group = tagged?.closest('[role="radiogroup"]') as HTMLElement | null;
         if (group) radios = Array.from(group.querySelectorAll<HTMLElement>('[role="radio"]'));
+        else if (tagged?.getAttribute("role") === "radio") {
+          const parentCard = findCard(fieldKey);
+          if (parentCard) radios = Array.from(parentCard.querySelectorAll<HTMLElement>('[role="radio"]'));
+        }
       }
     }
-    const target = value.trim().toLowerCase();
-    const compact = target.replace(/\s+/g, "");
-    const match =
-      radios.find((radio) => optionText(radio).toLowerCase() === target) ||
-      radios.find((radio) => {
-        const text = optionText(radio).toLowerCase();
-        return text === compact || text.includes(target) || target.includes(text);
-      }) ||
-      radios.find((radio) => {
-        const text = optionText(radio).toLowerCase().replace(/\s+/g, "");
-        // "3rd year" ↔ "3rd"
-        return text.length >= 2 && (compact.startsWith(text) || text.startsWith(compact.replace(/year$/, "")));
-      }) ||
-      radios.find((radio) => {
-        // Grid cells often use "Docker - Advanced"; Need You stores "Advanced".
-        const split = optionText(radio)
-          .toLowerCase()
-          .match(/^(.{1,80}?)\s*(?:[-–—,]|:)\s*(.{1,80})$/);
-        return Boolean(split && (split[2] === target || split[2]?.replace(/\s+/g, "") === compact));
-      });
+    if (!radios.length) {
+      radios = Array.from(document.querySelectorAll<HTMLElement>(`[role="radio"][${APPLY_FIELD_ATTR}="${cssEscape(fieldKey || "")}"]`));
+    }
+
+    const match = radios.find((radio) => choiceTextsMatch(optionText(radio), value));
     if (!match) return false;
-    match.click();
-    return true;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (match.getAttribute("aria-checked") === "true") return true;
+      activateToggle(match);
+      await sleep(70);
+      const clickTarget =
+        (match.closest("label") as HTMLElement | null) ||
+        (match.parentElement as HTMLElement | null) ||
+        match;
+      if (clickTarget !== match && match.getAttribute("aria-checked") !== "true") {
+        activateToggle(clickTarget);
+        await sleep(70);
+      }
+    }
+    return match.getAttribute("aria-checked") === "true";
   }
 
   function isTruthyCheckValue(value: string): boolean {
@@ -740,7 +909,7 @@ if (!root.__1APPLY_LISTENERS) {
       }
       // Ask background to try all frames (Google picker iframe).
       const ok = await new Promise<boolean>((resolve) => {
-        chrome.runtime.sendMessage({ type: "ATTACH_FILE_ALL_FRAMES", file }, (response) => {
+        sendRuntimeMessage({ type: "ATTACH_FILE_ALL_FRAMES", file }, (response) => {
           resolve(Boolean(response && (response as { ok?: boolean }).ok));
         });
       });
@@ -794,16 +963,20 @@ if (!root.__1APPLY_LISTENERS) {
     }
 
     if (mapping.type === "radio") {
-      if (card.querySelector('[role="radio"]')) return applyRoleRadios(card, mapping.value, mapping.fieldKey);
+      if (card.querySelector('[role="radio"]') || document.querySelector(`[role="radio"][${APPLY_FIELD_ATTR}="${cssEscape(mapping.fieldKey)}"]`)) {
+        return applyRoleRadios(card, mapping.value, mapping.fieldKey);
+      }
       const nodes = Array.from(
         document.querySelectorAll<HTMLInputElement>(`input[type="radio"][${APPLY_FIELD_ATTR}="${cssEscape(mapping.fieldKey)}"]`),
       );
-      const target = mapping.value.trim().toLowerCase();
       for (const node of nodes) {
-        const label = `${node.getAttribute("aria-label") ?? ""} ${node.labels?.[0]?.textContent ?? ""} ${node.value}`.toLowerCase();
-        if (label.includes(target) || target.includes(node.value.toLowerCase())) {
-          if (!node.checked) node.click();
-          return true;
+        const label = `${node.getAttribute("aria-label") ?? ""} ${node.labels?.[0]?.textContent ?? ""} ${node.value}`;
+        if (choiceTextsMatch(label, mapping.value) || choiceTextsMatch(node.value, mapping.value)) {
+          if (!node.checked) {
+            activateToggle(node);
+            await sleep(40);
+          }
+          return node.checked;
         }
       }
       return false;
@@ -1189,7 +1362,11 @@ if (!root.__1APPLY_LISTENERS) {
       statusEl.className = "status busy";
       try {
         const result = await new Promise<{ draft: string; grounded: boolean; limitApplied?: boolean }>((resolve, reject) => {
-          chrome.runtime.sendMessage(
+          if (!isExtensionContextValid()) {
+            reject(new Error("Extension was reloaded — refresh this tab and try again."));
+            return;
+          }
+          sendRuntimeMessage(
             {
               type: "GENERATE_AI_DRAFT",
               applicationId,
@@ -1199,9 +1376,8 @@ if (!root.__1APPLY_LISTENERS) {
               limitValue: lengthLimit?.value ?? null,
               limitUnit: lengthLimit?.unit ?? null,
             },
-            (response) => {
-              const err = chrome.runtime.lastError;
-              if (err) reject(new Error(err.message));
+            (response, lastError) => {
+              if (lastError) reject(new Error(lastError));
               else if (response && typeof response === "object" && "error" in response && (response as { error?: string }).error)
                 reject(new Error((response as { error: string }).error));
               else resolve(response as { draft: string; grounded: boolean; limitApplied?: boolean });
@@ -1356,6 +1532,11 @@ if (!root.__1APPLY_LISTENERS) {
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!isExtensionContextValid()) {
+      stopFillQuietly();
+      return false;
+    }
+
     if (message?.type === "TRY_AUTO_ADVANCE") {
       void tryAutoAdvance().then(sendResponse);
       return true;
@@ -1724,6 +1905,18 @@ if (!root.__1APPLY_LISTENERS) {
               results.push({ fieldId: result.fieldId, filled: true });
             } else {
               highlightKeys.push(fieldKey);
+              // Keep a chip so the applicant can pick the Need You answer on-page if auto-click missed.
+              if (isChoice && result.value && inferredType !== "file") {
+                const live = inventoryFromDocument(document).find((field) => field.key === fieldKey);
+                const chipOptions =
+                  (live?.options?.length ? live.options : result.value.split(/\n|;/))
+                    .map((value) => String(value).trim())
+                    .filter(Boolean)
+                    .map((value) => ({ value, label: value, source: "Need You" }));
+                if (chipOptions.length) {
+                  mountChip(el, fieldKey, uniqueOptions(chipOptions, result.value), inferredType);
+                }
+              }
               results.push({
                 fieldId: result.fieldId,
                 filled: false,

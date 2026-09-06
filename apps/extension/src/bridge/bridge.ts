@@ -2,7 +2,18 @@
  * Injected into 1-Apply tabs. Same-origin fetches use the website session cookies
  * so the extension never needs a pasted access token.
  */
+
+function isExtensionContextValid(): boolean {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!isExtensionContextValid()) return false;
+
   if (message?.type === "BRIDGE_PING") {
     sendResponse({ ok: true, origin: window.location.origin });
     return false;
@@ -40,20 +51,30 @@ window.addEventListener("message", (event) => {
   const data = event.data as { source?: string; type?: string } | null;
   if (!data || data.source !== "1apply-web") return;
 
+  if (!isExtensionContextValid()) return;
+
   if (data.type === "EXTENSION_DETECT") {
-    window.postMessage(
-      {
-        source: "1apply-extension",
-        type: "EXTENSION_PRESENT",
-        extensionId: chrome.runtime.id,
-      },
-      window.location.origin,
-    );
+    try {
+      window.postMessage(
+        {
+          source: "1apply-extension",
+          type: "EXTENSION_PRESENT",
+          extensionId: chrome.runtime.id,
+        },
+        window.location.origin,
+      );
+    } catch {
+      // Extension reloaded — ignore stale bridge.
+    }
     return;
   }
 
   // Need You save → wake the host fill poll immediately instead of waiting for the 1-minute alarm.
   if (data.type === "HOST_SUBMIT_POLL") {
-    void chrome.runtime.sendMessage({ type: "POLL_HOST_SUBMIT_JOBS" }).catch(() => undefined);
+    try {
+      void chrome.runtime.sendMessage({ type: "POLL_HOST_SUBMIT_JOBS" }).catch(() => undefined);
+    } catch {
+      // Extension context invalidated after reload.
+    }
   }
 });

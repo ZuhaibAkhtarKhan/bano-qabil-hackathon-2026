@@ -395,8 +395,20 @@ async function runBatchFillOnTab(input: {
   // Widgets (radios / listboxes) often need a moment after click before Next is enabled.
   await sleep(450);
 
-  const needYouFields = plan.fields.filter((item) => item.status === "need_you");
-  // Required and optional both block Next until filled or explicitly skipped in Need You.
+  const appliedRows = applied.filled ?? [];
+  const failedApplyIds = new Set(
+    appliedRows
+      .filter((row) => row.filled === false)
+      .map((row) => String(row.fieldId ?? "").trim())
+      .filter(Boolean),
+  );
+
+  // Plan said Need You OR the browser failed to apply a saved answer (common for radios).
+  const needYouFields = plan.fields.filter((item) => {
+    if (item.applyMode === "skip") return false;
+    if (item.status === "need_you") return true;
+    return failedApplyIds.has(item.fieldId);
+  });
   const needYouLabels = needYouFields
     .map((item) => labelById.get(item.fieldId) || item.reason || item.fieldId)
     .filter(Boolean)

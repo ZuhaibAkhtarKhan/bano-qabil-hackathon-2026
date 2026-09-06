@@ -205,9 +205,16 @@ export function snapToHostOption(value: string, options: string[] | null | undef
   if (!wanted) return null;
   if (!options?.length) return wanted;
 
-  const norm = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+  const norm = (text: string) =>
+    text
+      .trim()
+      .toLowerCase()
+      .replace(/[–—−]/g, "-")
+      .replace(/\s+/g, " ");
+  const compact = (text: string) => norm(text).replace(/[^a-z0-9]+/g, "");
   const wantedN = norm(wanted);
-  const exact = options.find((option) => norm(option) === wantedN);
+  const wantedC = compact(wanted);
+  const exact = options.find((option) => norm(option) === wantedN || compact(option) === wantedC);
   if (exact) return exact;
 
   const parts = wanted.split(/\n|;/).map((part) => part.trim()).filter(Boolean);
@@ -221,9 +228,11 @@ export function snapToHostOption(value: string, options: string[] | null | undef
   let best: { option: string; score: number } | null = null;
   for (const option of options) {
     const optionN = norm(option);
+    const optionC = compact(option);
     if (!optionN) continue;
     let score = 0;
-    if (optionN.includes(wantedN) || wantedN.includes(optionN)) {
+    if (optionC && wantedC && optionC === wantedC) score = 1;
+    else if (optionN.includes(wantedN) || wantedN.includes(optionN)) {
       score = Math.min(optionN.length, wantedN.length) / Math.max(optionN.length, wantedN.length);
     }
     if (score >= 0.35 && (!best || score > best.score)) {

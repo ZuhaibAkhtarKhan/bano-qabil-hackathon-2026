@@ -132,5 +132,7 @@ describe("needs-you field kinds", () => {
   it("snaps Need You answers onto live host options", () => {
     expect(snapToHostOption("advanced", ["Basic", "Intermediate", "Advanced", "Expert"])).toBe("Advanced");
     expect(snapToHostOption("Expert", ["Basic", "Intermediate", "Advanced", "Expert"])).toBe("Expert");
+    expect(snapToHostOption("Full time", ["Full-time", "Contract", "Remote", "Part-time"])).toBe("Full-time");
+    expect(snapToHostOption("yes", ["Yes", "No"])).toBe("Yes");
   });
 });
