@@ -1374,6 +1374,11 @@ if (!root.__1APPLY_LISTENERS) {
 
     if (message?.type === "FORCE_STEP_ADVANCE") {
       void (async () => {
+        const empty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
+        if (empty > 0) {
+          sendResponse({ clicked: false, reason: `empty-fields:${empty}` });
+          return;
+        }
         const next = findPrimaryStepAdvance(document);
         if (!next) {
           sendResponse({ clicked: false, reason: "no-next" });
@@ -1611,8 +1616,8 @@ if (!root.__1APPLY_LISTENERS) {
             if (!el) {
               results.push({ fieldId: result.fieldId, filled: false, skippedReason: "Control not found" });
               highlightKeys.push(fieldKey);
-              continue;
-            }
+          continue;
+        }
             const card = findCard(fieldKey) || el;
             const resultType = String(result.type ?? "");
             const inferredType =
@@ -1644,6 +1649,12 @@ if (!root.__1APPLY_LISTENERS) {
             if (!isChoice && isControlFilled(fieldKey, el)) {
               card.removeAttribute(APPLY_EMPTY_ATTR);
               results.push({ fieldId: result.fieldId, filled: true, skippedReason: "already filled" });
+              continue;
+            }
+
+            if (result.applyMode === "skip") {
+              card.removeAttribute(APPLY_EMPTY_ATTR);
+              results.push({ fieldId: result.fieldId, filled: true, skippedReason: "skipped optional" });
               continue;
             }
 

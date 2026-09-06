@@ -59,13 +59,24 @@ describe("isHostFileUploadEntry", () => {
 });
 
 describe("mappingBlocksPageAdvance", () => {
-  it("never blocks optional host fields", () => {
+  it("blocks unanswered optional host fields until filled or skipped", () => {
     expect(
       mappingBlocksPageAdvance({
         value: "",
         confidence: 0.1,
         excluded_by_default: true,
         meta: { required: false },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not block optional fields the applicant skipped", () => {
+    expect(
+      mappingBlocksPageAdvance({
+        value: "",
+        confidence: 1,
+        excluded_by_default: false,
+        meta: { required: false, skipped: true },
       }),
     ).toBe(false);
   });

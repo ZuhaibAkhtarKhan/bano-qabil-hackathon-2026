@@ -463,6 +463,12 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
       seenMappingKeys.add(dedupe);
 
       const value = String(mapping.value ?? "").trim();
+      const metaPreview =
+        mapping.meta && typeof mapping.meta === "object" && !Array.isArray(mapping.meta)
+          ? (mapping.meta as Record<string, unknown>)
+          : {};
+      if (Boolean(metaPreview.skipped)) continue;
+
       const pending =
         !value ||
         Number(mapping.confidence ?? 0) < 0.75 ||

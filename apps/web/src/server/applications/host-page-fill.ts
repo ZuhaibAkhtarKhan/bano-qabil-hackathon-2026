@@ -33,8 +33,8 @@ export function mappingMetaRequired(meta: unknown): boolean | null {
 }
 
 /**
- * Optional host fields never block Next/Submit.
- * Unanswered required fields (or unknown-required with a real value gap) do.
+ * Optional empty fields block Next until the applicant fills or explicitly skips them.
+ * Skipped optionals (meta.skipped) and filled values do not block.
  */
 export function mappingBlocksPageAdvance(row: {
   value?: string | null;
@@ -42,14 +42,17 @@ export function mappingBlocksPageAdvance(row: {
   excluded_by_default?: boolean | null;
   meta?: unknown;
 }): boolean {
-  if (mappingMetaRequired(row.meta) === false) return false;
+  if (mappingMetaSkipped(row.meta)) return false;
   const value = String(row.value ?? "").trim();
   const confidence = Number(row.confidence ?? 0);
-  const empty = !value || confidence < 0.75 || Boolean(row.excluded_by_default);
-  if (!empty) return false;
-  if (mappingMetaRequired(row.meta) === true) return true;
-  // Inventory rows (page_capture) with no required flag are optional until proven otherwise.
-  return !Boolean(row.excluded_by_default);
+  const filled = Boolean(value) && confidence >= 0.75 && !row.excluded_by_default;
+  if (filled) return false;
+  return true;
+}
+
+export function mappingMetaSkipped(meta: unknown): boolean {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+  return Boolean((meta as { skipped?: unknown }).skipped);
 }
 
 const VERSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

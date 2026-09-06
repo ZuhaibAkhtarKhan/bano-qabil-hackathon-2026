@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { useNeedsYouSave } from "@/components/app/needs-you-save-hook";
 import { type NeedsYouItem } from "@/lib/needs-you";
 import { parseNeedsYouMultiValues } from "@/lib/needs-you-field-kinds";
-import { generateNeedsYouDraftAction, resolveNeedsYouValue } from "@/server/needs-you/actions";
+import { generateNeedsYouDraftAction, resolveNeedsYouValue, skipOptionalNeedsYouField } from "@/server/needs-you/actions";
 import { Button, SubmitButton } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 
@@ -107,6 +107,18 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
   function save(scope: "memory" | "application") {
     submit(() => buildFormData(scope), resolveNeedsYouValue);
   }
+
+  function skipOptional() {
+    submit(() => {
+      const fd = new FormData();
+      fd.set("applicationId", item.applicationId);
+      if (item.payload.mappingId) fd.set("mappingId", item.payload.mappingId);
+      return fd;
+    }, skipOptionalNeedsYouField);
+  }
+
+  const canSkipOptional =
+    item.required === false && Boolean(item.payload.mappingId) && item.kind === "field_mapping";
 
   return (
     <div className="grid gap-3">
@@ -230,12 +242,30 @@ export function NeedsYouQuestionForm({ item }: { item: NeedsYouItem }) {
           >
             Fill just for this application
           </SubmitButton>
+          {canSkipOptional ? (
+            <SubmitButton
+              type="button"
+              variant="secondary"
+              pending={isPending}
+              pendingText="Skipping…"
+              onClick={skipOptional}
+            >
+              Skip
+            </SubmitButton>
+          ) : null}
         </div>
         <p className="text-xs leading-5 text-ink-muted">
           <span className="font-medium text-ink">Save to memory</span> keeps this for every future
           application.{" "}
           <span className="font-medium text-ink">Fill just for this application</span> uses it only
           here and does not update Application Memory.
+          {canSkipOptional ? (
+            <>
+              {" "}
+              <span className="font-medium text-ink">Skip</span> leaves this optional field blank and
+              lets host fill continue.
+            </>
+          ) : null}
         </p>
       </div>
     </div>

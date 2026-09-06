@@ -418,6 +418,62 @@ export async function resolveNeedsYouValue(formData: FormData): Promise<NeedsYou
   return { ok: true, notice: "continued" };
 }
 
+/** Mark an optional host field as intentionally skipped so the extension can advance past it. */
+export async function skipOptionalNeedsYouField(formData: FormData): Promise<NeedsYouActionResult> {
+  const { user, supabase, actor } = await requireWorkspace();
+  const applicationId = String(formData.get("applicationId") ?? "");
+  const mappingId = String(formData.get("mappingId") ?? "").trim();
+
+  if (!applicationId || !mappingId) {
+    return { ok: false, error: "required" };
+  }
+
+  const { data: mapping } = await supabase
+    .from("field_mappings")
+    .select("id, meta, application_id")
+    .eq("id", mappingId)
+    .eq("user_id", user.id)
+    .eq("application_id", applicationId)
+    .maybeSingle();
+
+  if (!mapping) return { ok: false, error: "not_found" };
+
+  const priorMeta =
+    mapping.meta && typeof mapping.meta === "object" && !Array.isArray(mapping.meta)
+      ? (mapping.meta as Record<string, unknown>)
+      : {};
+  if (priorMeta.required === true) {
+    return { ok: false, error: "required" };
+  }
+
+  await supabase
+    .from("field_mappings")
+    .update({
+      value: "",
+      source: "Needs You (skipped optional)",
+      confidence: 1,
+      excluded_by_default: false,
+      meta: {
+        ...priorMeta,
+        required: false,
+        skipped: true,
+      },
+    })
+    .eq("id", mappingId)
+    .eq("user_id", user.id);
+
+  await supabase
+    .from("applications")
+    .update({ next_action: "Optional field skipped — host fill can continue" })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+
+  revalidateNeedsYou(applicationId);
+  const { tryNoDeadlineHostSubmitIfComplete } = await import("@/server/applications/host-automation-schedule");
+  await tryNoDeadlineHostSubmitIfComplete({ supabase, actor, applicationId });
+  return { ok: true, notice: "continued" };
+}
+
 /** @deprecated Prefer resolveNeedsYouValue — kept for any stale form posts. */
 export async function resolveNeedsYouMemory(formData: FormData): Promise<NeedsYouActionResult> {
   if (!formData.get("scope")) formData.set("scope", "memory");

@@ -10,7 +10,13 @@ export type FieldMappingLike = {
   excluded_by_default?: boolean | null;
   created_at?: string | null;
   field_type?: string | null;
+  meta?: unknown;
 };
+
+function mappingMetaSkipped(meta: unknown): boolean {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+  return Boolean((meta as { skipped?: unknown }).skipped);
+}
 
 /**
  * Collapse "Email *", "Email", "Comments CommentsYour answer" into one identity
@@ -38,12 +44,15 @@ export function fieldMappingFillScore(row: FieldMappingLike): number {
   const confidence = Number(row.confidence ?? 0);
   const excluded = Boolean(row.excluded_by_default);
   const source = String(row.source ?? "").toLowerCase();
+  const skipped = mappingMetaSkipped(row.meta);
 
   let score = 0;
+  if (skipped) score += 900;
   if (value) score += 1000;
   score += Math.round(Math.min(1, Math.max(0, confidence)) * 100);
   if (!excluded) score += 50;
   if (source.includes("needs you") || source.includes("application tab edit")) score += 40;
+  if (source.includes("skipped optional")) score += 45;
   if (source.includes("memory") || source.includes("kit")) score += 25;
   if (source.includes("batch_fill") || source.includes("user (extension")) score += 15;
   if (source === "page_capture") score -= 50;
@@ -116,6 +125,7 @@ export function dedupeFieldMappings<T extends FieldMappingLike>(rows: T[]): T[] 
 export const dedupeFieldMappingsByLabel = dedupeFieldMappings;
 
 export function mappingHasUsableFill(row: FieldMappingLike, minConfidence = 0.75): boolean {
+  if (mappingMetaSkipped(row.meta)) return true;
   const value = String(row.value ?? "").trim();
   return Boolean(value) && Number(row.confidence ?? 0) >= minConfidence && !row.excluded_by_default;
 }
@@ -126,12 +136,14 @@ export function isUserConfirmedFieldMappingSource(source: string | null | undefi
   return (
     value.includes("needs you") ||
     value.includes("this application only") ||
+    value.includes("skipped optional") ||
     value.includes("application tab edit") ||
     value.includes("user (extension")
   );
 }
 
-export function mappingHasStoredValue(row: Pick<FieldMappingLike, "value">): boolean {
+export function mappingHasStoredValue(row: Pick<FieldMappingLike, "value" | "meta">): boolean {
+  if (mappingMetaSkipped(row.meta)) return true;
   return Boolean(String(row.value ?? "").trim());
 }
 

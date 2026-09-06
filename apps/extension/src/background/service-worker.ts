@@ -394,21 +394,18 @@ async function runBatchFillOnTab(input: {
   await sleep(1200);
 
   const needYouFields = plan.fields.filter((item) => item.status === "need_you");
-  const requiredNeedYouFields = needYouFields.filter((item) => {
-    const field = (inventory.fields ?? []).find((row) => String(row.fieldId ?? "") === item.fieldId);
-    return Boolean(field?.required);
-  });
-  const needYouLabels = requiredNeedYouFields
+  // Required and optional both block Next until filled or explicitly skipped in Need You.
+  const needYouLabels = needYouFields
     .map((item) => labelById.get(item.fieldId) || item.reason || item.fieldId)
     .filter(Boolean)
-    .slice(0, 6);
+    .slice(0, 8);
 
   return {
     ...applied,
     fillSessionId: plan.fillSessionId,
     filledCount: applied.filled?.filter((item) => item.filled).length ?? 0,
     highlighted: applied.highlighted ?? 0,
-    needYouCount: requiredNeedYouFields.length,
+    needYouCount: needYouFields.length,
     needYouLabels,
   };
 }
@@ -430,8 +427,8 @@ async function getPageStepState(tabId: number): Promise<{
 }
 
 /**
- * fillUntilSubmit: scan → fill from memory → pause on required Need You → recheck → Next,
- * until the Submit page (do not click Submit).
+ * fillUntilSubmit: scan → fill from memory → pause on any Need You gap → recheck → Next,
+ * until the Submit page (do not click Submit). Never advances while fields are unverified.
  * submitPageOnly: click Next through earlier pages without re-verifying them; fill/verify
  * only the final Submit page.
  */
@@ -511,6 +508,16 @@ async function walkHostFormPages(input: {
     const afterFill = await getPageStepState(input.tabId);
     if (afterFill.hasSubmit && !afterFill.hasNext) {
       reachedSubmitPage = true;
+      // Still pause if the Submit page itself has unverified fields.
+      if (result.needYouCount > 0 || result.highlighted > 0) {
+        return {
+          totalFilled,
+          needYouLabels: needYouLabels.slice(0, 8),
+          stuckHighlighted,
+          pagesVisited: pageIndex + 1,
+          reachedSubmitPage,
+        };
+      }
       return {
         totalFilled,
         needYouLabels: needYouLabels.slice(0, 8),
@@ -520,8 +527,8 @@ async function walkHostFormPages(input: {
       };
     }
 
-    // Required Need You gaps: stop so the user can answer before Next.
-    if (result.needYouCount > 0) {
+    // Any remaining Need You gap (required or optional) or empty highlight blocks Next.
+    if (result.needYouCount > 0 || result.highlighted > 0) {
       return {
         totalFilled,
         needYouLabels: needYouLabels.slice(0, 8),
@@ -591,16 +598,34 @@ async function waitForTabComplete(tabId: number, timeoutMs = 45000): Promise<voi
   });
 }
 
-/** Open the host form in a background tab (no focus steal). Caller should close it when done. */
-async function openFormTabInBackground(sourceUrl: string): Promise<{ tabId: number; origin: string }> {
+/** Open the host form in a background tab, or reuse the existing tab for this application. */
+async function openOrReuseFormTab(
+  applicationId: string,
+  sourceUrl: string,
+): Promise<{ tabId: number; origin: string; reused: boolean }> {
   const origin = new URL(sourceUrl).origin;
+  const existing = await loadFillSession();
+  if (existing?.applicationId === applicationId && existing.tabId != null) {
+    try {
+      const tab = await chrome.tabs.get(existing.tabId);
+      if (tab.id != null) {
+        const tabUrl = tab.url ? new URL(tab.url) : null;
+        if (tabUrl && tabUrl.origin === origin) {
+          await ensureHostAccess(origin, true);
+          return { tabId: tab.id, origin, reused: true };
+        }
+      }
+    } catch {
+      // Tab was closed — open a fresh one below.
+    }
+  }
+
   await ensureHostAccess(origin, true);
   const tab = await chrome.tabs.create({ url: sourceUrl, active: false });
   if (!tab.id) throw new Error("Could not open host form tab in the background.");
   await waitForTabComplete(tab.id);
-  // Extra wait — Google Forms often paints controls after "complete".
   await sleep(2500);
-  return { tabId: tab.id, origin };
+  return { tabId: tab.id, origin, reused: false };
 }
 
 async function closeBackgroundTab(tabId: number | null): Promise<void> {
@@ -613,20 +638,18 @@ async function closeBackgroundTab(tabId: number | null): Promise<void> {
 }
 
 /**
- * Fill carefully (transferring Need You gaps via batch plans), optionally reopen to
- * re-sync Need You ↔ host form, then Submit only when the form looks complete.
- */
-/**
- * Prefill: open form → fill → Need You → recheck → Next until Submit page (no Submit click).
- * Submit window (~2h before deadline): skip earlier pages, verify Submit page only, then Submit.
+ * Prefill: open (or reuse) form → fill → Need You → recheck → Next until Submit page.
+ * Submit window: reuse same tab when possible, verify Submit page, then Submit.
+ * Keeps the form tab open across Need You pauses and page-loop continues until Submit finishes.
  */
 async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
   let tabId: number | null = null;
+  let keepTabOpen = false;
   try {
     const begin = await beginHostSubmitJob(job.jobId);
     if (!begin.ok) return;
 
-    const opened = await openFormTabInBackground(job.sourceUrl);
+    const opened = await openOrReuseFormTab(job.applicationId, job.sourceUrl);
     tabId = opened.tabId;
     await trackExtensionFormTab({
       applicationId: job.applicationId,
@@ -643,7 +666,7 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
         mode: "fillUntilSubmit",
       });
 
-      if (fillPass.needYouLabels.length > 0) {
+      if (fillPass.needYouLabels.length > 0 || fillPass.stuckHighlighted > 0) {
         await sleep(3000);
         await completeHostSubmitJob({
           jobId: job.jobId,
@@ -651,6 +674,7 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
           pausedForNeedsYou: true,
           missingRequired: fillPass.needYouLabels,
         });
+        keepTabOpen = true;
         return;
       }
 
@@ -659,12 +683,17 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
         jobId: job.jobId,
         filledFields: fillPass.totalFilled,
       });
+      // Prefill done / waiting for deadline window — keep tab for later Submit.
+      keepTabOpen = true;
       return;
     }
 
     // Submit path: do not re-verify earlier pages — advance to Submit, verify that page, click.
     const stillAllowed = await beginHostSubmitJob(job.jobId);
-    if (!stillAllowed.ok) return;
+    if (!stillAllowed.ok) {
+      keepTabOpen = true;
+      return;
+    }
 
     const submitPass = await walkHostFormPages({
       tabId,
@@ -674,7 +703,7 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       mode: "submitPageOnly",
     });
 
-    if (submitPass.needYouLabels.length > 0) {
+    if (submitPass.needYouLabels.length > 0 || submitPass.stuckHighlighted > 0) {
       await sleep(3000);
       await completeHostSubmitJob({
         jobId: job.jobId,
@@ -682,11 +711,15 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
         pausedForNeedsYou: true,
         missingRequired: submitPass.needYouLabels,
       });
+      keepTabOpen = true;
       return;
     }
 
     const beforeClick = await beginHostSubmitJob(job.jobId);
-    if (!beforeClick.ok) return;
+    if (!beforeClick.ok) {
+      keepTabOpen = true;
+      return;
+    }
 
     await sleep(2000);
     const submit = await clickHostSubmitAndConfirm(tabId);
@@ -703,6 +736,8 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
           ? "Submit clicked but host did not confirm."
           : submit.reason || "Could not find Submit on the host form.",
     });
+    // Close after a terminal submit attempt (success or confirmed click).
+    keepTabOpen = false;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Host job failed.";
     const code = error && typeof error === "object" && "code" in error ? String((error as { code: string }).code) : "";
@@ -716,8 +751,12 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       blockedReason: code === "captcha" || code === "account" ? message : undefined,
       error: code === "captcha" || code === "account" ? undefined : channelRace ? "Submit click may have succeeded; confirmation was interrupted." : message,
     }).catch(() => undefined);
+    keepTabOpen = code === "captcha" || code === "account";
   } finally {
-    // Don't yank the tab the instant the last click lands — confirmation page needs a moment.
+    if (keepTabOpen) {
+      // Leave the form tab open for Need You continue / deadline Submit.
+      return;
+    }
     await sleep(2500);
     await closeBackgroundTab(tabId);
     await chrome.storage.local.remove(FILL_SESSION_KEY).catch(() => undefined);

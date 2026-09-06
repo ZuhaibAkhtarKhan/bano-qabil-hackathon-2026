@@ -893,12 +893,27 @@ async function persistBatchMappings(
 
   const mappingByFieldId = new Map((options.baseMappings ?? []).map((item) => [item.fieldKey, item]));
   const byId = new Map(results.map((item) => [item.fieldId, item]));
+  const { data: priorRows } = await supabase
+    .from("field_mappings")
+    .select("field_key, meta")
+    .eq("application_id", applicationId)
+    .eq("user_id", actor.userId);
+  const priorSkipped = new Set(
+    (priorRows ?? [])
+      .filter((row) => {
+        const meta = row.meta;
+        return Boolean(meta && typeof meta === "object" && !Array.isArray(meta) && (meta as { skipped?: unknown }).skipped);
+      })
+      .map((row) => String(row.field_key)),
+  );
   const rows = fields.map((field) => {
     const result = byId.get(field.fieldId);
     const base = mappingByFieldId.get(field.fieldId);
-    const filled = result?.status === "filled";
-    const value = result?.documentVersionId || result?.value || "";
     const hostKey = options.hostFieldKeyById?.[field.fieldId] ?? field.fieldId;
+    const skippedOptional =
+      result?.applyMode === "skip" || priorSkipped.has(hostKey) || priorSkipped.has(field.fieldId);
+    const filled = result?.status === "filled" || skippedOptional;
+    const value = skippedOptional ? "" : result?.documentVersionId || result?.value || "";
     const choiceValues = persistableFormChoiceOptions({
       fieldType: field.type === "contenteditable" ? "textarea" : field.type,
       hostOptions: field.options ?? [],
@@ -919,14 +934,17 @@ async function persistBatchMappings(
       field_key: hostKey.slice(0, 180),
       label: field.label.slice(0, 180),
       value: String(value).slice(0, 4000),
-      source: base?.source?.slice(0, 120) ?? "batch_fill",
-      confidence: filled ? Math.max(base?.confidence ?? 0.9, 0.88) : base?.confidence ?? 0.2,
-      excluded_by_default: !filled,
+      source: skippedOptional
+        ? "Needs You (skipped optional)"
+        : base?.source?.slice(0, 120) ?? "batch_fill",
+      confidence: filled ? Math.max(base?.confidence ?? 0.9, skippedOptional ? 1 : 0.88) : base?.confidence ?? 0.2,
+      excluded_by_default: skippedOptional ? false : !filled,
       sensitive: Boolean(base?.sensitive),
       field_type: field.type,
       options: choiceValues,
       meta: {
         required: Boolean(field.required),
+        ...(skippedOptional ? { skipped: true } : {}),
         ...(uploadKind ? { uploadKind } : {}),
         ...(result?.documentVersionId ? { versionId: result.documentVersionId } : {}),
         ...(result?.evidenceIds ? { evidenceIds: result.evidenceIds } : {}),
@@ -1060,12 +1078,13 @@ export async function runBatchFillPlan(input: {
   // Prefer values already saved on this application (Need You / memory / kit) over fresh empty plans.
   const { data: storedMappings } = await input.supabase
     .from("field_mappings")
-    .select("field_key, label, value, source, confidence, excluded_by_default")
+    .select("field_key, label, value, source, confidence, excluded_by_default, meta")
     .eq("application_id", input.applicationId)
     .eq("user_id", input.actor.userId);
   const { dedupeFieldMappings, mappingHasUsableFill, matchStoredMappingForHostField } = await import(
     "@/lib/field-mappings"
   );
+  const { mappingMetaSkipped } = await import("@/server/applications/host-page-fill");
   const bestStored = dedupeFieldMappings(storedMappings ?? []).filter((row) =>
     mappingHasUsableFill(row, 0.5),
   );
@@ -1078,7 +1097,19 @@ export async function runBatchFillPlan(input: {
         fieldId: field.fieldId,
         label: field.label,
       });
-      const value = String(match?.value ?? "").trim();
+      if (!match) return [];
+      if (mappingMetaSkipped(match.meta)) {
+        return [
+          {
+            fieldId: field.fieldId,
+            status: "filled" as const,
+            value: "",
+            applyMode: "skip" as const,
+            reason: "Optional field skipped in Need You.",
+          },
+        ];
+      }
+      const value = String(match.value ?? "").trim();
       if (!value) return [];
       const choiceValue =
         field.type === "radio" || field.type === "checkbox" || field.type === "select"
@@ -1088,7 +1119,7 @@ export async function runBatchFillPlan(input: {
         fieldId: field.fieldId,
         fieldType: field.type,
         value: choiceValue,
-        source: match?.source,
+        source: match.source,
         allowedDocumentVersionIds: catalog.allowedDocumentVersionIds,
       });
       return result ? [result] : [];

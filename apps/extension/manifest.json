@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "1-Apply",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Save opportunities to 1-Apply and fill host forms carefully in a background tab (page loop + Need You, Submit only in the 2-hour deadline window).",
   "icons": {
     "16": "icons/icon-16.png",
