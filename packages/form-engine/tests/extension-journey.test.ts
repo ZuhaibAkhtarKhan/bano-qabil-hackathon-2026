@@ -79,6 +79,64 @@ describe("extension field, label, name, and id detection", () => {
     expect(fields.find((item) => item.key === "listitem:i2")?.options).toEqual(["Editorial Board", "Human Resource"]);
     expect(fields.find((item) => item.key === "listitem:i3")?.type).toBe("file");
   });
+
+  it("splits Google Forms multiple-choice grids into one radio field per row", () => {
+    const document = documentFrom(`
+      <div role="listitem">
+        <div id="iGrid" role="heading">Please rate your proficiency with the following technologies:</div>
+        <div role="radiogroup" aria-label="Docker">
+          <div role="radio" aria-label="Novice"></div>
+          <div role="radio" aria-label="Intermediate"></div>
+          <div role="radio" aria-label="Advanced"></div>
+          <div role="radio" aria-label="Expert"></div>
+        </div>
+        <div role="radiogroup" aria-label="Kubernetes">
+          <div role="radio" aria-label="Novice"></div>
+          <div role="radio" aria-label="Intermediate"></div>
+          <div role="radio" aria-label="Advanced"></div>
+          <div role="radio" aria-label="Expert"></div>
+        </div>
+        <div role="radiogroup" aria-label="Terraform">
+          <div role="radio" aria-label="Novice"></div>
+          <div role="radio" aria-label="Intermediate"></div>
+          <div role="radio" aria-label="Advanced"></div>
+          <div role="radio" aria-label="Expert"></div>
+        </div>
+      </div>
+    `);
+    const fields = inventoryFromDocument(document);
+    const docker = fields.find((item) => item.key === "listitem:iGrid:row:docker");
+    const k8s = fields.find((item) => item.key === "listitem:iGrid:row:kubernetes");
+    expect(fields.find((item) => item.key === "listitem:iGrid")).toBeUndefined();
+    expect(docker?.type).toBe("radio");
+    expect(docker?.options).toEqual(["Novice", "Intermediate", "Advanced", "Expert"]);
+    expect(docker?.label).toMatch(/Docker/i);
+    expect(k8s?.options).toEqual(["Novice", "Intermediate", "Advanced", "Expert"]);
+    expect(
+      document.querySelector('[data-1apply-key="listitem:iGrid:row:docker"][role="radiogroup"]'),
+    ).toBeTruthy();
+  });
+
+  it("splits grid radios labeled as Row - Column without radiogroups", () => {
+    const document = documentFrom(`
+      <div role="listitem">
+        <div id="iGrid2" role="heading">Rate your skills</div>
+        <div role="radio" aria-label="Docker - Novice"></div>
+        <div role="radio" aria-label="Docker - Expert"></div>
+        <div role="radio" aria-label="Python - Novice"></div>
+        <div role="radio" aria-label="Python - Expert"></div>
+      </div>
+    `);
+    const fields = inventoryFromDocument(document);
+    expect(fields.find((item) => item.key === "listitem:iGrid2:row:docker")?.options).toEqual([
+      "Novice",
+      "Expert",
+    ]);
+    expect(fields.find((item) => item.key === "listitem:iGrid2:row:python")?.options).toEqual([
+      "Novice",
+      "Expert",
+    ]);
+  });
 });
 
 describe("extension mapping, sensitive fields, and no accidental submission", () => {

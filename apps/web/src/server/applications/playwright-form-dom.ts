@@ -355,6 +355,51 @@ export function executeFormDomInPage(input: FormDomEvaluateInput): FormDomEvalua
 
       let type = "text";
       let options: string[] | undefined;
+      const radioGroups = Array.from(item.querySelectorAll('[role="radiogroup"]')).filter(
+        (group) => group.querySelectorAll('[role="radio"], input[type="radio"]').length > 0,
+      );
+      if (radioGroups.length > 1) {
+        const requiredMarker = Boolean(
+          item.querySelector(
+            '[aria-required="true"], .freebirdFormviewerComponentsQuestionBaseRequiredAsterisk',
+          ),
+        );
+        const headingRequired = /\brequired\b/i.test(heading?.textContent ?? "");
+        const looksOptional = /\boptional\b/i.test(item.textContent ?? "");
+        for (const [rowIndex, group] of radioGroups.entries()) {
+          const rowName = (
+            group.getAttribute("aria-label") ||
+            (group.getAttribute("aria-labelledby") || "")
+              .split(/\s+/)
+              .map((id) => document.getElementById(id)?.textContent ?? "")
+              .join(" ") ||
+            `Row ${rowIndex + 1}`
+          )
+            .replace(/\s+/g, " ")
+            .trim();
+          const rowLabel = `${label} — ${rowName}`.slice(0, 160);
+          const rowKeyBase = rowLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 80) || `field_${fields.length}`;
+          const rowFieldId = stableFieldId(rowKeyBase, rowKeyBase, `${fieldKey}_row_${rowIndex}`);
+          if (seen.has(rowFieldId)) continue;
+          seen.add(rowFieldId);
+          group.setAttribute(BATCH_ATTR, rowFieldId);
+          const checkedChoice = group.querySelector(
+            '[role="radio"][aria-checked="true"], input[type="radio"]:checked',
+          );
+          fields.push({
+            fieldId: rowFieldId,
+            fieldKey: rowKeyBase,
+            type: "radio",
+            label: rowLabel,
+            required: !looksOptional && (requiredMarker || headingRequired),
+            options: uniqueOptionLabels(
+              Array.from(group.querySelectorAll('[role="radio"], input[type="radio"]')),
+            ),
+            currentValue: checkedChoice ? optionLabelFromNode(checkedChoice) : undefined,
+          });
+        }
+        continue;
+      }
       if (item.querySelector('[role="radio"], input[type="radio"]')) {
         type = "radio";
         options = uniqueOptionLabels(

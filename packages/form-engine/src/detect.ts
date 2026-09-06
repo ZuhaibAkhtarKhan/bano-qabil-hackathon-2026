@@ -233,6 +233,166 @@ function optionLabel(el: Element): string {
   return ((el as HTMLInputElement).value || el.textContent || "").trim().slice(0, 160);
 }
 
+function accessibleName(el: Element): string {
+  const aria = attr(el, "aria-label");
+  if (aria) return aria;
+  const labelledBy = attr(el, "aria-labelledby");
+  if (labelledBy && el.ownerDocument) {
+    const text = labelledBy
+      .split(/\s+/)
+      .map((token) => el.ownerDocument?.getElementById(token)?.textContent?.trim() ?? "")
+      .filter(Boolean)
+      .join(" ");
+    if (text) return cleanQuestionText(text);
+  }
+  return "";
+}
+
+/** Google Forms grids often label cells as "Docker - Novice" or "Docker, Novice". */
+function splitRowColOptionLabel(label: string): { row: string; col: string } | null {
+  const text = label.trim();
+  if (!text) return null;
+  const match = text.match(/^(.{1,80}?)\s*(?:[-–—,]|:\s+)\s*(.{1,80})$/);
+  if (!match) return null;
+  const row = match[1]!.trim();
+  const col = match[2]!.trim();
+  if (!row || !col || row.length > 60 || col.length > 60) return null;
+  if (/^(yes|no|true|false)$/i.test(row)) return null;
+  return { row, col };
+}
+
+function slugFieldToken(value: string, fallback: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || fallback;
+}
+
+function radioChoiceLabels(radios: Element[], rowLabel?: string): string[] {
+  const rowNorm = (rowLabel ?? "").trim().toLowerCase();
+  const values = radios.map((radio) => {
+    const label = optionLabel(radio);
+    const split = splitRowColOptionLabel(label);
+    if (split && (!rowNorm || split.row.toLowerCase() === rowNorm)) return split.col;
+    return label;
+  });
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function findNearbyGridRowLabel(radios: Element[], item: Element, questionLabel: string): string {
+  const first = radios[0];
+  if (!first) return "";
+  let node: Element | null = first.parentElement;
+  while (node && node !== item) {
+    const clone = node.cloneNode(true) as HTMLElement;
+    for (const control of Array.from(clone.querySelectorAll('[role="radio"], [role="checkbox"], input, textarea, select'))) {
+      control.remove();
+    }
+    const text = cleanQuestionText(clone.textContent);
+    if (
+      text &&
+      text.length >= 1 &&
+      text.length <= 80 &&
+      text.toLowerCase() !== questionLabel.toLowerCase() &&
+      !/^(novice|beginner|intermediate|advanced|expert|poor|fair|good|excellent)$/i.test(text)
+    ) {
+      return text;
+    }
+    node = node.parentElement;
+  }
+  return accessibleName(first.closest('[role="radiogroup"], [role="group"]') ?? first) || "";
+}
+
+type GridRadioRow = { scope: Element; radios: Element[]; rowLabel: string };
+
+/**
+ * Multiple-choice grids are one listitem with many radios — invent one field per row
+ * so Need You / fill can pick a single column option per technology (etc.).
+ */
+function inventGoogleFormsRadioGridRows(
+  item: Element,
+  roleRadios: Element[],
+  questionLabel: string,
+): GridRadioRow[] | null {
+  if (roleRadios.length < 4) return null;
+
+  const groups = Array.from(item.querySelectorAll('[role="radiogroup"]')).filter(
+    (group) => group.querySelectorAll('[role="radio"]').length > 0,
+  );
+  if (groups.length > 1) {
+    return groups.map((group, index) => {
+      const radios = Array.from(group.querySelectorAll('[role="radio"]'));
+      const name = accessibleName(group);
+      const rowLabel =
+        (name && name.toLowerCase() !== questionLabel.toLowerCase() ? name : "") ||
+        findNearbyGridRowLabel(radios, item, questionLabel) ||
+        `Row ${index + 1}`;
+      return { scope: group, radios, rowLabel };
+    });
+  }
+
+  const byRow = new Map<string, Element[]>();
+  let splitHits = 0;
+  for (const radio of roleRadios) {
+    const split = splitRowColOptionLabel(optionLabel(radio));
+    if (!split) continue;
+    splitHits += 1;
+    const list = byRow.get(split.row) ?? [];
+    list.push(radio);
+    byRow.set(split.row, list);
+  }
+  if (byRow.size > 1 && splitHits >= Math.ceil(roleRadios.length * 0.75)) {
+    return Array.from(byRow.entries()).map(([rowLabel, radios], index) => ({
+      scope:
+        radios[0]?.closest('[role="radiogroup"], [role="group"]') ??
+        radios[0]?.parentElement ??
+        item,
+      radios,
+      rowLabel: rowLabel || `Row ${index + 1}`,
+    }));
+  }
+
+  const labels = roleRadios.map((radio) => optionLabel(radio).trim()).filter(Boolean);
+  const uniqueOrdered: string[] = [];
+  for (const label of labels) {
+    if (!uniqueOrdered.includes(label)) uniqueOrdered.push(label);
+  }
+  const colCount = uniqueOrdered.length;
+  if (colCount < 2 || labels.length < colCount * 2 || labels.length % colCount !== 0) return null;
+
+  let repeatsCleanly = true;
+  for (let i = 0; i < labels.length; i += 1) {
+    if (labels[i] !== uniqueOrdered[i % colCount]) {
+      repeatsCleanly = false;
+      break;
+    }
+  }
+  if (!repeatsCleanly) {
+    // Still accept when each chunk of colCount has the same option set (order may vary).
+    const expected = new Set(uniqueOrdered);
+    for (let offset = 0; offset < labels.length; offset += colCount) {
+      const chunk = new Set(labels.slice(offset, offset + colCount));
+      if (chunk.size !== expected.size || [...expected].some((value) => !chunk.has(value))) {
+        return null;
+      }
+    }
+  }
+
+  const rows: GridRadioRow[] = [];
+  for (let offset = 0; offset < roleRadios.length; offset += colCount) {
+    const radios = roleRadios.slice(offset, offset + colCount);
+    const rowLabel = findNearbyGridRowLabel(radios, item, questionLabel) || `Row ${rows.length + 1}`;
+    const scope =
+      radios[0]?.closest('[role="radiogroup"], [role="group"]') ??
+      radios[0]?.parentElement ??
+      item;
+    rows.push({ scope, radios, rowLabel });
+  }
+  return rows.length > 1 ? rows : null;
+}
+
 function selectOptions(el: Element): string[] {
   if (el.tagName.toLowerCase() !== "select") return [];
   return Array.from(el.querySelectorAll("option"))
@@ -343,8 +503,40 @@ function inventoryGoogleFormsListitems(root: ParentNode, seen: Set<string>): Det
 
     const roleRadios = Array.from(item.querySelectorAll('[role="radio"]'));
     if (roleRadios.length > 0) {
+      const gridRows = inventGoogleFormsRadioGridRows(item, roleRadios, label);
+      if (gridRows) {
+        seen.add(key);
+        for (const [rowIndex, row] of gridRows.entries()) {
+          const rowKey = `${key}:row:${slugFieldToken(row.rowLabel, String(rowIndex))}`;
+          if (seen.has(rowKey)) continue;
+          seen.add(rowKey);
+          const options = radioChoiceLabels(row.radios, row.rowLabel);
+          for (const radio of row.radios) stamp(radio, rowKey);
+          const exclusiveScope =
+            row.scope !== item &&
+            Array.from(row.scope.querySelectorAll('[role="radio"]')).length === row.radios.length &&
+            row.radios.every((radio) => row.scope.contains(radio));
+          if (exclusiveScope) stampCard(row.scope, rowKey);
+          pushField(fields, {
+            key: rowKey,
+            name: "",
+            id: heading?.id ?? "",
+            label: label ? `${label} — ${row.rowLabel}` : row.rowLabel,
+            placeholder: "",
+            ariaLabel: row.rowLabel,
+            nearbyText: label,
+            type: "radio",
+            inputType: "radio",
+            options,
+            required: isMarkedRequired(item, heading, label),
+            autocomplete: "",
+          });
+        }
+        continue;
+      }
+
       seen.add(key);
-      const options = roleRadios.map((node) => optionLabel(node)).filter(Boolean);
+      const options = radioChoiceLabels(roleRadios);
       for (const radio of roleRadios) stamp(radio, key);
       stampCard(item, key);
       pushField(fields, {

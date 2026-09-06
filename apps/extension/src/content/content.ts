@@ -619,8 +619,18 @@ if (!root.__1APPLY_LISTENERS) {
     return true;
   }
 
-  async function applyRoleRadios(card: HTMLElement, value: string): Promise<boolean> {
-    const radios = Array.from(card.querySelectorAll<HTMLElement>('[role="radio"]'));
+  async function applyRoleRadios(card: HTMLElement, value: string, fieldKey?: string): Promise<boolean> {
+    let radios = Array.from(card.querySelectorAll<HTMLElement>('[role="radio"]'));
+    if (fieldKey) {
+      const keyed = radios.filter((radio) => radio.getAttribute(APPLY_FIELD_ATTR) === fieldKey);
+      if (keyed.length) {
+        radios = keyed;
+      } else {
+        const tagged = findTagged(fieldKey);
+        const group = tagged?.closest('[role="radiogroup"]') as HTMLElement | null;
+        if (group) radios = Array.from(group.querySelectorAll<HTMLElement>('[role="radio"]'));
+      }
+    }
     const target = value.trim().toLowerCase();
     const compact = target.replace(/\s+/g, "");
     const match =
@@ -633,6 +643,13 @@ if (!root.__1APPLY_LISTENERS) {
         const text = optionText(radio).toLowerCase().replace(/\s+/g, "");
         // "3rd year" ↔ "3rd"
         return text.length >= 2 && (compact.startsWith(text) || text.startsWith(compact.replace(/year$/, "")));
+      }) ||
+      radios.find((radio) => {
+        // Grid cells often use "Docker - Advanced"; Need You stores "Advanced".
+        const split = optionText(radio)
+          .toLowerCase()
+          .match(/^(.{1,80}?)\s*(?:[-–—,]|:)\s*(.{1,80})$/);
+        return Boolean(split && (split[2] === target || split[2]?.replace(/\s+/g, "") === compact));
       });
     if (!match) return false;
     match.click();
@@ -778,7 +795,7 @@ if (!root.__1APPLY_LISTENERS) {
     }
 
     if (mapping.type === "radio") {
-      if (card.querySelector('[role="radio"]')) return applyRoleRadios(card, mapping.value);
+      if (card.querySelector('[role="radio"]')) return applyRoleRadios(card, mapping.value, mapping.fieldKey);
       const nodes = Array.from(
         document.querySelectorAll<HTMLInputElement>(`input[type="radio"][${APPLY_FIELD_ATTR}="${cssEscape(mapping.fieldKey)}"]`),
       );
@@ -869,7 +886,10 @@ if (!root.__1APPLY_LISTENERS) {
       return Boolean(selectedText && selectedText !== "choose" && !selectedText.includes("choose"));
     }
     if (card.querySelector('[role="radio"]') || (el instanceof HTMLInputElement && el.type === "radio")) {
-      if (Array.from(card.querySelectorAll('[role="radio"]')).some((node) => node.getAttribute("aria-checked") === "true")) {
+      const roleRadios = Array.from(card.querySelectorAll<HTMLElement>('[role="radio"]'));
+      const keyed = roleRadios.filter((node) => node.getAttribute(APPLY_FIELD_ATTR) === fieldKey);
+      const scoped = keyed.length ? keyed : roleRadios;
+      if (scoped.some((node) => node.getAttribute("aria-checked") === "true")) {
         return true;
       }
       return Array.from(
