@@ -8,6 +8,7 @@ import {
   shouldCreateNewAutoSubmitJob,
   shouldQueuePostDeadlineRetry,
   shouldSkipClaimedSubmitJob,
+  shouldSubmitOnHostContinue,
   summarizeHostSubmitJobs,
 } from "@/server/applications/host-submit-policy";
 
@@ -87,6 +88,47 @@ describe("host submit attempt policy", () => {
     expect(
       shouldSkipClaimedSubmitJob({ state: paused, postDeadline: false, manual: false }),
     ).toBe(true);
+  });
+
+  it("resumes Need You as early fill only until the 2-hour submit window opens", () => {
+    const paused = summarizeHostSubmitJobs(
+      [
+        {
+          status: "completed",
+          job_kind: "prefill",
+          host_submit_clicked: false,
+          last_error: "waiting_needs_you",
+          idempotency_key: "app-1:host_prefill",
+        },
+      ],
+      { status: "in_progress" },
+    );
+    const now = new Date("2026-09-03T10:00:00.000Z");
+    const farDeadline = "2026-09-10T14:00:00.000Z";
+    expect(
+      shouldSubmitOnHostContinue({
+        prepareAndSendIfSilent: true,
+        state: paused,
+        deadlineAt: farDeadline,
+        now,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSubmitOnHostContinue({
+        prepareAndSendIfSilent: true,
+        state: paused,
+        deadlineAt: "2026-09-03T11:00:00.000Z",
+        now,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSubmitOnHostContinue({
+        prepareAndSendIfSilent: true,
+        state: paused,
+        deadlineAt: null,
+        now,
+      }),
+    ).toBe(false);
   });
 
   it("does not queue a second auto-submit key while a page-loop submit job exists", () => {

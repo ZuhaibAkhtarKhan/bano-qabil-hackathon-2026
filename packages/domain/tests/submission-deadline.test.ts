@@ -416,7 +416,7 @@ describe("auto-submit policy", () => {
   it("schedules host submit before the deadline and a one-shot post-deadline retry", () => {
     const now = new Date("2026-09-03T10:00:00.000Z");
     const deadline = "2026-09-03T14:00:00.000Z";
-    expect(computeHostSubmitDueAt(deadline, now).toISOString()).toBe("2026-09-03T13:00:00.000Z");
+    expect(computeHostSubmitDueAt(deadline, now).toISOString()).toBe("2026-09-03T12:00:00.000Z");
     expect(computePostDeadlineHostSubmitDueAt(deadline, now).toISOString()).toBe(deadline);
 
     const pastDeadline = "2026-09-03T09:00:00.000Z";
@@ -431,6 +431,7 @@ describe("auto-submit policy", () => {
     expect(
       shouldSendPreDeadlineReviewNotice(1.5, true),
     ).toBe(true);
+    expect(shouldSendPreDeadlineReviewNotice(2, true)).toBe(true);
     expect(shouldSendPreDeadlineReviewNotice(3, true)).toBe(false);
     expect(shouldSendPreDeadlineReviewNotice(1.5, false)).toBe(false);
     expect(shouldSendPreDeadlineReviewNotice(-1, true)).toBe(false);
@@ -443,7 +444,7 @@ describe("auto-submit policy", () => {
       reviewUrl: "https://app.example/app/applications/app-1#submission",
     });
     expect(notice.title).toMatch(/Review before auto-submit/);
-    expect(notice.body).toMatch(/already filled this form|auto-submit 1 hour before/i);
+    expect(notice.body).toMatch(/already filled this form|auto-submit 2 hours before/i);
     expect(notice.emailHtml).toMatch(/Review application/);
   });
 

@@ -1,3 +1,5 @@
+export type DashboardNoticeId = "extension" | "kit";
+
 export type WorkspacePreferences = {
   onboardingSkippedDocuments: boolean;
   onboardingSkippedProfile: boolean;
@@ -5,6 +7,10 @@ export type WorkspacePreferences = {
   university: string;
   educationSummary: string;
   guideDismissed: boolean;
+  /** Permanently hide the Chrome/extension auto-submit notice on the dashboard. */
+  hideDashboardExtensionNotice: boolean;
+  /** Permanently hide the “Your kit” reminder card on the dashboard. */
+  hideDashboardKitCard: boolean;
 };
 
 export function parseWorkspacePreferences(raw: Record<string, unknown> | null | undefined): WorkspacePreferences {
@@ -16,6 +22,8 @@ export function parseWorkspacePreferences(raw: Record<string, unknown> | null | 
     university: typeof value.university === "string" ? value.university.trim() : "",
     educationSummary: typeof value.educationSummary === "string" ? value.educationSummary.trim() : "",
     guideDismissed: value.guideDismissed === true,
+    hideDashboardExtensionNotice: value.hideDashboardExtensionNotice === true,
+    hideDashboardKitCard: value.hideDashboardKitCard === true,
   };
 }
 

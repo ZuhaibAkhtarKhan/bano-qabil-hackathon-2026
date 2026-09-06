@@ -369,7 +369,7 @@ export async function reconcileOverdueHostSubmitJobs(supabase: SupabaseClient): 
   return requeued;
 }
 
-/** Immediate server visit: inventory + fill all pages (no final Submit). */
+/** Immediate visit: inventory + fill all reachable pages (no final Submit). */
 export async function queueHostPrefillJob(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -386,13 +386,15 @@ export async function queueHostPrefillJob(input: {
     jobKind: "prefill",
     dueAt: new Date(),
     idempotencyKey: `${input.applicationId}:host_prefill`,
-    nextAction: "Server prefill queued — fields will be filled from your profile shortly.",
-    eventTitle: `Prefill queued — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
-    eventBody: "1-Apply will visit the form now and fill it from Application Memory. You can review before auto-submit.",
+    reopenIfComplete: true,
+    nextAction: "Early fill queued — form pages will be filled from Need You and your kit now.",
+    eventTitle: `Early fill queued — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
+    eventBody:
+      "1-Apply will open the form now, fill every page it can from Need You answers and Application Memory, and surface anything still missing. Final Submit stays scheduled before the deadline.",
   });
 }
 
-/** Schedule final submit for 1 hour before the deadline (or immediately if deadline is sooner). */
+/** Schedule final submit for 2 hours before the deadline (or immediately if deadline is sooner). */
 export async function scheduleHostSubmitJob(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -428,10 +430,10 @@ export async function scheduleHostSubmitJob(input: {
       jobKind: "submit",
       dueAt,
       idempotencyKey,
-      nextAction: `Auto-submit scheduled ${dueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })} (1 hour before deadline).`,
+      nextAction: `Auto-submit scheduled ${dueAt.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })} (2 hours before deadline).`,
       eventTitle: `Auto-submit scheduled — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
       eventBody:
-        "You'll get a review email up to 2 hours before the deadline. The form submits automatically 1 hour before unless you edit. If it is still open after the deadline, 1-Apply tries once more and notifies you.",
+        "You'll get a review email about 2 hours before the deadline. The form submits automatically then unless you edit. If it is still open after the deadline, 1-Apply tries once more and notifies you.",
     });
   }
 
@@ -657,7 +659,7 @@ export async function completeHostPrefillJob(input: {
         ? waitingLabels
           ? `Needs you — required fields on this page: ${waitingLabels}`
           : "Needs you — missing fields Application Memory cannot answer yet"
-        : `Prefilled ${filledFields} field(s) from your profile. Review before auto-submit 1 hour before the deadline.`,
+        : `Prefilled ${filledFields} field(s) from your profile and Need You. Review before auto-submit 2 hours before the deadline.`,
     })
     .eq("id", applicationId)
     .eq("user_id", actor.userId);

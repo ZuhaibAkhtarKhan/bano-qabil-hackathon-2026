@@ -34,6 +34,8 @@ export default async function DashboardPage() {
       packets,
       prepareAndSendIfSilent,
       guideDismissed,
+      hideDashboardExtensionNotice,
+      hideDashboardKitCard,
     },
     needsYouCounts,
   ] = await Promise.all([loadDashboard(), loadNeedsYouFieldCounts()]);
@@ -47,7 +49,9 @@ export default async function DashboardPage() {
     prepareAndSendIfSilent,
   });
   const showKitCard =
-    (!kit.ready || kit.missing.length > 0) && (guideDismissed || currentGuideStep(guideSteps)?.id !== "kit");
+    !hideDashboardKitCard &&
+    (!kit.ready || kit.missing.length > 0) &&
+    (guideDismissed || currentGuideStep(guideSteps)?.id !== "kit");
 
   const scoredApps = applications
     .map((row) => ({ row, score: fitScore(row) }))
@@ -89,6 +93,7 @@ export default async function DashboardPage() {
         matches={matchSource}
         applications={tableRows}
         displayName={profile.display_name}
+        showExtensionNotice={!hideDashboardExtensionNotice}
         kit={{
           ready: kit.ready,
           missing: kit.missing,

@@ -200,6 +200,8 @@ export async function loadDashboard() {
     packets,
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
     guideDismissed: prefs.guideDismissed,
+    hideDashboardExtensionNotice: prefs.hideDashboardExtensionNotice,
+    hideDashboardKitCard: prefs.hideDashboardKitCard,
   };
 }
 

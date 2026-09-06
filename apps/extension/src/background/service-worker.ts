@@ -373,17 +373,8 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       totalFilled += result.filledCount;
       lastHighlighted = result.highlighted ?? 0;
 
-      if (lastHighlighted > 0 && result.filledCount === 0) {
-        await completeHostSubmitJob({
-          jobId: job.jobId,
-          filledFields: totalFilled,
-          pausedForNeedsYou: true,
-          missingRequired: [`${lastHighlighted} empty field(s) on page ${pageIndex + 1}`],
-        });
-        return;
-      }
-
-      // Try Next; if none and submit job, click Submit.
+      // Try Next so later pages are inventoried/filled ASAP. Only pause for Need You when
+      // the host will not advance (required gaps) — do not wait until the deadline submit job.
       const advance = (await sendToTab<{ clicked: boolean; reason?: string }>(tabId, {
         type: "TRY_AUTO_ADVANCE",
       }).catch(() => ({ clicked: false, reason: "error" }))) as {
@@ -402,7 +393,19 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
           jobId: job.jobId,
           filledFields: totalFilled,
           pausedForNeedsYou: lastHighlighted > 0,
-          missingRequired: lastHighlighted > 0 ? [`${lastHighlighted} empty field(s)`] : undefined,
+          missingRequired: lastHighlighted > 0 ? [`${lastHighlighted} empty field(s) on page ${pageIndex + 1}`] : undefined,
+        });
+        return;
+      }
+
+      // Stuck on a page with empties during a submit job — pause for Need You instead of
+      // clicking Submit with required gaps (host would reject).
+      if (lastHighlighted > 0) {
+        await completeHostSubmitJob({
+          jobId: job.jobId,
+          filledFields: totalFilled,
+          pausedForNeedsYou: true,
+          missingRequired: [`${lastHighlighted} empty field(s) on page ${pageIndex + 1}`],
         });
         return;
       }

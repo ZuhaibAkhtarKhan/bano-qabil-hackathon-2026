@@ -115,6 +115,22 @@ export async function skipWorkspaceGuide() {
   redirect("/app");
 }
 
+/** Permanently hide a dashboard notice for this account (Don't show again). */
+export async function dismissDashboardNoticePermanently(notice: "extension" | "kit") {
+  const { profile, supabase } = await requireWorkspace();
+  const patch =
+    notice === "extension"
+      ? { hideDashboardExtensionNotice: true }
+      : notice === "kit"
+        ? { hideDashboardKitCard: true }
+        : null;
+  if (!patch) return;
+  const preferences = mergeWorkspacePreferences(profile.preferences, patch);
+  const { error } = await supabase.from("profiles").update({ preferences }).eq("id", profile.id);
+  if (error) throw new Error("Could not save notice preference.");
+  revalidatePath("/app");
+}
+
 export async function addMemoryEvidence(formData: FormData) {
   const { user, supabase, actor } = await requireWorkspace();
   const title = String(formData.get("title") ?? "").trim();

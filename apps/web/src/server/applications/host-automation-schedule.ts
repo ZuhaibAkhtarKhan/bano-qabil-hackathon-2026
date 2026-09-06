@@ -11,7 +11,7 @@ import {
   scheduleHostSubmitJob,
   scheduleHostSubmitWhenFullyComplete,
 } from "./host-submit";
-import { shouldClickSubmitOnContinue, shouldContinueHostFill } from "./host-submit-policy";
+import { shouldContinueHostFill, shouldSubmitOnHostContinue } from "./host-submit-policy";
 import { kickHostSubmitWorkerIfEnabled } from "./host-submit-worker-kick";
 import { isHostAutomationSchedulingEnabled, isServerHostSubmitEnabled } from "./host-submit-flags";
 import { maybeSendPreDeadlineReviewForApplication } from "./pre-deadline-review-email";
@@ -114,12 +114,30 @@ export async function tryContinueHostFillAfterNeedsYou(input: {
   const blocking = dedupeFieldMappings(mappings ?? []).some((row) => mappingBlocksPageAdvance(row));
   if (blocking) return;
 
-  const state = await loadHostSubmitAttemptState(input.supabase, input.applicationId);
+  const { data: application } = await input.supabase
+    .from("applications")
+    .select("status, deadline_at")
+    .eq("id", input.applicationId)
+    .eq("user_id", input.actor.userId)
+    .maybeSingle();
+
+  const state = await loadHostSubmitAttemptState(input.supabase, input.applicationId, {
+    status: application?.status ? String(application.status) : undefined,
+    submitted_at: null,
+  });
   if (!shouldContinueHostFill(state)) return;
+
+  // Fill every reachable page ASAP from Need You / kit answers. Only click Submit once the
+  // scheduled pre-deadline window is open (or no-deadline completion path below).
+  const clickFinalSubmit = shouldSubmitOnHostContinue({
+    prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
+    state,
+    deadlineAt: (application?.deadline_at as string | null) ?? null,
+  });
 
   const continued = await queueHostFillContinueJob({
     ...input,
-    clickFinalSubmit: prefs.prepareAndSendIfSilent && shouldClickSubmitOnContinue(state),
+    clickFinalSubmit,
   });
   if (continued.ok) {
     if (isServerHostSubmitEnabled()) {

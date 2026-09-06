@@ -81,10 +81,10 @@ export default async function SettingsPage({
         <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Auto-submit if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            When you add a form URL, 1-Apply schedules prefill and submit around your deadline.
+            When you add a form URL, 1-Apply fills every form page as early as it can from Need You and your kit.
             About 2 hours before the deadline (or sooner if you set the deadline late), you get a review
             email. Whether or not you edit, the Chrome extension opens the form in your signed-in browser
-            and fills + Submits about 1 hour before the deadline. Keep Chrome open and stay signed into
+            and Submits about 2 hours before the deadline. Keep Chrome open and stay signed into
             the host site (Google Forms, Jotform, etc.). If it is still not submitted after the deadline,
             1-Apply tries once more and notifies you. CAPTCHA, signature, and payment still need you.
           </p>

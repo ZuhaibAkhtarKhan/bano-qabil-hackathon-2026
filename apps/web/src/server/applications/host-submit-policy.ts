@@ -1,4 +1,4 @@
-import { isPostDeadlineHostSubmitKey } from "@1apply/domain";
+import { computeHostSubmitDueAt, isPostDeadlineHostSubmitKey } from "@1apply/domain";
 
 export type HostJobLite = {
   status: string;
@@ -78,11 +78,34 @@ export function shouldContinueHostFill(state: HostSubmitAttemptState): boolean {
   return true;
 }
 
-/** Page-loop may click Submit only on the first automatic attempt. */
+/**
+ * Page-loop may click Submit only on the first automatic attempt AND only when the
+ * deadline submit window is already open (or there is no future deadline to wait for).
+ * Early Need You answers must resume prefill across pages — never submit days early.
+ */
 export function shouldClickSubmitOnContinue(state: HostSubmitAttemptState): boolean {
   if (!shouldContinueHostFill(state)) return false;
   if (state.firstSubmitAttemptFinished) return false;
   return true;
+}
+
+/** Whether a Need You / page-loop continue job should click final Submit now. */
+export function shouldSubmitOnHostContinue(input: {
+  prepareAndSendIfSilent: boolean;
+  state: HostSubmitAttemptState;
+  deadlineAt: string | null | undefined;
+  now?: Date;
+}): boolean {
+  if (!input.prepareAndSendIfSilent) return false;
+  if (!shouldClickSubmitOnContinue(input.state)) return false;
+  const deadlineAt = input.deadlineAt ? String(input.deadlineAt) : "";
+  if (!deadlineAt) {
+    // No deadline: keep filling only; scheduleHostSubmitWhenFullyComplete queues submit when ready.
+    return false;
+  }
+  const now = input.now ?? new Date();
+  const dueAt = computeHostSubmitDueAt(deadlineAt, now);
+  return dueAt.getTime() <= now.getTime();
 }
 
 /** Create a new auto-submit job key (deadline / no-deadline). Do not add a second submit path. */

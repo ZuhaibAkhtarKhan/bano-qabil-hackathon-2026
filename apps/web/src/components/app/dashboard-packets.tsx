@@ -4,6 +4,7 @@ import Link from "next/link";
 import { currentGuideStep, nextGuideSteps } from "@1apply/domain";
 
 import { PageHeader, WorkspaceMain } from "@/components/app/page-header";
+import { DismissibleDashboardNotice } from "@/components/app/dismissible-dashboard-notice";
 import { WorkspaceGuideCard } from "@/components/app/workspace-guide";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, MetricCard } from "@/components/ui/card";
@@ -37,8 +38,18 @@ function Section({
 
 /** Packet / kit dashboard from saadia — preserved during branch merge. */
 export async function DashboardPackets() {
-  const { profile, kit, packets, notifications, applications, opportunities, prepareAndSendIfSilent, guideDismissed } =
-    await loadDashboard();
+  const {
+    profile,
+    kit,
+    packets,
+    notifications,
+    applications,
+    opportunities,
+    prepareAndSendIfSilent,
+    guideDismissed,
+    hideDashboardExtensionNotice,
+    hideDashboardKitCard,
+  } = await loadDashboard();
   const lanes = groupPackets(packets);
   const submitted = applications.filter((row) => row.status === "submitted");
   const guideSteps = nextGuideSteps({
@@ -48,7 +59,10 @@ export async function DashboardPackets() {
     needsYouCount: lanes.needsYou.length,
     prepareAndSendIfSilent,
   });
-  const showKitCard = (!kit.ready || kit.missing.length > 0) && (guideDismissed || currentGuideStep(guideSteps)?.id !== "kit");
+  const showKitCard =
+    !hideDashboardKitCard &&
+    (!kit.ready || kit.missing.length > 0) &&
+    (guideDismissed || currentGuideStep(guideSteps)?.id !== "kit");
 
   return (
     <WorkspaceMain>
@@ -61,8 +75,24 @@ export async function DashboardPackets() {
 
       <WorkspaceGuideCard dismissed={guideDismissed} steps={guideSteps} />
 
+      {!hideDashboardExtensionNotice ? (
+        <DismissibleDashboardNotice
+          noticeId="extension"
+          className="mt-8 rounded-2xl border border-line bg-[#f7f8f4] p-6"
+          labelledBy="extension-requirement-heading-packets"
+        >
+          <h2 id="extension-requirement-heading-packets" className="text-sm font-semibold tracking-tight text-ink">
+            Chrome + 1-Apply extension required for auto-submit
+          </h2>
+          <p className="mt-2 text-sm text-ink-muted">
+            Deadline fill and Submit run in your browser through the 1-Apply Chrome extension. Keep Chrome open and the
+            extension connected.
+          </p>
+        </DismissibleDashboardNotice>
+      ) : null}
+
       {showKitCard ? (
-        <Card className="mt-8 p-6">
+        <DismissibleDashboardNotice noticeId="kit" className="mt-8 rounded-2xl border border-line bg-white p-6">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Your kit</p>
           <h2 className="mt-1 font-display text-2xl">Upload once, reuse everywhere</h2>
           <p className="mt-2 text-sm text-ink-muted">
@@ -71,7 +101,7 @@ export async function DashboardPackets() {
           <div className="mt-4">
             <ButtonLink href="/app/memory">Open your kit</ButtonLink>
           </div>
-        </Card>
+        </DismissibleDashboardNotice>
       ) : null}
 
       <dl className="mt-10 grid gap-4 sm:grid-cols-3">
