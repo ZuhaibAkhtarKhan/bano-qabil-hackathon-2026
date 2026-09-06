@@ -1,4 +1,5 @@
 import {
+  beginHostSubmitJob,
   completeHostSubmitJob,
   connectWithWebsiteSession,
   createBatchFillPlan,
@@ -545,6 +546,9 @@ async function closeBackgroundTab(tabId: number | null): Promise<void> {
 async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
   let tabId: number | null = null;
   try {
+    const begin = await beginHostSubmitJob(job.jobId);
+    if (!begin.ok) return;
+
     const opened = await openFormTabInBackground(job.sourceUrl);
     tabId = opened.tabId;
     await trackExtensionFormTab({
@@ -588,6 +592,9 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
     tabId = null;
     await sleep(1500);
 
+    const stillAllowed = await beginHostSubmitJob(job.jobId);
+    if (!stillAllowed.ok) return;
+
     const reopened = await openFormTabInBackground(job.sourceUrl);
     tabId = reopened.tabId;
     await trackExtensionFormTab({
@@ -614,6 +621,9 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       });
       return;
     }
+
+    const beforeClick = await beginHostSubmitJob(job.jobId);
+    if (!beforeClick.ok) return;
 
     await sleep(2000);
     const submit = await clickHostSubmitAndConfirm(tabId);

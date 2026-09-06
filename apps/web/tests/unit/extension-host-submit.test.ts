@@ -6,6 +6,7 @@ import {
   isServerHostSubmitEnabled,
 } from "@/server/applications/host-submit-flags";
 import {
+  ExtensionHostSubmitBeginSchema,
   ExtensionHostSubmitCompleteSchema,
   ExtensionHostSubmitJobSchema,
 } from "@/server/extension/extension-host-submit";
@@ -89,5 +90,13 @@ describe("extension host-submit contracts", () => {
         blockedReason: "CAPTCHA on the host form",
       }).blockedReason,
     ).toMatch(/CAPTCHA/);
+  });
+
+  it("parses a begin payload used to stop after status becomes submitted", () => {
+    expect(
+      ExtensionHostSubmitBeginSchema.parse({
+        jobId: "11111111-1111-4111-8111-111111111111",
+      }).jobId,
+    ).toBe("11111111-1111-4111-8111-111111111111");
   });
 });

@@ -724,7 +724,8 @@ export async function completeHostSubmitJob(input: {
   const now = new Date().toISOString();
 
   async function cancelPendingSubmitSiblings(reason: string, includePostDeadline: boolean) {
-    const { data: siblings } = await supabase
+    const queue = createServiceRoleSupabaseClient();
+    const { data: siblings } = await queue
       .from("host_submit_jobs")
       .select("id, idempotency_key")
       .eq("application_id", applicationId)
@@ -737,7 +738,7 @@ export async function completeHostSubmitJob(input: {
       .filter((row) => !isManualHostSubmitKey(String(row.idempotency_key ?? "")))
       .map((row) => String(row.id));
     if (ids.length === 0) return;
-    await supabase
+    await queue
       .from("host_submit_jobs")
       .update({
         status: "cancelled",

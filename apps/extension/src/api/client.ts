@@ -333,6 +333,14 @@ export function fetchPendingHostSubmitJobs() {
   return request<ExtensionHostSubmitJob[]>("/api/extension/host-submits/pending");
 }
 
+/** Re-check a claimed job before fill/submit — false when already submitted or cancelled. */
+export function beginHostSubmitJob(jobId: string) {
+  return request<{ ok: boolean; reason?: string }>("/api/extension/host-submits/begin", {
+    method: "POST",
+    body: JSON.stringify({ jobId }),
+  });
+}
+
 /** Report fill/submit result for a claimed job. */
 export function completeHostSubmitJob(input: {
   jobId: string;
