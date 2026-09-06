@@ -8,9 +8,12 @@ export type ActionControlKind = "next" | "submit" | "other";
 const CONTROL_SELECTOR =
   'button, a[href], [role="button"], input[type="button"], input[type="submit"], [data-action], [data-testid], [data-qa]';
 
-/** Final-submit language — must not be auto-clicked. */
+/** Final-submit language — must not be treated as Next. */
 const FINAL_SUBMIT_RE =
-  /\b(submit application|submit form|submit your application|place order|pay now|finalize|confirm payment|complete application|send application|finish application|apply now)\b/i;
+  /\b(submit application|submit form|submit your application|submit response|submit answers|place order|pay now|finalize|confirm payment|complete application|send application|finish application|apply now|enviar|absenden|envoyer|invia|wyślij|einreichen)\b/i;
+
+/** Bare submit labels (Google Forms last page uses role=button, not type=submit). */
+const BARE_SUBMIT_RE = /^(submit|enviar|absenden|envoyer|invia|wyślij|senden)$/i;
 
 /** Step-advance language (Next and common aliases). */
 const STEP_ADVANCE_RE =
@@ -44,9 +47,10 @@ export function classifyActionControl(el: Element): ActionControlKind {
 
   const hasAdvance = STEP_ADVANCE_RE.test(text) || STEP_ADVANCE_ATTR_RE.test(text);
   const hasFinal = FINAL_SUBMIT_RE.test(text);
+  const bareSubmit = BARE_SUBMIT_RE.test(text.trim());
 
   // Explicit final submit without Next/Continue → submit.
-  if (hasFinal && !hasAdvance) return "submit";
+  if ((hasFinal || bareSubmit) && !hasAdvance) return "submit";
   // "Submit & continue" style still advances.
   if (hasAdvance) return "next";
 
@@ -58,9 +62,13 @@ export function classifyActionControl(el: Element): ActionControlKind {
       : null
   ) || ("type" in el ? String((el as { type?: string }).type ?? "") : "");
   if ((tag === "button" || tag === "input") && typeAttr.toLowerCase() === "submit" && !hasAdvance) {
-    // Google Forms "Submit" on last page — treat as submit.
-    if (/\bsubmit\b/i.test(text)) return "submit";
+    // Google Forms / HTML "Submit" on last page — treat as submit.
+    if (/\bsubmit\b/i.test(text) || !text.trim()) return "submit";
   }
+
+  // role=button "Submit" (Google Forms) without type=submit.
+  const role = typeof (el as Element).getAttribute === "function" ? (el as Element).getAttribute("role") : null;
+  if (role === "button" && /\bsubmit\b/i.test(text) && !hasAdvance) return "submit";
 
   return "other";
 }

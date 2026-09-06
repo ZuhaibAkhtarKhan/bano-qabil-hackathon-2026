@@ -21,7 +21,6 @@ import {
   valueFitsNativeInput,
   type FieldLengthLimit,
 } from "@1apply/form-engine";
-import { detectSubmissionSignals } from "@1apply/domain";
 
 type FillOption = { value: string; label?: string; source?: string };
 
@@ -1379,39 +1378,48 @@ if (!root.__1APPLY_LISTENERS) {
           return;
         }
 
+        // Drop stale empty highlights when the control is actually filled (common after radio/listbox).
+        for (const node of Array.from(document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`))) {
+          const key = node.getAttribute(APPLY_FIELD_ATTR) || "";
+          const el = (key ? findControl(key) : null) || (node as HTMLElement);
+          if (key && isControlFilled(key, el)) {
+            node.removeAttribute(APPLY_EMPTY_ATTR);
+          }
+        }
         const empty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
         if (empty > 0) {
-          sendResponse({ clicked: false, confirmed: false, reason: "empty-fields" });
+          sendResponse({ clicked: false, confirmed: false, reason: `empty-fields:${empty}` });
           return;
         }
 
-        const btn = findPrimarySubmitControl(document);
+        let btn = findPrimarySubmitControl(document);
+        if (!btn) {
+          // Fallback: Google Forms / ATS often use role=button with short "Submit" copy.
+          btn =
+            Array.from(
+              document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], span[role="button"]'),
+            ).find((el) => {
+              const label = `${el.getAttribute("aria-label") ?? ""} ${el.textContent ?? ""}`.replace(/\s+/g, " ").trim();
+              return /^(submit|enviar|absenden|envoyer|invia|wyślij|senden)$/i.test(label) || /\bsubmit\b/i.test(label);
+            }) || null;
+        }
         if (!btn) {
           sendResponse({ clicked: false, confirmed: false, reason: "no-submit" });
           return;
         }
 
         btn.scrollIntoView({ block: "center", inline: "nearest" });
-        await new Promise((resolve) => setTimeout(resolve, 120));
+        await sleep(200);
+        // Google Forms ignores a bare .click() on some role=button nodes.
+        for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const) {
+          btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, buttons: 1 }));
+        }
         btn.click();
         showToast("1-Apply submitted the host form…");
 
-        // Poll for confirmation page / thank-you copy.
-        let confirmed = false;
-        for (let i = 0; i < 10; i += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 700));
-          const pageText = document.body?.innerText ?? "";
-          const signal = detectSubmissionSignals(pageText);
-          if (signal.submitted) {
-            confirmed = true;
-            break;
-          }
-          if (/formResponse|submitted|thank you for|response has been recorded/i.test(`${location.href} ${pageText}`)) {
-            confirmed = true;
-            break;
-          }
-        }
-        sendResponse({ clicked: true, confirmed, reason: confirmed ? "confirmed" : "no-confirmation" });
+        // Respond immediately. Google Forms navigates to formResponse and tears down this
+        // content script — waiting here causes "message channel closed before a response".
+        sendResponse({ clicked: true, confirmed: false, reason: "clicked" });
       })();
       return true;
     }

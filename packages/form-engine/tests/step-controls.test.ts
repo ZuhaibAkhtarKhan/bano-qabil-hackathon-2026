@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyActionControl,
   findPrimaryStepAdvance,
+  findPrimarySubmitControl,
   findStepAdvanceControls,
   isStepAdvanceControl,
 } from "../src/step-controls";
@@ -58,6 +59,17 @@ describe("step advance controls", () => {
     expect(findStepAdvanceControls(doc)).toHaveLength(1);
     expect(isStepAdvanceControl(doc.querySelector(".btn-next"))).toBe(true);
     expect(isStepAdvanceControl(doc.querySelector('button[type="submit"]'))).toBe(false);
+  });
+
+  it("classifies Google Forms role=button Submit as submit", () => {
+    const doc = documentFrom(`
+      <div role="button" aria-label="Submit">Submit</div>
+      <div role="button">Next</div>
+    `);
+    const [submit, next] = Array.from(doc.querySelectorAll('[role="button"]'));
+    expect(classifyActionControl(submit!)).toBe("submit");
+    expect(classifyActionControl(next!)).toBe("next");
+    expect(findPrimarySubmitControl(doc)?.getAttribute("aria-label")).toBe("Submit");
   });
 
   it("allows clickNext and clickSubmit only when host submit is enabled", async () => {
