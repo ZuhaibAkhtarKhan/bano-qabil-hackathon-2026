@@ -57,6 +57,12 @@ declare const chrome: {
   cookies: {
     getAll: (details: { url: string }) => Promise<Array<{ name: string; value: string }>>;
   };
+  alarms: {
+    create: (name: string, alarmInfo: { periodInMinutes?: number; delayInMinutes?: number }) => void;
+    onAlarm: {
+      addListener: (callback: (alarm: { name: string }) => void) => void;
+    };
+  };
 };
 
 declare namespace chrome {

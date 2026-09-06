@@ -1,32 +1,32 @@
 import { createApiEnvelopeSchema } from "@1apply/contracts";
-import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { ApiAuthError, apiAuthResponse, requireApiSession } from "@/server/auth/require-api";
 import { extensionPreflight, withExtensionCors } from "@/server/auth/extension-cors";
-import { kickHostSubmitWorkerIfEnabled } from "@/server/applications/host-submit-worker-kick";
+import {
+  claimPendingHostJobsForExtension,
+  ExtensionHostSubmitJobSchema,
+} from "@/server/extension/extension-host-submit";
 
-const envelope = createApiEnvelopeSchema(z.array(z.never()));
+const envelope = createApiEnvelopeSchema(z.array(ExtensionHostSubmitJobSchema));
 
 export function OPTIONS(request: Request) {
   return extensionPreflight(request);
 }
 
-/**
- * Legacy extension poller endpoint.
- * Host fill + submit is server-only (Playwright). Kick the worker and return no jobs.
- */
+/** Extension polls for due host_submit_jobs and claims them for in-browser fill/submit. */
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    await requireApiSession(request);
-    after(() => {
-      void kickHostSubmitWorkerIfEnabled();
+    const session = await requireApiSession(request);
+    const jobs = await claimPendingHostJobsForExtension({
+      supabase: session.supabase,
+      actor: session.actor,
     });
     return withExtensionCors(
       request,
-      NextResponse.json(envelope.parse({ data: [], error: null, requestId })),
+      NextResponse.json(envelope.parse({ data: jobs, error: null, requestId })),
     );
   } catch (error) {
     if (error instanceof ApiAuthError) {

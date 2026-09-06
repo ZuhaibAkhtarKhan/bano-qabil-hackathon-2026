@@ -163,8 +163,10 @@ document.getElementById("fill")!.addEventListener("click", async () => {
       const filled = result.filledCount ?? result.filled?.filter((item) => item.filled).length ?? 0;
       const highlighted = result.highlighted ?? 0;
       log(
-        `Filled ${filled} on this page. Click Next yourself, then tap Fill again for the next step. ${
-          highlighted ? `${highlighted} still empty — highlighted for Need You.` : "Submit on the host is handled by the server before the deadline — not by this extension."
+        `Filled ${filled} on this page. ${
+          highlighted
+            ? `${highlighted} still empty — highlighted for Need You / AI.`
+            : "When a deadline job is due, this extension will open the form and Submit for you (while you're signed in)."
         }`,
       );
       return;

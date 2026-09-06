@@ -490,7 +490,7 @@ export async function scheduleHostSubmitWhenFullyComplete(input: {
     idempotencyKey: `${input.applicationId}:host_submit:no_deadline_complete`,
     nextAction: "All form fields are filled — submitting to the host now.",
     eventTitle: `Auto-submit queued — ${(ctx.opportunity as { title?: string } | null)?.title ?? "Application"}`,
-    eventBody: "Every required and optional field is complete. The server will fill and submit this form.",
+    eventBody: "Every required and optional field is complete. Your browser extension will fill and submit this form.",
   });
 }
 

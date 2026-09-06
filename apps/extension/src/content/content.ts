@@ -9,6 +9,7 @@ import {
   fieldsEligibleForBatch,
   fillTargetAllowed,
   findPrimaryStepAdvance,
+  findPrimarySubmitControl,
   inspectPage,
   inventoryFromDocument,
   isProtectedControl,
@@ -20,6 +21,7 @@ import {
   valueFitsNativeInput,
   type FieldLengthLimit,
 } from "@1apply/form-engine";
+import { detectSubmissionSignals } from "@1apply/domain";
 
 type FillOption = { value: string; label?: string; source?: string };
 
@@ -58,6 +60,8 @@ const root = globalThis as {
   /** Hard stop — ignores late APPLY / Next until the user fills again. */
   __1APPLY_STOPPED?: boolean;
   __1APPLY_PENDING_TIMERS?: number[];
+  /** Set only for claimed host-submit jobs — allows final Submit click. */
+  __1APPLY_HOST_SUBMIT_ALLOWED?: boolean;
 };
 if (!root.__1APPLY_LISTENERS) {
   root.__1APPLY_LISTENERS = true;
@@ -1338,8 +1342,63 @@ if (!root.__1APPLY_LISTENERS) {
       return true;
     }
 
+    if (message?.type === "CLICK_HOST_SUBMIT") {
+      void (async () => {
+        if (!message.hostSubmitAllowed && !root.__1APPLY_HOST_SUBMIT_ALLOWED) {
+          sendResponse({ clicked: false, confirmed: false, reason: "Submit not allowed for this session." });
+          return;
+        }
+        try {
+          assertFillActionAllowed("clickSubmit", { hostSubmitAllowed: true });
+        } catch (error) {
+          sendResponse({
+            clicked: false,
+            confirmed: false,
+            reason: error instanceof Error ? error.message : "Submit blocked",
+          });
+          return;
+        }
+
+        const empty = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
+        if (empty > 0) {
+          sendResponse({ clicked: false, confirmed: false, reason: "empty-fields" });
+          return;
+        }
+
+        const btn = findPrimarySubmitControl(document);
+        if (!btn) {
+          sendResponse({ clicked: false, confirmed: false, reason: "no-submit" });
+          return;
+        }
+
+        btn.scrollIntoView({ block: "center", inline: "nearest" });
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        btn.click();
+        showToast("1-Apply submitted the host form…");
+
+        // Poll for confirmation page / thank-you copy.
+        let confirmed = false;
+        for (let i = 0; i < 10; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          const pageText = document.body?.innerText ?? "";
+          const signal = detectSubmissionSignals(pageText);
+          if (signal.submitted) {
+            confirmed = true;
+            break;
+          }
+          if (/formResponse|submitted|thank you for|response has been recorded/i.test(`${location.href} ${pageText}`)) {
+            confirmed = true;
+            break;
+          }
+        }
+        sendResponse({ clicked: true, confirmed, reason: confirmed ? "confirmed" : "no-confirmation" });
+      })();
+      return true;
+    }
+
     if (message?.type === "STOP_AUTO_CONTINUE") {
       disableAutoContinueWatch();
+      root.__1APPLY_HOST_SUBMIT_ALLOWED = false;
       showToast("1-Apply stopped filling this page.");
       sendResponse({ ok: true });
       return false;
@@ -1461,6 +1520,8 @@ if (!root.__1APPLY_LISTENERS) {
         sendResponse({ type: "FILL_RESULT", filled: [], error: "Origin mismatch" });
         return false;
       }
+
+      root.__1APPLY_HOST_SUBMIT_ALLOWED = Boolean(message.hostSubmitAllowed);
 
       void (async () => {
         root.__1APPLY_FILLING = true;

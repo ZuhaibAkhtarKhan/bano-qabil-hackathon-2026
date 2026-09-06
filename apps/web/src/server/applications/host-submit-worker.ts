@@ -19,11 +19,8 @@ import {
   shouldCancelAfterSiblingSubmitClick,
   shouldSkipClaimedSubmitJob,
 } from "./host-submit-policy";
-import {
-  isServerHostSubmitEnabled,
-  runPlaywrightHostPrefill,
-  runPlaywrightHostSubmit,
-} from "./playwright-host-submit";
+import { isServerHostSubmitEnabled } from "./host-submit-flags";
+import { runPlaywrightHostPrefill, runPlaywrightHostSubmit } from "./playwright-host-submit";
 
 const MAX_ATTEMPTS = 5;
 const MAX_JOBS_PER_RUN = 6;

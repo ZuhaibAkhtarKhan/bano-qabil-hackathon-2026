@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/admin";
 import { logError } from "@/lib/log";
 
-import { isServerHostSubmitEnabled } from "./playwright-host-submit";
+import { isServerHostSubmitEnabled } from "./host-submit-flags";
 import { runServerHostSubmitWorker } from "./host-submit-worker";
 
 async function runWorkerOnce(): Promise<void> {

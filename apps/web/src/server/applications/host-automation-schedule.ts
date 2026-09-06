@@ -13,10 +13,10 @@ import {
 } from "./host-submit";
 import { shouldClickSubmitOnContinue, shouldContinueHostFill } from "./host-submit-policy";
 import { kickHostSubmitWorkerIfEnabled } from "./host-submit-worker-kick";
-import { isServerHostSubmitEnabled } from "./playwright-host-submit";
+import { isHostAutomationSchedulingEnabled, isServerHostSubmitEnabled } from "./host-submit-flags";
 import { maybeSendPreDeadlineReviewForApplication } from "./pre-deadline-review-email";
 
-/** Queue immediate server prefill + schedule submit before deadline when automation is on. */
+/** Queue immediate prefill + schedule submit before deadline when automation is on. */
 export async function syncHostAutomationForApplication(input: {
   supabase: SupabaseClient;
   actor: Actor;
@@ -26,10 +26,10 @@ export async function syncHostAutomationForApplication(input: {
   const prefs = parseWorkspacePreferences(input.actor.profile.preferences);
   if (!prefs.prepareAndSendIfSilent) return;
 
-  if (!isServerHostSubmitEnabled()) {
-    logError("host_automation.server_submit_disabled", {
+  if (!isHostAutomationSchedulingEnabled()) {
+    logError("host_automation.schedule_disabled", {
       applicationId: input.applicationId,
-      hint: "ENABLE_SERVER_HOST_SUBMIT must be true — host fill/submit is server-only.",
+      hint: "ENABLE_HOST_AUTOMATION_SCHEDULE is off — jobs will not be queued.",
     });
     return;
   }
@@ -89,8 +89,10 @@ export async function syncHostAutomationForApplication(input: {
     prepareAndSendIfSilent: prefs.prepareAndSendIfSilent,
   });
 
-  // Run worker immediately when jobs are due — do not rely on after() alone.
-  await kickHostSubmitWorkerIfEnabled();
+  // Playwright fallback only — extension claims jobs via /api/extension/host-submits/pending.
+  if (isServerHostSubmitEnabled()) {
+    await kickHostSubmitWorkerIfEnabled();
+  }
 }
 
 /** After Need You edits, continue the page-loop when required fields are ready. */
@@ -120,14 +122,16 @@ export async function tryContinueHostFillAfterNeedsYou(input: {
     clickFinalSubmit: prefs.prepareAndSendIfSilent && shouldClickSubmitOnContinue(state),
   });
   if (continued.ok) {
-    await kickHostSubmitWorkerIfEnabled();
+    if (isServerHostSubmitEnabled()) {
+      await kickHostSubmitWorkerIfEnabled();
+    }
     return;
   }
 
   if (!prefs.prepareAndSendIfSilent) return;
 
   const result = await scheduleHostSubmitWhenFullyComplete(input);
-  if (result.ok) {
+  if (result.ok && isServerHostSubmitEnabled()) {
     await kickHostSubmitWorkerIfEnabled();
   }
 }

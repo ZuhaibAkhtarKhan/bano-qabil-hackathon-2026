@@ -81,14 +81,12 @@ export default async function SettingsPage({
         <Card className="p-6" data-tour="settings-freeze">
           <h2 className="text-base font-medium">Auto-submit if I don’t respond</h2>
           <p className="mt-2 text-sm text-ink-muted">
-            When you add a form URL, the server prefills it from your profile right away.
-            About 2 hours before the deadline (or sooner if you set the deadline late), 1-Apply emails you
-            so you can review answers, documents, and Need You items. Whether or not you edit, the form
-            auto-submits 1 hour before the deadline. If it is still not submitted after the deadline,
-            1-Apply tries once more and notifies you whether that final attempt succeeded or failed.
-            With no deadline set, it auto-submits once every
-            form field is filled — including optional ones — in Need You. Your laptop can be off; only
-            the EC2 server needs to stay up. CAPTCHA, signature, and payment still need you.
+            When you add a form URL, 1-Apply schedules prefill and submit around your deadline.
+            About 2 hours before the deadline (or sooner if you set the deadline late), you get a review
+            email. Whether or not you edit, the Chrome extension opens the form in your signed-in browser
+            and fills + Submits about 1 hour before the deadline. Keep Chrome open and stay signed into
+            the host site (Google Forms, Jotform, etc.). If it is still not submitted after the deadline,
+            1-Apply tries once more and notifies you. CAPTCHA, signature, and payment still need you.
           </p>
           <form action={updatePrepareAndSend} className="mt-4 grid gap-3">
             <label className="flex items-start gap-3 text-sm">
@@ -98,7 +96,7 @@ export default async function SettingsPage({
                 defaultChecked={prefs.prepareAndSendIfSilent}
                 className="mt-1"
               />
-              <span>Auto-submit this form before the deadline if I stay silent (server-side — no browser required).</span>
+              <span>Auto-submit before the deadline if I stay silent (runs in my browser via the extension).</span>
             </label>
             <SubmitButton variant="secondary">
               Save send preference
@@ -113,8 +111,8 @@ export default async function SettingsPage({
             <a className="underline" href="/app/integrations">
               Integrations
             </a>
-            . Use the extension only for optional manual “Fill from memory” on the open tab.
-            Prefill, review email, and host auto-submit run entirely on the server (no extension required).
+            . Keep the extension installed and connected — it fills from memory and executes deadline
+            Submit jobs in your signed-in browser. You can also tap “Fill from memory” manually on an open form.
           </p>
           <ExtensionConnectCard appUrl={appUrl} />
         </Card>

@@ -317,6 +317,39 @@ export function fetchDocumentFile(versionId: string) {
   }>(`/api/extension/documents/${versionId}`);
 }
 
+export type ExtensionHostSubmitJob = {
+  jobId: string;
+  applicationId: string;
+  sourceUrl: string;
+  jobKind: "prefill" | "submit";
+  clickFinalSubmit: boolean;
+  dueAt: string;
+  attemptCount: number;
+  idempotencyKey?: string;
+};
+
+/** Claim due host-submit jobs for this user (extension executor). */
+export function fetchPendingHostSubmitJobs() {
+  return request<ExtensionHostSubmitJob[]>("/api/extension/host-submits/pending");
+}
+
+/** Report fill/submit result for a claimed job. */
+export function completeHostSubmitJob(input: {
+  jobId: string;
+  filledFields?: number;
+  submitted?: boolean;
+  hostSubmitClicked?: boolean;
+  error?: string | null;
+  blockedReason?: string | null;
+  pausedForNeedsYou?: boolean;
+  missingRequired?: string[];
+}) {
+  return request<{ ok: boolean; reason?: string }>("/api/extension/host-submits/complete", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function connectWithWebsiteSession() {
   await saveSession();
   const allowed = await ensureAppHostPermission();

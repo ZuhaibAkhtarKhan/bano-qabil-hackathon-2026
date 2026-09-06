@@ -1,13 +1,16 @@
 import {
+  completeHostSubmitJob,
   connectWithWebsiteSession,
   createBatchFillPlan,
   createFillPlan,
   endFillSession,
   fetchDocumentFile,
+  fetchPendingHostSubmitJobs,
   fetchSession,
   generateAiDraft,
   ingestOpportunity,
   listApplications,
+  type ExtensionHostSubmitJob,
 } from "../api/client";
 import type { DetectedField } from "@1apply/form-engine";
 
@@ -92,12 +95,18 @@ function tabOrigin(tab: chrome.tabs.Tab): string {
   return parsed.origin;
 }
 
-async function ensureHostAccess(origin: string): Promise<void> {
+async function ensureHostAccess(origin: string, soft = false): Promise<void> {
   const origins = [`${origin}/*`];
   const already = await chrome.permissions.contains({ origins });
   if (already) return;
+  if (soft) {
+    const granted = await chrome.permissions.request({ origins }).catch(() => false);
+    if (granted) return;
+  }
   throw new Error(
-    "Site access is missing. Click Fill/Save in the 1-Apply popup once and allow access when Chrome asks.",
+    soft
+      ? "Open this form once and allow 1-Apply site access so deadline submit can run in your browser."
+      : "Site access is missing. Click Fill/Save in the 1-Apply popup once and allow access when Chrome asks.",
   );
 }
 
@@ -212,6 +221,10 @@ async function runBatchFillOnTab(input: {
   applicationId: string;
   pageIndex: number;
   resumeFill?: boolean;
+  /** Host-submit job: click Next between pages. */
+  autoContinue?: boolean;
+  /** Host-submit job: allow final Submit click in content script. */
+  hostSubmitAllowed?: boolean;
 }) {
   let inventory: { fields?: unknown[]; hazards?: unknown; url?: string; title?: string } | null = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -225,6 +238,25 @@ async function runBatchFillOnTab(input: {
   }
   if (!inventory?.fields?.length) {
     throw new Error("no-fields");
+  }
+
+  const hazards = inventory.hazards as
+    | {
+        captcha?: boolean;
+        captchaMessage?: string | null;
+        accountCreation?: boolean;
+        accountMessage?: string | null;
+      }
+    | undefined;
+  if (hazards?.captcha) {
+    throw Object.assign(new Error(hazards.captchaMessage || "CAPTCHA blocked host fill."), {
+      code: "captcha",
+    });
+  }
+  if (hazards?.accountCreation) {
+    throw Object.assign(new Error(hazards.accountMessage || "Account wall blocked host fill."), {
+      code: "account",
+    });
   }
 
   const plan = await createBatchFillPlan({
@@ -245,7 +277,8 @@ async function runBatchFillOnTab(input: {
     type: "APPLY_BATCH_RESULTS",
     origin: input.origin,
     applicationId: input.applicationId,
-    autoContinue: false,
+    autoContinue: Boolean(input.autoContinue),
+    hostSubmitAllowed: Boolean(input.hostSubmitAllowed),
     resumeFill: Boolean(input.resumeFill),
     results: plan.fields.map((item) => ({
       ...item,
@@ -262,8 +295,193 @@ async function runBatchFillOnTab(input: {
     ...applied,
     fillSessionId: plan.fillSessionId,
     filledCount: applied.filled?.filter((item) => item.filled).length ?? 0,
+    highlighted: applied.highlighted ?? 0,
   };
 }
+
+async function waitForTabComplete(tabId: number, timeoutMs = 45000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      reject(new Error("Timed out waiting for form page to load."));
+    }, timeoutMs);
+
+    function onUpdated(id: number, info: { status?: string }) {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+    }
+
+    void chrome.tabs.get(tabId).then((tab) => {
+      if (tab.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+        return;
+      }
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    });
+  });
+}
+
+async function openFormTab(sourceUrl: string): Promise<{ tabId: number; origin: string }> {
+  const origin = new URL(sourceUrl).origin;
+  await ensureHostAccess(origin, true);
+  const existing = await chrome.tabs.query({ url: `${origin}/*` });
+  const match = existing.find((tab) => tab.id && tab.url && tab.url.startsWith(sourceUrl.split("?")[0]!));
+  if (match?.id) {
+    await chrome.tabs.update(match.id, { active: true, url: sourceUrl });
+    await waitForTabComplete(match.id);
+    return { tabId: match.id, origin };
+  }
+  const tab = await chrome.tabs.create({ url: sourceUrl, active: true });
+  if (!tab.id) throw new Error("Could not open host form tab.");
+  await waitForTabComplete(tab.id);
+  return { tabId: tab.id, origin };
+}
+
+async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
+  let tabId: number | null = null;
+  try {
+    const opened = await openFormTab(job.sourceUrl);
+    tabId = opened.tabId;
+    await trackExtensionFormTab({
+      applicationId: job.applicationId,
+      origin: opened.origin,
+      tabId,
+    });
+
+    let pageIndex = 0;
+    let totalFilled = 0;
+    let lastHighlighted = 0;
+
+    for (let step = 0; step < 12; step += 1) {
+      const result = await runBatchFillOnTab({
+        tabId,
+        origin: opened.origin,
+        applicationId: job.applicationId,
+        pageIndex,
+        resumeFill: true,
+        autoContinue: true,
+        hostSubmitAllowed: job.clickFinalSubmit,
+      });
+      totalFilled += result.filledCount;
+      lastHighlighted = result.highlighted ?? 0;
+
+      if (lastHighlighted > 0 && result.filledCount === 0) {
+        await completeHostSubmitJob({
+          jobId: job.jobId,
+          filledFields: totalFilled,
+          pausedForNeedsYou: true,
+          missingRequired: [`${lastHighlighted} empty field(s) on page ${pageIndex + 1}`],
+        });
+        return;
+      }
+
+      // Try Next; if none and submit job, click Submit.
+      const advance = (await sendToTab<{ clicked: boolean; reason?: string }>(tabId, {
+        type: "TRY_AUTO_ADVANCE",
+      }).catch(() => ({ clicked: false, reason: "error" }))) as {
+        clicked: boolean;
+        reason?: string;
+      };
+
+      if (advance.clicked && advance.reason !== "no-change") {
+        pageIndex += 1;
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        continue;
+      }
+
+      if (!job.clickFinalSubmit) {
+        await completeHostSubmitJob({
+          jobId: job.jobId,
+          filledFields: totalFilled,
+          pausedForNeedsYou: lastHighlighted > 0,
+          missingRequired: lastHighlighted > 0 ? [`${lastHighlighted} empty field(s)`] : undefined,
+        });
+        return;
+      }
+
+      const submit = (await sendToTab<{
+        clicked: boolean;
+        confirmed?: boolean;
+        reason?: string;
+      }>(tabId, {
+        type: "CLICK_HOST_SUBMIT",
+        hostSubmitAllowed: true,
+      })) as { clicked: boolean; confirmed?: boolean; reason?: string };
+
+      await completeHostSubmitJob({
+        jobId: job.jobId,
+        filledFields: totalFilled,
+        submitted: Boolean(submit.confirmed),
+        hostSubmitClicked: Boolean(submit.clicked),
+        error: submit.confirmed
+          ? undefined
+          : submit.clicked
+            ? "Submit clicked but host did not confirm."
+            : submit.reason || "Could not find Submit on the host form.",
+      });
+      return;
+    }
+
+    await completeHostSubmitJob({
+      jobId: job.jobId,
+      filledFields: totalFilled,
+      submitted: false,
+      hostSubmitClicked: false,
+      error: "Stopped after too many form pages.",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Host job failed.";
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code: string }).code) : "";
+    await completeHostSubmitJob({
+      jobId: job.jobId,
+      filledFields: 0,
+      submitted: false,
+      hostSubmitClicked: false,
+      blockedReason: code === "captcha" || code === "account" ? message : undefined,
+      error: code === "captcha" || code === "account" ? undefined : message,
+    }).catch(() => undefined);
+  }
+}
+
+let hostJobPollRunning = false;
+
+async function pollAndRunHostSubmitJobs(): Promise<void> {
+  if (hostJobPollRunning) return;
+  hostJobPollRunning = true;
+  try {
+    const jobs = await fetchPendingHostSubmitJobs();
+    for (const job of jobs) {
+      await runHostSubmitJob(job);
+    }
+  } catch {
+    // Not signed in / API unreachable — try again on next alarm.
+  } finally {
+    hostJobPollRunning = false;
+  }
+}
+
+const HOST_SUBMIT_ALARM = "poll-host-submit-jobs";
+
+function ensureHostSubmitAlarm(): void {
+  chrome.alarms.create(HOST_SUBMIT_ALARM, { periodInMinutes: 1, delayInMinutes: 0.2 });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  ensureHostSubmitAlarm();
+});
+
+ensureHostSubmitAlarm();
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HOST_SUBMIT_ALARM) {
+    void pollAndRunHostSubmitJobs();
+  }
+});
 
 async function applyMappingsToTab(input: {
   tabId: number;
@@ -439,10 +657,34 @@ async function syncFillSessionEnd(
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const task = (async () => {
     if (message?.type === "SESSION") return fetchSession();
-    if (message?.type === "CONNECT_WEBSITE") return connectWithWebsiteSession();
+    if (message?.type === "CONNECT_WEBSITE") {
+      const session = await connectWithWebsiteSession();
+      void pollAndRunHostSubmitJobs();
+      return session;
+    }
     if (message?.type === "LIST_APPLICATIONS") return listApplications();
+    if (message?.type === "POLL_HOST_SUBMIT_JOBS") {
+      await pollAndRunHostSubmitJobs();
+      return { ok: true };
+    }
+    if (message?.type === "AUTO_CONTINUE_FILL") {
+      const session = await loadFillSession();
+      const tabId = sender.tab?.id ?? session?.tabId;
+      if (!tabId || !session) return { ok: false };
+      const origin = tabOrigin({ url: sender.tab?.url || session.origin } as chrome.tabs.Tab);
+      return runBatchFillOnTab({
+        tabId,
+        origin: session.origin || origin,
+        applicationId: session.applicationId,
+        pageIndex: typeof message.pageIndex === "number" ? message.pageIndex : (session.pageIndex ?? 0) + 1,
+        resumeFill: true,
+        autoContinue: true,
+        hostSubmitAllowed: Boolean(message.hostSubmitAllowed),
+      });
+    }
     if (message?.type === "FILL_SESSION_STATUS") {
-      return { active: false };
+      const session = await loadFillSession();
+      return { active: Boolean(session), applicationId: session?.applicationId ?? null };
     }
     if (message?.type === "GENERATE_AI_DRAFT") {
       return generateAiDraft({
@@ -562,7 +804,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pageText: meta.pageText || meta.excerpt,
         formPage,
       }).then(async (result) => {
-        if (formPage?.fields?.length) {
+        if (formPage?.fields?.length && tab.id != null) {
           await trackExtensionFormTab({
             applicationId: result.applicationId,
             origin,
@@ -609,13 +851,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         applicationId,
         origin,
         tabId: tab.id,
-        fillSessionId: result.fillSessionId,
+        fillSessionId: result.fillSessionId ?? undefined,
       });
       await syncManualFillCapture({
         tabId: tab.id,
         applicationId,
         origin,
-        fillSessionId: result.fillSessionId,
+        fillSessionId: result.fillSessionId ?? undefined,
       });
       return result;
     }
@@ -672,12 +914,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.url == null) return;
+  if (!changeInfo.url) return;
+  const nextUrl = changeInfo.url;
   void (async () => {
     const session = await loadFillSession();
     if (!session || session.tabId !== tabId) return;
     try {
-      const nextOrigin = new URL(changeInfo.url).origin;
+      const nextOrigin = new URL(nextUrl).origin;
       if (nextOrigin !== session.origin) {
         await clearFillSession(tabId, "origin_left");
       }
