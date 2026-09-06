@@ -260,13 +260,13 @@ export const DEFAULT_AUTO_SUBMIT_POLICY: AutoSubmitPolicy = {
   auditTrail: true,
 };
 
-export const PRE_DEADLINE_REVIEW_NOTICE_HOURS = 2;
+export const PRE_DEADLINE_REVIEW_NOTICE_HOURS: number = 2;
 
 /** Auto-submit runs this many hours before the deadline (after / with the review notice). */
-export const HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS = 2;
+export const HOST_AUTO_SUBMIT_BEFORE_DEADLINE_HOURS: number = 2;
 
 /** How long after the deadline we still attempt a final one-shot host submit. */
-export const HOST_POST_DEADLINE_RETRY_WINDOW_HOURS = 24;
+export const HOST_POST_DEADLINE_RETRY_WINDOW_HOURS: number = 24;
 
 export function computeHostSubmitDueAt(deadlineAt: string, now: Date = new Date()): Date {
   const deadline = new Date(deadlineAt);
