@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "1-Apply",
-  "version": "0.4.0",
-  "description": "Save opportunities to 1-Apply and fill + submit host forms from your signed-in browser. Deadlines are scheduled on the server; the extension executes fill and Submit.",
+  "version": "0.4.1",
+  "description": "Save opportunities to 1-Apply and fill + submit host forms in a background browser tab. Deadlines are scheduled on the server; the extension executes fill and Submit without stealing focus.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

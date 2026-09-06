@@ -326,26 +326,29 @@ async function waitForTabComplete(tabId: number, timeoutMs = 45000): Promise<voi
   });
 }
 
-async function openFormTab(sourceUrl: string): Promise<{ tabId: number; origin: string }> {
+/** Open the host form in a background tab (no focus steal). Caller should close it when done. */
+async function openFormTabInBackground(sourceUrl: string): Promise<{ tabId: number; origin: string }> {
   const origin = new URL(sourceUrl).origin;
   await ensureHostAccess(origin, true);
-  const existing = await chrome.tabs.query({ url: `${origin}/*` });
-  const match = existing.find((tab) => tab.id && tab.url && tab.url.startsWith(sourceUrl.split("?")[0]!));
-  if (match?.id) {
-    await chrome.tabs.update(match.id, { active: true, url: sourceUrl });
-    await waitForTabComplete(match.id);
-    return { tabId: match.id, origin };
-  }
-  const tab = await chrome.tabs.create({ url: sourceUrl, active: true });
-  if (!tab.id) throw new Error("Could not open host form tab.");
+  const tab = await chrome.tabs.create({ url: sourceUrl, active: false });
+  if (!tab.id) throw new Error("Could not open host form tab in the background.");
   await waitForTabComplete(tab.id);
   return { tabId: tab.id, origin };
+}
+
+async function closeBackgroundTab(tabId: number | null): Promise<void> {
+  if (tabId == null) return;
+  try {
+    await chrome.tabs.remove(tabId);
+  } catch {
+    // Tab may already be closed.
+  }
 }
 
 async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
   let tabId: number | null = null;
   try {
-    const opened = await openFormTab(job.sourceUrl);
+    const opened = await openFormTabInBackground(job.sourceUrl);
     tabId = opened.tabId;
     await trackExtensionFormTab({
       applicationId: job.applicationId,
@@ -445,6 +448,9 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       blockedReason: code === "captcha" || code === "account" ? message : undefined,
       error: code === "captcha" || code === "account" ? undefined : message,
     }).catch(() => undefined);
+  } finally {
+    await closeBackgroundTab(tabId);
+    await chrome.storage.local.remove(FILL_SESSION_KEY).catch(() => undefined);
   }
 }
 

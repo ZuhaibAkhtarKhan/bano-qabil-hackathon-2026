@@ -41,6 +41,7 @@ declare const chrome: {
     onRemoved: {
       addListener: (callback: (tabId: number, removeInfo?: { windowId?: number; isWindowClosing?: boolean }) => void) => void;
     };
+    remove: (tabId: number) => Promise<void>;
   };
   scripting: {
     executeScript: (injection: {
