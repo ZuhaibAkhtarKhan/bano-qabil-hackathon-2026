@@ -47,6 +47,8 @@ const REFRESH_TABLES = [
   "notifications",
 ] as const;
 
+const POLL_MS = 20_000;
+
 export function RealtimeWorkspaceProvider({
   userId,
   initialUnreadCount = 0,
@@ -61,21 +63,51 @@ export function RealtimeWorkspaceProvider({
   const [toasts, setToasts] = useState<RealtimeToastItem[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unreadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const supabaseRef = useRef<ReturnType<typeof createBrowserSupabaseClient> | null>(null);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const markNotificationRead = useCallback(async (id: string) => {
-    setUnreadCount((prev) => Math.max(0, prev - 1));
+  const refreshUnreadCount = useCallback(async () => {
+    const supabase = supabaseRef.current;
+    if (!supabase) return;
     try {
-      const fd = new FormData();
-      fd.set("notificationId", id);
-      await markNotificationReadAction(fd);
+      const { count } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .is("read_at", null);
+      if (typeof count === "number") setUnreadCount(count);
     } catch {
-      // Best-effort
+      // Keep last known value.
     }
-  }, []);
+  }, [userId]);
+
+  const scheduleUnreadRefresh = useCallback(() => {
+    if (unreadTimer.current) clearTimeout(unreadTimer.current);
+    unreadTimer.current = setTimeout(() => {
+      unreadTimer.current = null;
+      void refreshUnreadCount();
+    }, 350);
+  }, [refreshUnreadCount]);
+
+  const markNotificationRead = useCallback(
+    async (id: string) => {
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+      try {
+        const fd = new FormData();
+        fd.set("notificationId", id);
+        await markNotificationReadAction(fd);
+      } catch {
+        // Best-effort
+      } finally {
+        scheduleUnreadRefresh();
+      }
+    },
+    [scheduleUnreadRefresh],
+  );
 
   const addToast = useCallback((item: RealtimeToastItem) => {
     setToasts((prev) => [item, ...prev.slice(0, 4)]);
@@ -85,12 +117,13 @@ export function RealtimeWorkspaceProvider({
   }, []);
 
   const softRefresh = useCallback(() => {
-    if (refreshTimer.current) return;
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null;
       router.refresh();
-    }, 750);
-  }, [router]);
+      scheduleUnreadRefresh();
+    }, 500);
+  }, [router, scheduleUnreadRefresh]);
 
   useEffect(() => {
     let supabase: ReturnType<typeof createBrowserSupabaseClient>;
@@ -99,15 +132,9 @@ export function RealtimeWorkspaceProvider({
     } catch {
       return;
     }
+    supabaseRef.current = supabase;
 
-    void supabase
-      .from("notifications")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .is("read_at", null)
-      .then(({ count }) => {
-        if (typeof count === "number") setUnreadCount(count);
-      });
+    void refreshUnreadCount();
 
     let channel = supabase.channel(`realtime:workspace:${userId}`);
 
@@ -133,17 +160,16 @@ export function RealtimeWorkspaceProvider({
 
           if (!newRow.read_at) {
             setUnreadCount((prev) => prev + 1);
+            addToast({
+              id: newRow.id,
+              title: newRow.title,
+              body: newRow.body,
+              category: newRow.category,
+              actionUrl: newRow.action_url,
+              createdAt: newRow.created_at,
+            });
           }
-
-          addToast({
-            id: newRow.id,
-            title: newRow.title,
-            body: newRow.body,
-            category: newRow.category,
-            actionUrl: newRow.action_url,
-            createdAt: newRow.created_at,
-          });
-
+          scheduleUnreadRefresh();
           softRefresh();
         },
       )
@@ -155,11 +181,20 @@ export function RealtimeWorkspaceProvider({
           table: "notifications",
           filter: `user_id=eq.${userId}`,
         },
-        (payload) => {
-          const updatedRow = payload.new as { id: string; read_at?: string | null };
-          if (updatedRow.read_at) {
-            setUnreadCount((prev) => Math.max(0, prev - 1));
-          }
+        () => {
+          scheduleUnreadRefresh();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          scheduleUnreadRefresh();
         },
       );
 
@@ -182,19 +217,36 @@ export function RealtimeWorkspaceProvider({
 
     channel.subscribe((status) => {
       setIsRealtimeConnected(status === "SUBSCRIBED");
+      if (status === "SUBSCRIBED") void refreshUnreadCount();
     });
 
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") softRefresh();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshUnreadCount();
+        softRefresh();
+      }
     };
-    document.addEventListener("visibilitychange", onVisibility);
+    const onFocus = () => {
+      void refreshUnreadCount();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+
+    // Polling fallback when Realtime is flaky or not subscribed.
+    const poll = window.setInterval(() => {
+      void refreshUnreadCount();
+    }, POLL_MS);
 
     return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(poll);
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      if (unreadTimer.current) clearTimeout(unreadTimer.current);
+      supabaseRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [userId, addToast, softRefresh]);
+  }, [userId, addToast, softRefresh, refreshUnreadCount, scheduleUnreadRefresh]);
 
   const value = useMemo(
     () => ({

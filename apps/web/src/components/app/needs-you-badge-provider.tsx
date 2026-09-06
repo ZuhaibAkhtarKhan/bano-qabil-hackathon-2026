@@ -36,11 +36,20 @@ const BADGE_TABLES = [
   "documents",
 ] as const;
 
+const POLL_MS = 20_000;
+
 export function NeedsYouBadgeProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const [counts, setCounts] = useState<NeedsYouBadgeCounts>({ applicationCount: 0, totalFields: 0 });
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef(false);
+  const pending = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (inFlight.current) {
+      pending.current = true;
+      return;
+    }
+    inFlight.current = true;
     try {
       const response = await fetch("/api/needs-you/counts", { cache: "no-store" });
       if (!response.ok) return;
@@ -51,15 +60,21 @@ export function NeedsYouBadgeProvider({ userId, children }: { userId: string; ch
       });
     } catch {
       // Best-effort — badge stays at last known value.
+    } finally {
+      inFlight.current = false;
+      if (pending.current) {
+        pending.current = false;
+        void refresh();
+      }
     }
   }, []);
 
   const scheduleRefresh = useCallback(() => {
-    if (refreshTimer.current) return;
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null;
       void refresh();
-    }, 600);
+    }, 400);
   }, [refresh]);
 
   useEffect(() => {
@@ -69,7 +84,10 @@ export function NeedsYouBadgeProvider({ userId, children }: { userId: string; ch
     try {
       supabase = createBrowserSupabaseClient();
     } catch {
-      return;
+      const pollOnly = window.setInterval(() => {
+        void refresh();
+      }, POLL_MS);
+      return () => window.clearInterval(pollOnly);
     }
 
     let channel = supabase.channel(`needs-you-badge:${userId}`);
@@ -82,9 +100,25 @@ export function NeedsYouBadgeProvider({ userId, children }: { userId: string; ch
         );
       }
     }
-    channel.subscribe();
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") scheduleRefresh();
+    });
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") scheduleRefresh();
+    };
+    const onFocus = () => scheduleRefresh();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+
+    const poll = window.setInterval(() => {
+      void refresh();
+    }, POLL_MS);
 
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(poll);
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       void supabase.removeChannel(channel);
     };
