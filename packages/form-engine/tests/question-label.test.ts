@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { Window } from "happy-dom";
 
 import {
-  inventoryFromDocument,
+  humanizeFieldToken,
   humanQuestionLabel,
+  isFormBuilderChromeLabel,
+  isMachineFieldToken,
   isNoiseFormField,
   mapFields,
   stripFormSyntaxDecorators,
+  inventoryFromDocument,
 } from "../src/index";
 
 function documentFrom(html: string) {
@@ -102,6 +105,48 @@ describe("human question labels", () => {
     })).toBe("How long is your notice period?");
     expect(stripFormSyntaxDecorators("Email address *Required*")).toBe("Email address");
     expect(stripFormSyntaxDecorators("Phone (mandatory)")).toBe("Phone");
+  });
+
+  it("does not treat Google Forms builder chrome as applicant questions", () => {
+    for (const label of ["Add option", "Confirmation message", "Long answer text", "Untitled question"]) {
+      expect(
+        isFormBuilderChromeLabel(label),
+        `${label} should be chrome`,
+      ).toBe(true);
+      expect(
+        isNoiseFormField({
+          label,
+          nearbyText: "",
+          ariaLabel: label,
+          placeholder: "",
+          name: "",
+          id: "",
+          key: `listitem:${label}`,
+          type: "text",
+          inputType: "text",
+        }),
+      ).toBe(true);
+    }
+
+    const document = documentFrom(`
+      <form>
+        <div role="listitem">
+          <div role="heading">Add option</div>
+          <input type="text" />
+        </div>
+        <div role="listitem">
+          <div role="heading">Confirmation message</div>
+          <textarea></textarea>
+        </div>
+        <div role="listitem">
+          <div role="heading">What is your full name?</div>
+          <input type="text" />
+        </div>
+      </form>
+    `);
+    const fields = inventoryFromDocument(document);
+    expect(fields.some((field) => /add option|confirmation message|long answer/i.test(field.label))).toBe(false);
+    expect(fields.some((field) => /full name/i.test(field.label))).toBe(true);
   });
 
   it("reads question text from a preceding sibling, not the input name", () => {

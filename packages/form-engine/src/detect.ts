@@ -1,5 +1,5 @@
 import { fieldSignals, type DetectedField, type FieldType } from "./types";
-import { humanQuestionLabel, isNoiseFormField, stripFormSyntaxDecorators } from "./question-label";
+import { humanQuestionLabel, isFormBuilderChromeLabel, isNoiseFormField, stripFormSyntaxDecorators } from "./question-label";
 import { isCaptchaChallengeCopy } from "./safety";
 
 export const APPLY_FIELD_ATTR = "data-1apply-key";
@@ -473,6 +473,8 @@ function inventoryGoogleFormsListitems(root: ParentNode, seen: Set<string>): Det
 
     const heading = item.querySelector('[role="heading"]');
     const label = cleanQuestionText(heading?.textContent) || labelFor(item, root);
+    // Builder chrome titles are not applicant questions (Add option, Long answer text, …).
+    if (isFormBuilderChromeLabel(label)) continue;
     const textBlob = `${label} ${item.textContent ?? ""}`.toLowerCase();
 
     const listbox = item.querySelector('[role="listbox"]');

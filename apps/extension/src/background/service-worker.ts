@@ -315,7 +315,7 @@ async function runBatchFillOnTab(input: {
   hostSubmitAllowed?: boolean;
 }) {
   let inventory: {
-    fields?: Array<{ fieldId?: string; type?: string; label?: string }>;
+    fields?: Array<{ fieldId?: string; type?: string; label?: string; required?: boolean }>;
     hazards?: unknown;
     url?: string;
     title?: string;
@@ -394,7 +394,11 @@ async function runBatchFillOnTab(input: {
   await sleep(1200);
 
   const needYouFields = plan.fields.filter((item) => item.status === "need_you");
-  const needYouLabels = needYouFields
+  const requiredNeedYouFields = needYouFields.filter((item) => {
+    const field = (inventory.fields ?? []).find((row) => String(row.fieldId ?? "") === item.fieldId);
+    return Boolean(field?.required);
+  });
+  const needYouLabels = requiredNeedYouFields
     .map((item) => labelById.get(item.fieldId) || item.reason || item.fieldId)
     .filter(Boolean)
     .slice(0, 6);
@@ -404,43 +408,86 @@ async function runBatchFillOnTab(input: {
     fillSessionId: plan.fillSessionId,
     filledCount: applied.filled?.filter((item) => item.filled).length ?? 0,
     highlighted: applied.highlighted ?? 0,
-    needYouCount: needYouFields.length,
+    needYouCount: requiredNeedYouFields.length,
     needYouLabels,
   };
 }
 
-/** Walk every reachable page: fill, transfer Need You gaps via fill-plan, then Next. */
+async function getPageStepState(tabId: number): Promise<{
+  hasNext: boolean;
+  hasSubmit: boolean;
+  emptyHighlighted: number;
+}> {
+  try {
+    return (await sendToTab(tabId, { type: "GET_PAGE_STEP_STATE" })) as {
+      hasNext: boolean;
+      hasSubmit: boolean;
+      emptyHighlighted: number;
+    };
+  } catch {
+    return { hasNext: false, hasSubmit: false, emptyHighlighted: 0 };
+  }
+}
+
+/**
+ * fillUntilSubmit: scan → fill from memory → pause on required Need You → recheck → Next,
+ * until the Submit page (do not click Submit).
+ * submitPageOnly: click Next through earlier pages without re-verifying them; fill/verify
+ * only the final Submit page.
+ */
 async function walkHostFormPages(input: {
   tabId: number;
   origin: string;
   applicationId: string;
   hostSubmitAllowed: boolean;
+  mode?: "fillUntilSubmit" | "submitPageOnly";
   maxSteps?: number;
 }): Promise<{
   totalFilled: number;
   needYouLabels: string[];
   stuckHighlighted: number;
   pagesVisited: number;
+  reachedSubmitPage: boolean;
 }> {
+  const mode = input.mode ?? "fillUntilSubmit";
   let pageIndex = 0;
   let totalFilled = 0;
   const needYouLabels: string[] = [];
   let stuckHighlighted = 0;
+  let reachedSubmitPage = false;
   const maxSteps = input.maxSteps ?? 14;
 
   for (let step = 0; step < maxSteps; step += 1) {
+    const stepState = await getPageStepState(input.tabId);
+    const onSubmitPage = stepState.hasSubmit && !stepState.hasNext;
+
+    if (mode === "submitPageOnly" && !onSubmitPage && stepState.hasNext) {
+      const advance = (await sendToTab<{ clicked: boolean; reason?: string }>(input.tabId, {
+        type: "FORCE_STEP_ADVANCE",
+      }).catch(() => ({ clicked: false, reason: "error" }))) as {
+        clicked: boolean;
+        reason?: string;
+      };
+      if (advance.clicked && advance.reason !== "no-change") {
+        pageIndex += 1;
+        await sleep(1800);
+        continue;
+      }
+      // Fall through to a fill pass if Next is stuck.
+    }
+
     let result = await runBatchFillOnTab({
       tabId: input.tabId,
       origin: input.origin,
       applicationId: input.applicationId,
       pageIndex,
       resumeFill: true,
-      autoContinue: true,
+      autoContinue: false,
       hostSubmitAllowed: input.hostSubmitAllowed,
     });
     totalFilled += result.filledCount;
 
-    // Second pass on the same page when widgets fail the first apply.
+    // Recheck the same page from memory / Need You before advancing.
     if (result.highlighted > 0 || result.needYouCount > 0) {
       await sleep(1500);
       const retry = await runBatchFillOnTab({
@@ -449,7 +496,7 @@ async function walkHostFormPages(input: {
         applicationId: input.applicationId,
         pageIndex,
         resumeFill: true,
-        autoContinue: true,
+        autoContinue: false,
         hostSubmitAllowed: input.hostSubmitAllowed,
       });
       totalFilled += retry.filledCount;
@@ -461,8 +508,31 @@ async function walkHostFormPages(input: {
     }
     stuckHighlighted = result.highlighted;
 
+    const afterFill = await getPageStepState(input.tabId);
+    if (afterFill.hasSubmit && !afterFill.hasNext) {
+      reachedSubmitPage = true;
+      return {
+        totalFilled,
+        needYouLabels: needYouLabels.slice(0, 8),
+        stuckHighlighted,
+        pagesVisited: pageIndex + 1,
+        reachedSubmitPage,
+      };
+    }
+
+    // Required Need You gaps: stop so the user can answer before Next.
+    if (result.needYouCount > 0) {
+      return {
+        totalFilled,
+        needYouLabels: needYouLabels.slice(0, 8),
+        stuckHighlighted,
+        pagesVisited: pageIndex + 1,
+        reachedSubmitPage,
+      };
+    }
+
     const advance = (await sendToTab<{ clicked: boolean; reason?: string }>(input.tabId, {
-      type: "TRY_AUTO_ADVANCE",
+      type: "FORCE_STEP_ADVANCE",
     }).catch(() => ({ clicked: false, reason: "error" }))) as {
       clicked: boolean;
       reason?: string;
@@ -470,16 +540,18 @@ async function walkHostFormPages(input: {
 
     if (advance.clicked && advance.reason !== "no-change") {
       pageIndex += 1;
-      // Multi-step forms need a real settle before inventory of the next page.
       await sleep(2200);
       continue;
     }
 
+    const finalState = await getPageStepState(input.tabId);
+    reachedSubmitPage = finalState.hasSubmit && !finalState.hasNext;
     return {
       totalFilled,
       needYouLabels: needYouLabels.slice(0, 8),
       stuckHighlighted,
       pagesVisited: pageIndex + 1,
+      reachedSubmitPage,
     };
   }
 
@@ -488,6 +560,7 @@ async function walkHostFormPages(input: {
     needYouLabels: needYouLabels.slice(0, 8),
     stuckHighlighted,
     pagesVisited: pageIndex + 1,
+    reachedSubmitPage,
   };
 }
 
@@ -543,6 +616,10 @@ async function closeBackgroundTab(tabId: number | null): Promise<void> {
  * Fill carefully (transferring Need You gaps via batch plans), optionally reopen to
  * re-sync Need You ↔ host form, then Submit only when the form looks complete.
  */
+/**
+ * Prefill: open form → fill → Need You → recheck → Next until Submit page (no Submit click).
+ * Submit window (~2h before deadline): skip earlier pages, verify Submit page only, then Submit.
+ */
 async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
   let tabId: number | null = null;
   try {
@@ -557,67 +634,53 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
       tabId,
     });
 
-    const firstPass = await walkHostFormPages({
+    if (!job.clickFinalSubmit) {
+      const fillPass = await walkHostFormPages({
+        tabId,
+        origin: opened.origin,
+        applicationId: job.applicationId,
+        hostSubmitAllowed: false,
+        mode: "fillUntilSubmit",
+      });
+
+      if (fillPass.needYouLabels.length > 0) {
+        await sleep(3000);
+        await completeHostSubmitJob({
+          jobId: job.jobId,
+          filledFields: fillPass.totalFilled,
+          pausedForNeedsYou: true,
+          missingRequired: fillPass.needYouLabels,
+        });
+        return;
+      }
+
+      await sleep(2500);
+      await completeHostSubmitJob({
+        jobId: job.jobId,
+        filledFields: fillPass.totalFilled,
+      });
+      return;
+    }
+
+    // Submit path: do not re-verify earlier pages — advance to Submit, verify that page, click.
+    const stillAllowed = await beginHostSubmitJob(job.jobId);
+    if (!stillAllowed.ok) return;
+
+    const submitPass = await walkHostFormPages({
       tabId,
       origin: opened.origin,
       applicationId: job.applicationId,
       hostSubmitAllowed: false,
+      mode: "submitPageOnly",
     });
 
-    const firstGaps = firstPass.needYouLabels.length > 0;
-    if (firstGaps) {
-      // Stay on the tab long enough for fill-plan / Need You persistence to settle.
+    if (submitPass.needYouLabels.length > 0) {
       await sleep(3000);
       await completeHostSubmitJob({
         jobId: job.jobId,
-        filledFields: firstPass.totalFilled,
+        filledFields: submitPass.totalFilled,
         pausedForNeedsYou: true,
-        missingRequired: firstPass.needYouLabels,
-      });
-      return;
-    }
-
-    if (!job.clickFinalSubmit) {
-      await sleep(2500);
-      await completeHostSubmitJob({
-        jobId: job.jobId,
-        filledFields: firstPass.totalFilled,
-      });
-      return;
-    }
-
-    // Submit path: close and reopen, then re-check Need You ↔ form sync before Submit.
-    await sleep(1500);
-    await closeBackgroundTab(tabId);
-    tabId = null;
-    await sleep(1500);
-
-    const stillAllowed = await beginHostSubmitJob(job.jobId);
-    if (!stillAllowed.ok) return;
-
-    const reopened = await openFormTabInBackground(job.sourceUrl);
-    tabId = reopened.tabId;
-    await trackExtensionFormTab({
-      applicationId: job.applicationId,
-      origin: reopened.origin,
-      tabId,
-    });
-
-    const verifyPass = await walkHostFormPages({
-      tabId,
-      origin: reopened.origin,
-      applicationId: job.applicationId,
-      hostSubmitAllowed: false,
-    });
-
-    const verifyGaps = verifyPass.needYouLabels.length > 0;
-    if (verifyGaps) {
-      await sleep(3000);
-      await completeHostSubmitJob({
-        jobId: job.jobId,
-        filledFields: firstPass.totalFilled + verifyPass.totalFilled,
-        pausedForNeedsYou: true,
-        missingRequired: verifyPass.needYouLabels,
+        missingRequired: submitPass.needYouLabels,
       });
       return;
     }
@@ -631,7 +694,7 @@ async function runHostSubmitJob(job: ExtensionHostSubmitJob): Promise<void> {
     await sleep(1200);
     await completeHostSubmitJob({
       jobId: job.jobId,
-      filledFields: firstPass.totalFilled + verifyPass.totalFilled,
+      filledFields: submitPass.totalFilled,
       submitted: Boolean(submit.confirmed),
       hostSubmitClicked: Boolean(submit.clicked),
       error: submit.confirmed

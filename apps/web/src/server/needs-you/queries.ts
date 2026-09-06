@@ -484,6 +484,10 @@ async function loadNeedsYouQueueImpl(polish: boolean, skipAi = false): Promise<N
         continue;
       }
 
+      if (isNeedsYouSystemNoise(title) || isNeedsYouSystemNoise(rawLabel)) {
+        continue;
+      }
+
       // Skip plumbing / hex ids that never resolved to a real question.
       if (
         title === "Form question" ||

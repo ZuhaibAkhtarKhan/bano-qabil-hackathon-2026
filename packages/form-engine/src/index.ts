@@ -16,7 +16,15 @@ export {
 } from "./batch-fill";
 export { detectAccountCreation, detectCaptcha, detectUnsupportedForm, inspectPage } from "./hazards";
 export { inventoryFromDocument, APPLY_FIELD_ATTR, APPLY_EMPTY_ATTR, APPLY_HOST_ATTR } from "./detect";
-export { humanQuestionLabel, humanizeFieldToken, isMachineFieldToken, isNoiseFormField, looksLikeFormSyntaxNoise, stripFormSyntaxDecorators } from "./question-label";
+export {
+  humanQuestionLabel,
+  humanizeFieldToken,
+  isFormBuilderChromeLabel,
+  isMachineFieldToken,
+  isNoiseFormField,
+  looksLikeFormSyntaxNoise,
+  stripFormSyntaxDecorators,
+} from "./question-label";
 export { mapField, mapFields, isAiAnswerableField, inferYesNoFromMemory, memoryChoiceScore, isJudgmentYesNoQuestion, shouldDeferYesNoToUserOrLlm } from "./mapping";
 export {
   classifyActionControl,

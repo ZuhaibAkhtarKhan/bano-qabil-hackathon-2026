@@ -1,3 +1,4 @@
+import { isFormBuilderChromeLabel } from "@1apply/form-engine";
 import { looksLikeYesNoChoiceQuestion } from "@/lib/needs-you-field-kinds";
 
 export type NeedsYouKind =
@@ -130,6 +131,7 @@ export function isStructuredFormFieldPrompt(label: string): boolean {
 export function isNeedsYouSystemNoise(text: string): boolean {
   const value = text.trim();
   if (!value) return true;
+  if (isFormBuilderChromeLabel(value)) return true;
   return [
     /no explicit requirements were extracted/i,
     /add them before treating this as a fit check/i,

@@ -1361,6 +1361,38 @@ if (!root.__1APPLY_LISTENERS) {
       return true;
     }
 
+    if (message?.type === "GET_PAGE_STEP_STATE") {
+      const next = findPrimaryStepAdvance(document);
+      const submit = findPrimarySubmitControl(document);
+      sendResponse({
+        hasNext: Boolean(next),
+        hasSubmit: Boolean(submit),
+        emptyHighlighted: document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length,
+      });
+      return false;
+    }
+
+    if (message?.type === "FORCE_STEP_ADVANCE") {
+      void (async () => {
+        const next = findPrimaryStepAdvance(document);
+        if (!next) {
+          sendResponse({ clicked: false, reason: "no-next" });
+          return;
+        }
+        const before = pageFingerprint();
+        next.scrollIntoView({ block: "center", inline: "nearest" });
+        await sleep(80);
+        next.click();
+        await sleep(1400);
+        const after = pageFingerprint();
+        sendResponse({
+          clicked: true,
+          reason: after && before && after === before ? "no-change" : "advanced",
+        });
+      })();
+      return true;
+    }
+
     if (message?.type === "CLICK_HOST_SUBMIT") {
       void (async () => {
         if (!message.hostSubmitAllowed && !root.__1APPLY_HOST_SUBMIT_ALLOWED) {

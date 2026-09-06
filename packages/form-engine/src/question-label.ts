@@ -108,6 +108,35 @@ export function humanQuestionLabel(
   return "Form question";
 }
 
+/**
+ * Google Forms / Jotform / ATS builder chrome scraped as if it were a question
+ * (e.g. “Add option”, “Long answer text”, “Confirmation message”).
+ */
+export function isFormBuilderChromeLabel(value: string | null | undefined): boolean {
+  const text = collapseWhitespace(value ?? "");
+  if (!text) return false;
+  if (
+    /^(add(\s+an?)?\s+option|add(\s+an?)?\s+other|option\s*\d+|other(\s*option)?)$/i.test(text)
+  ) {
+    return true;
+  }
+  if (
+    /^(long|short)\s+answer(\s+text)?$|^(paragraph|linear\s*scale|multiple\s*choice|checkboxes|dropdown|file\s*upload|date|time|duration)(\s+text)?$/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(confirmation\s+message|untitled\s+question|question\s+title|section\s+title|title\s*\(optional\)|description\s*\(optional\)|type\s+(a\s+|your\s+)?question)$/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Fields that are plumbing, not applicant questions — skip in Need You / fill assist. */
 export function isNoiseFormField(
   field: Pick<DetectedField, "label" | "nearbyText" | "ariaLabel" | "placeholder" | "name" | "id" | "key" | "type" | "inputType">,
@@ -127,6 +156,13 @@ export function isNoiseFormField(
     }
   }
   const question = humanQuestionLabel(field);
+  if (
+    isFormBuilderChromeLabel(question) ||
+    isFormBuilderChromeLabel(field.label) ||
+    isFormBuilderChromeLabel(field.ariaLabel)
+  ) {
+    return true;
+  }
   if (question === "Form question" && isMachineFieldToken(field.key) && isMachineFieldToken(field.name || field.id)) {
     return true;
   }
