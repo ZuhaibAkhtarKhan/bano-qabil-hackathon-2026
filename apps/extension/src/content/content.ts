@@ -197,6 +197,16 @@ if (!root.__1APPLY_LISTENERS) {
       .map((el) => (el.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 80))
       .filter(Boolean)
       .join("|");
+    // Google Forms question titles are more stable page markers than generic headings.
+    const questionTitles = Array.from(
+      document.querySelectorAll(
+        '[role="heading"], .freebirdFormviewerViewItemsItemItemTitle, [data-item-id] [role="heading"]',
+      ),
+    )
+      .slice(0, 24)
+      .map((el) => (el.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 100))
+      .filter((text) => text.length >= 2)
+      .join("|");
     const visibleControls = Array.from(
       document.querySelectorAll(
         'input:not([type=hidden]), textarea, select, [role="textbox"], [role="listbox"], [role="radio"], [role="checkbox"], [contenteditable="true"]',
@@ -208,7 +218,40 @@ if (!root.__1APPLY_LISTENERS) {
       const style = window.getComputedStyle(node);
       return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
     }).length;
-    return [urlKey, `visible=${visibleControls}`, headings, fieldKey].join("\n---\n");
+    const hasBack = Boolean(
+      Array.from(document.querySelectorAll("button, [role='button']")).some((el) =>
+        /\bback\b/i.test(`${el.getAttribute("aria-label") ?? ""} ${el.textContent ?? ""}`),
+      ),
+    );
+    const hasNext = Boolean(findPrimaryStepAdvance(document));
+    const hasSubmit = Boolean(findPrimarySubmitControl(document));
+    return [
+      urlKey,
+      `visible=${visibleControls}`,
+      `nav=back:${hasBack}|next:${hasNext}|submit:${hasSubmit}`,
+      headings,
+      questionTitles,
+      fieldKey,
+    ].join("\n---\n");
+  }
+
+  /** Google Forms often needs >1.4s to swap pages — poll instead of a single sleep. */
+  async function waitForPageChange(
+    before: string,
+    options: { timeoutMs?: number; intervalMs?: number } = {},
+  ): Promise<{ changed: boolean; after: string }> {
+    const timeoutMs = options.timeoutMs ?? 5000;
+    const intervalMs = options.intervalMs ?? 350;
+    const started = Date.now();
+    let after = pageFingerprint();
+    while (Date.now() - started < timeoutMs) {
+      after = pageFingerprint();
+      if (after && before && after !== before) return { changed: true, after };
+      // Also treat new inventory field set as a page change even if fingerprint ties.
+      await sleep(intervalMs);
+    }
+    after = pageFingerprint();
+    return { changed: Boolean(after && before && after !== before), after };
   }
 
   function showToast(text: string) {
@@ -317,22 +360,25 @@ if (!root.__1APPLY_LISTENERS) {
       if (!isFillActive()) return { clicked: false, reason: "stopped" };
       btn.click();
       showToast("1-Apply opened the next page…");
+      root.__1APPLY_LAST_PAGE_FP = undefined;
+      root.__1APPLY_CONTINUE_TRIES = 0;
 
-      // Wait for SPA / Google Forms paint; if fingerprint unchanged, host may have blocked Next.
-      await sleep(1400);
+      // Soft SPA: wait for paint. Hard reload: this script dies and background resumes on load.
+      const changed = await waitForPageChange(before, { timeoutMs: 3500 });
       if (!isFillActive()) return { clicked: false, reason: "stopped" };
-      const after = pageFingerprint();
-      if (after && before && after === before) {
-        // Stay on this step; lock fingerprint so we don't thrash fill → Next.
-        root.__1APPLY_LAST_PAGE_FP = after;
-        showToast("Next page blocked — fill highlighted fields or answer in Need You.");
-        return { clicked: true, reason: "no-change" };
+      if (!changed.changed) {
+        const emptyAfter = document.querySelectorAll(`[${APPLY_EMPTY_ATTR}]`).length;
+        if (emptyAfter > 0) {
+          root.__1APPLY_LAST_PAGE_FP = changed.after;
+          showToast("Next page blocked — fill highlighted fields or answer in Need You.");
+          return { clicked: true, reason: "no-change" };
+        }
       }
 
       trackTimeout(() => requestAutoContinue(true), 400);
       trackTimeout(() => requestAutoContinue(true), 1600);
       trackTimeout(() => requestAutoContinue(true), 3200);
-      return { clicked: true };
+      return { clicked: true, reason: changed.changed ? "advanced" : "advanced-unverified" };
     } finally {
       // Release promptly so the next page’s fill can schedule another advance.
       root.__1APPLY_ADVANCE_LOCK = false;
@@ -812,7 +858,7 @@ if (!root.__1APPLY_LISTENERS) {
       if (match.getAttribute("aria-checked") === "true") return true;
       activateToggle(match);
       await sleep(70);
-      const clickTarget =
+      const clickTarget: HTMLElement =
         (match.closest("label") as HTMLElement | null) ||
         (match.parentElement as HTMLElement | null) ||
         match;
@@ -1586,16 +1632,14 @@ if (!root.__1APPLY_LISTENERS) {
           sendResponse({ clicked: false, reason: "no-next" });
           return;
         }
-        const before = pageFingerprint();
         next.scrollIntoView({ block: "center", inline: "nearest" });
         await sleep(80);
+        // Respond BEFORE waiting for paint. Full navigations tear this content script down and
+        // used to abort the background walker with "message channel closed".
         next.click();
-        await sleep(1400);
-        const after = pageFingerprint();
-        sendResponse({
-          clicked: true,
-          reason: after && before && after === before ? "no-change" : "advanced",
-        });
+        root.__1APPLY_LAST_PAGE_FP = undefined;
+        root.__1APPLY_CONTINUE_TRIES = 0;
+        sendResponse({ clicked: true, reason: "click-sent" });
       })();
       return true;
     }
@@ -1668,6 +1712,32 @@ if (!root.__1APPLY_LISTENERS) {
       root.__1APPLY_HOST_SUBMIT_ALLOWED = false;
       showToast("1-Apply stopped filling this page.");
       sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "RESUME_AUTO_CONTINUE") {
+      root.__1APPLY_STOPPED = false;
+      if (isHostFormTerminalPage()) {
+        stopFillQuietly();
+        sendResponse({ ok: false, reason: "terminal" });
+        return false;
+      }
+      enableAutoContinueWatch();
+      root.__1APPLY_LAST_PAGE_FP = undefined;
+      scheduleAutoContinue(500, true);
+      scheduleAutoContinue(1600, true);
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "PING_CONTENT") {
+      sendResponse({
+        ok: true,
+        url: location.href,
+        fingerprint: pageFingerprint(),
+        hasNext: Boolean(findPrimaryStepAdvance(document)),
+        hasSubmit: Boolean(findPrimarySubmitControl(document)),
+      });
       return false;
     }
 

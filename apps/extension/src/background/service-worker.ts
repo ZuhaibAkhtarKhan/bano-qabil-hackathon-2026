@@ -530,17 +530,70 @@ async function walkHostFormPages(input: {
       };
     }
 
-    const advance = (await sendToTab<{ clicked: boolean; reason?: string }>(input.tabId, {
-      type: "FORCE_STEP_ADVANCE",
-    }).catch(() => ({ clicked: false, reason: "error" }))) as {
-      clicked: boolean;
-      reason?: string;
-    };
+    const advance = await forceStepAdvanceOnTab(input.tabId);
 
-    if (advance.clicked && advance.reason !== "no-change") {
+    // click-sent / navigated / unverified all mean Next was pressed — keep walking.
+    if (
+      advance.clicked &&
+      (advance.reason === "advanced" ||
+        advance.reason === "advanced-unverified" ||
+        advance.reason === "advanced-navigated" ||
+        advance.reason === "click-sent")
+    ) {
       pageIndex += 1;
-      await sleep(900);
+      const session = await loadFillSession();
+      if (session?.tabId === input.tabId) {
+        await chrome.storage.local.set({
+          [FILL_SESSION_KEY]: { ...session, pageIndex, updatedAt: Date.now() },
+        });
+      }
+      await sleep(advance.reason === "advanced-navigated" ? 600 : 400);
       continue;
+    }
+
+    if (advance.clicked && advance.reason === "no-change") {
+      // Host blocked Next (validation). Re-audit and pause with labels when possible.
+      await sleep(600);
+      const blockedAudit = await auditPageFields(input.tabId);
+      const blockedRetry = await runBatchFillOnTab({
+        tabId: input.tabId,
+        origin: input.origin,
+        applicationId: input.applicationId,
+        pageIndex,
+        resumeFill: true,
+        autoContinue: false,
+        hostSubmitAllowed: input.hostSubmitAllowed,
+      });
+      const blockedLabels =
+        blockedRetry.needYouLabels.length > 0
+          ? blockedRetry.needYouLabels
+          : blockedAudit.emptyLabels.length > 0
+            ? blockedAudit.emptyLabels
+            : currentGapLabels.length > 0
+              ? currentGapLabels
+              : ["Could not advance — unanswered fields on this page"];
+      return {
+        totalFilled: totalFilled + blockedRetry.filledCount,
+        needYouLabels: blockedLabels.slice(0, 8),
+        stuckHighlighted: Math.max(
+          stuckHighlighted,
+          blockedRetry.highlighted ?? 0,
+          blockedAudit.emptyCount,
+        ),
+        pagesVisited: pageIndex + 1,
+        reachedSubmitPage: (await getPageStepState(input.tabId)).hasSubmit,
+        pageComplete: false,
+      };
+    }
+
+    // Channel died without a clear click ack — still try to recover if the tab reloaded.
+    if (!advance.clicked && (advance.reason === "error" || !advance.reason)) {
+      const ready = await waitForHostFormPageReady(input.tabId, 6000);
+      if (ready) {
+        pageIndex += 1;
+        await sleep(500);
+        continue;
+      }
     }
 
     return {
@@ -600,6 +653,109 @@ async function waitForTabComplete(tabId: number, timeoutMs = 45000): Promise<voi
       chrome.tabs.onUpdated.addListener(onUpdated);
     });
   });
+}
+
+/** After Next, the host may soft-swap or fully reload — wait until content is injectable again. */
+async function waitForHostFormPageReady(tabId: number, timeoutMs = 12000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let sawLoading = false;
+  while (Date.now() < deadline) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === "loading") {
+        sawLoading = true;
+        await sleep(250);
+        continue;
+      }
+      if (sawLoading) {
+        await waitForTabComplete(tabId, Math.max(2000, deadline - Date.now())).catch(() => undefined);
+      }
+      await ensureContentScript(tabId);
+      const ping = (await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT" })) as {
+        ok?: boolean;
+      } | null;
+      if (ping?.ok) {
+        await sleep(450);
+        return true;
+      }
+    } catch {
+      // Content script not ready yet after navigation.
+    }
+    await sleep(350);
+  }
+  try {
+    await ensureContentScript(tabId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isNavigationChannelError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /message channel closed|receiving end does not exist|context invalidated|extension context/i.test(
+    message,
+  );
+}
+
+/**
+ * Click Next, then survive full page reloads. Content responds immediately after click;
+ * background waits for the next page to be injectable.
+ */
+async function forceStepAdvanceOnTab(tabId: number): Promise<{ clicked: boolean; reason?: string }> {
+  try {
+    const result = (await sendToTab(tabId, { type: "FORCE_STEP_ADVANCE" })) as {
+      clicked?: boolean;
+      reason?: string;
+    };
+    if (!result?.clicked) {
+      return { clicked: false, reason: result?.reason || "error" };
+    }
+    await waitForHostFormPageReady(tabId);
+    // Soft SPA advance may not reload — still give the DOM a beat to swap questions.
+    if (result.reason === "click-sent") {
+      await sleep(700);
+      await ensureContentScript(tabId);
+    }
+    return {
+      clicked: true,
+      reason:
+        result.reason === "click-sent" || result.reason === "advanced" || result.reason === "advanced-unverified"
+          ? result.reason === "click-sent"
+            ? "advanced-navigated"
+            : result.reason
+          : result.reason || "advanced",
+    };
+  } catch (error) {
+    if (isNavigationChannelError(error)) {
+      // Next triggered a hard navigation and tore down the content script mid-response.
+      await waitForHostFormPageReady(tabId);
+      return { clicked: true, reason: "advanced-navigated" };
+    }
+    return { clicked: false, reason: "error" };
+  }
+}
+
+/** Re-inject content + resume auto-continue after same-origin Next / refresh. */
+async function resumeFillSessionAfterNavigation(tabId: number): Promise<void> {
+  const session = await loadFillSession();
+  if (!session || session.tabId !== tabId || !session.enabled) return;
+
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab.url ?? "";
+    if (!url || url.startsWith("chrome://") || url.startsWith("chrome-extension://")) return;
+    const origin = new URL(url).origin;
+    if (origin !== session.origin) return;
+    if (looksLikeSubmitConfirmation(url)) return;
+
+    await ensureContentScript(tabId);
+    await chrome.tabs
+      .sendMessage(tabId, { type: "RESUME_AUTO_CONTINUE" })
+      .catch(() => undefined);
+  } catch {
+    // Tab may be mid-navigation.
+  }
 }
 
 /** Open the host form in a background tab, or reuse the existing tab for this application. */
@@ -1258,19 +1414,27 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void clearFillSession(tabId, "tab_closed");
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (!changeInfo.url) return;
-  const nextUrl = changeInfo.url;
-  void (async () => {
-    const session = await loadFillSession();
-    if (!session || session.tabId !== tabId) return;
-    try {
-      const nextOrigin = new URL(nextUrl).origin;
-      if (nextOrigin !== session.origin) {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url) {
+    const nextUrl = changeInfo.url;
+    void (async () => {
+      const session = await loadFillSession();
+      if (!session || session.tabId !== tabId) return;
+      try {
+        const nextOrigin = new URL(nextUrl).origin;
+        if (nextOrigin !== session.origin) {
+          await clearFillSession(tabId, "origin_left");
+        }
+      } catch {
         await clearFillSession(tabId, "origin_left");
       }
-    } catch {
-      await clearFillSession(tabId, "origin_left");
-    }
-  })();
+    })();
+  }
+
+  // Same-origin Next / refresh: reinject content and keep filling — do not treat reload as stop.
+  if (changeInfo.status === "complete") {
+    void resumeFillSessionAfterNavigation(tabId);
+  } else if (changeInfo.status === "loading" && tab?.url) {
+    // no-op: wait for complete
+  }
 });

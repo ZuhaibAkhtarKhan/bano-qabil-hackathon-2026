@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "1-Apply",
-  "version": "0.4.14",
-  "description": "Save opportunities to 1-Apply and fill host forms carefully (reliable radio/choice fill + Need You re-open).",
+  "version": "0.4.16",
+  "description": "Save opportunities to 1-Apply and fill host forms carefully (keeps filling after Next page loads).",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

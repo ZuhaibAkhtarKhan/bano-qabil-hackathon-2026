@@ -39,6 +39,14 @@ describe("upload security", () => {
     expect(await extractDocumentText(encrypted, "application/pdf")).toBeNull();
   });
 
+  it("does not treat EncryptMetadata as an encryption dictionary", () => {
+    const openWithMeta = "%PDF-1.4\n/EncryptMetadata false\n";
+    const realEncrypt = "%PDF-1.4\n/Encrypt 12 0 R\n";
+    const encryptedPattern = /\/Encrypt(?!Metadata)(?:\s|<<|\/)/;
+    expect(encryptedPattern.test(openWithMeta)).toBe(false);
+    expect(encryptedPattern.test(realEncrypt)).toBe(true);
+  });
+
   it("chunks long text without dropping content boundaries", () => {
     const text = "a".repeat(5000);
     const chunks = chunkDocumentText(text, 1600, 10);
